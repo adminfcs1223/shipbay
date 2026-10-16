@@ -8,14 +8,23 @@ export default function App() {
   const [session, setSession] = useState(undefined);
   const [me, setMe] = useState(null);
 
+  const [handoffFailed, setHandoffFailed] = useState(false);
+
   useEffect(() => {
+    let booted = false;
+    // Ignore auth events (incl. the INITIAL_SESSION=null that fires immediately) until the bootstrap below has settled;
+    // otherwise dashboard. bounces to auth. before the handed-off session is stored → redirect loop.
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => { if (booted) setSession(s); });
     (async () => {
       const t = isAppHost ? takeHandoff() : null;
-      if (t) await supabase.auth.setSession(t);
+      if (t) {
+        const { error } = await supabase.auth.setSession(t);
+        if (error) setHandoffFailed(true);
+      }
       const { data } = await supabase.auth.getSession();
+      booted = true;
       setSession(data.session);
     })();
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => sub.subscription.unsubscribe();
   }, []);
 
@@ -36,24 +45,27 @@ export default function App() {
     return <SignIn />;
   }
   if (!session) {
-    if (isAppHost) { window.location.replace(authUrl()); return null; }
+    if (isAppHost) {
+      if (handoffFailed) return <SignIn note="Your sign-in didn’t carry over. Please sign in again." />;
+      window.location.replace(authUrl()); return null;
+    }
     return <SignIn />;
   }
   return <Shell me={me} />;
 }
 
 /* ---------- Sign-in (ported from site/portal.html) ---------- */
-function SignIn() {
+function SignIn({ note }) {
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [remember, setRemember] = useState(true);
-  const [msg, setMsg] = useState(null);
+  const [msg, setMsg] = useState(note ? { kind: 'err', text: note } : null);
   const [busy, setBusy] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault(); setBusy(true); setMsg(null);
     const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pw });
-    if (!error && splitMode && data?.session) return handoffToApp(data.session);
+    if (!error && splitMode && data?.session) { const sess = data.session; await supabase.auth.signOut({ scope: 'local' }); return handoffToApp(sess); }
     setBusy(false);
     if (error) setMsg({ kind: 'err', text: error.message === 'Invalid login credentials' ? 'That email and password don’t match. Try again or reset your password.' : error.message });
   };

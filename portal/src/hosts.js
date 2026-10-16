@@ -15,15 +15,16 @@ export const appUrl = () => (splitMode ? `https://${APP_HOST}/` : '/');
 
 /** After sign-in on auth., carry the session to the app host in the URL fragment (never the query string, so it is not logged). */
 export function handoffToApp(session) {
-  const p = new URLSearchParams({ access_token: session.access_token, refresh_token: session.refresh_token });
+  // keys deliberately differ from Supabase's own implicit-flow names so its URL detector ignores this fragment
+  const p = new URLSearchParams({ sb_at: session.access_token, sb_rt: session.refresh_token });
   window.location.replace(`${appUrl()}#${p.toString()}`);
 }
 
 /** On the app host: pick up a handed-off session from the fragment, then scrub it from the URL. Returns tokens or null. */
 export function takeHandoff() {
-  if (!window.location.hash.includes('access_token=')) return null;
+  if (!window.location.hash.includes('sb_at=')) return null;
   const p = new URLSearchParams(window.location.hash.slice(1));
-  const t = { access_token: p.get('access_token'), refresh_token: p.get('refresh_token') };
+  const t = { access_token: p.get('sb_at'), refresh_token: p.get('sb_rt') };
   history.replaceState(null, '', window.location.pathname + window.location.search);
   return t.access_token && t.refresh_token ? t : null;
 }
