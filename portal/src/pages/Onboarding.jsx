@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib';
 import { CATEGORY, providerName } from '../providers';
 
-const DOC_KIND = { intake_form: 'intake_form', w9: 'w9', formation_cert: 'formation_cert', rate_card: 'rate_card', agreement: 'agreement', sla: 'sla' };
+const DOC_KIND = { intake_form: 'intake_form', w9: 'w9', formation_cert: 'formation_cert', rate_card: 'rate_card', agreement: 'agreement', sla: 'sla', packaging_spec: 'packaging_spec', returns_rules: 'returns_rules', packing_sops: 'packing_sops', sku_catalog: 'sku_catalog' };
+// what a document task accepts: default PDF only; 'pdf,doc,image' for specs / SOPs
+const ACCEPT = {
+  pdf: { mimes: ['application/pdf'], ext: '.pdf', label: 'PDF' },
+  'pdf,doc,image': { mimes: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'image/png', 'image/jpeg', 'image/webp', 'image/heic'], ext: '.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp,.heic', label: 'file' },
+};
+const acceptFor = (t) => ACCEPT[t.accept] || ACCEPT.pdf;
 const fn = async (name, body) => {
   const { data, error } = await supabase.functions.invoke(name, { body });
   if (error) { // FunctionsHttpError carries the JSON body the function returned
@@ -108,15 +114,18 @@ function AccountDetail({ account, me, onChange }) {
   const [connectOpen, setConnectOpen] = useState(null); // task key: label_access | shopify_connected
   const [flash, setFlash] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const [skuCount, setSkuCount] = useState(0);
+  const [catalogOpen, setCatalogOpen] = useState(false);
 
   const load = async () => {
-    const [{ data: o }, { data: t }, { data: d }, { data: c }] = await Promise.all([
+    const [{ data: o }, { data: t }, { data: d }, { data: c }, { count: n }] = await Promise.all([
       supabase.from('orgs').select('*').eq('id', account.org_id).single(),
       supabase.from('onboarding_tasks').select('*').eq('org_id', account.org_id).order('sort'),
       supabase.from('documents').select('*').eq('org_id', account.org_id).not('task_key', 'is', null).order('created_at', { ascending: false }),
       supabase.from('integrations').select('*').eq('org_id', account.org_id).order('created_at'),
+      supabase.from('skus').select('id', { count: 'exact', head: true }).eq('org_id', account.org_id).eq('active', true),
     ]);
-    setOrg(o); setTasks(t || []); setDocs(d || []); setConns(c || []);
+    setOrg(o); setTasks(t || []); setDocs(d || []); setConns(c || []); setSkuCount(n || 0);
   };
   useEffect(() => { load(); }, [account.org_id]);
 
@@ -148,12 +157,22 @@ function AccountDetail({ account, me, onChange }) {
   };
   const upload = async (t, file) => {
     if (!file) return;
-    if (file.type !== 'application/pdf') return alert('Please upload a PDF.');
+    const acc = acceptFor(t);
+    if (!acc.mimes.includes(file.type) && !acc.ext.split(',').some((e) => file.name.toLowerCase().endsWith(e))) return alert(`Please upload a ${acc.label === 'PDF' ? 'PDF' : 'PDF, Word, Excel or image file'}.`);
     const path = `${org.id}/${t.key}/${crypto.randomUUID()}-${file.name.replace(/[^A-Za-z0-9._-]+/g, '_')}`;
-    const { error: upErr } = await supabase.storage.from('client-docs').upload(path, file, { contentType: 'application/pdf', upsert: false });
+    const { error: upErr } = await supabase.storage.from('client-docs').upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
     if (upErr) return alert(upErr.message);
-    const { error } = await supabase.from('documents').insert({ org_id: org.id, kind: DOC_KIND[t.key] || 'other', title: `${t.label} — ${org.name}`, storage_path: path, mime: 'application/pdf', size_bytes: file.size, task_key: t.key, status: 'pending', uploaded_by: me.id });
+    const { error } = await supabase.from('documents').insert({ org_id: org.id, kind: DOC_KIND[t.key] || 'other', title: `${t.label} — ${org.name}`, storage_path: path, mime: file.type || null, size_bytes: file.size, task_key: t.key, status: 'pending', uploaded_by: me.id });
     if (error) return alert(error.message);
+    load(); onChange();
+  };
+  const schedule = async (t, date) => {
+    await supabase.from('onboarding_tasks').update({ scheduled_for: date || null }).eq('id', t.id);
+    if (date) { // keep an inbound record so receiving can work against it
+      const { data: ex } = await supabase.from('inbound_shipments').select('id').eq('org_id', org.id).eq('reference', 'Initial inbound transfer').maybeSingle();
+      if (ex) await supabase.from('inbound_shipments').update({ expected_at: date }).eq('id', ex.id);
+      else await supabase.from('inbound_shipments').insert({ org_id: org.id, reference: 'Initial inbound transfer', status: 'expected', expected_at: date, created_by: me.id });
+    }
     load(); onChange();
   };
   const viewDoc = async (d) => {
@@ -230,7 +249,10 @@ function AccountDetail({ account, me, onChange }) {
               : t.kind === 'portal' && org.portal_user_id ? 'done'
               : t.kind === 'integration' && list.some((c) => c.status === 'connected') ? 'done'
               : t.kind === 'integration' && list.length ? 'pending'
+              : t.kind === 'catalog' && skuCount > 0 ? 'done'
+              : t.kind === 'schedule' && t.scheduled_for ? 'done'
               : 'open';
+            const catalogDoc = t.kind === 'catalog' ? latest : null;
             const title = { done: t.kind === 'document' ? 'Approved' : 'Complete', pending: t.kind === 'document' ? 'Uploaded — awaiting review' : 'Started — not verified yet', open: 'Not started' }[state];
             return (
               <div key={t.id} className={`task ${state}`}>
@@ -239,7 +261,9 @@ function AccountDetail({ account, me, onChange }) {
                   : <span className={`circle ${state}`} title={title}>{state === 'done' ? '✓' : state === 'pending' ? '–' : ''}</span>}
                 <div>
                   <div className="lbl">{t.label}{t.optional && <span className="opt">optional</span>}
-                    {t.kind === 'document' && <UploadButton onFile={(f) => upload(t, f)} label={multi ? 'Upload PDF' : latest ? 'Replace PDF' : 'Upload PDF'} />}
+                    {t.kind === 'document' && <UploadButton accept={acceptFor(t).ext} onFile={(f) => upload(t, f)} label={multi ? 'Upload PDF' : latest ? `Replace ${acceptFor(t).label}` : `Upload ${acceptFor(t).label}`} />}
+                    {t.kind === 'catalog' && <button className={`btn-xs ${skuCount ? '' : 'primary'}`} onClick={() => setCatalogOpen(true)}>{skuCount ? 'Upload CSV again' : 'Upload CSV'}</button>}
+                    {t.kind === 'schedule' && <input type="date" className="inlinedate sm" value={t.scheduled_for || ''} min={new Date().toISOString().slice(0, 10)} onChange={(e) => schedule(t, e.target.value)} />}
                     {t.kind === 'billing' && <button className="btn-xs" onClick={() => setBillingOpen(true)}>{org.billing_method ? 'Change billing method' : 'Add billing method'}</button>}
                     {t.kind === 'portal' && <button className={`btn-xs ${org.portal_user_id ? '' : 'primary'}`} onClick={() => setPortalOpen(true)}>{org.portal_user_id ? 'Reset & resend' : 'Create'}</button>}
                     {t.kind === 'integration' && <button className="btn-xs primary" onClick={() => setConnectOpen(t.key)}>Connect</button>}
@@ -251,6 +275,12 @@ function AccountDetail({ account, me, onChange }) {
                     </ul>
                   ) : <div className="note">Anything else the client sends over — insurance certificate, resale certificate, brand guidelines, prior 3PL reports.</div>)}
                   {t.kind === 'billing' && org.billing_method && <div className="note">{BILLING.find((b) => b[0] === org.billing_method)?.[1]}{org.billing_details?.summary ? ` · ${org.billing_details.summary}` : ''}</div>}
+                  {t.kind === 'catalog' && <div className="note">{skuCount
+                    ? <><b>{skuCount.toLocaleString()} active SKUs</b>{catalogDoc ? <> · last file {fmt(catalogDoc.created_at)}</> : null} · re-uploading updates matching SKUs and adds new ones</>
+                    : <>CSV with one row per SKU — Shopify / WooCommerce product exports work as-is. Columns are matched on the next screen.</>}</div>}
+                  {t.kind === 'schedule' && <div className="note">{t.scheduled_for
+                    ? <>First inbound expected <b>{new Date(t.scheduled_for + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</b> · receiving will count against this transfer</>
+                    : <>Pick the date the client’s first inventory lands at 115 Stryker Ln.</>}</div>}
                   {t.kind === 'portal' && <div className="note">{org.portal_user_id
                     ? <>Login created {fmt(org.portal_created_at)} for <b>{org.contact_email}</b>{org.portal_invited_at ? <> · welcome email sent {fmt(org.portal_invited_at)}</> : <> · <span className="warn">welcome email not sent yet</span></>}</>
                     : <>Creates the client’s shipbay.dashboard login from <b>{org.contact_email || 'their contact email'}</b> and emails them their details.</>}</div>}
@@ -277,7 +307,7 @@ function AccountDetail({ account, me, onChange }) {
                   ))}
                 </div>
                 <div className="when">
-                  {t.kind === 'document' && !multi && latest ? <button className="viewdoc" onClick={() => viewDoc(latest)}>View document</button> : (t.done && t.done_at ? fmt(t.done_at) : '')}
+                  {(t.kind === 'document' && !multi && latest) || catalogDoc ? <button className="viewdoc" onClick={() => viewDoc(latest)}>{catalogDoc ? 'View CSV' : 'View document'}</button> : (t.done && t.done_at ? fmt(t.done_at) : '')}
                 </div>
               </div>
             );
@@ -286,18 +316,125 @@ function AccountDetail({ account, me, onChange }) {
       )}
       {billingOpen && <BillingModal org={org} onClose={() => setBillingOpen(false)} onSaved={() => { setBillingOpen(false); load(); onChange(); }} />}
       {portalOpen && <PortalModal org={org} onClose={() => { setPortalOpen(false); load(); onChange(); }} />}
+      {catalogOpen && <CatalogModal org={org} me={me} onClose={() => setCatalogOpen(false)} onDone={(f) => { setCatalogOpen(false); setFlash(f); load(); onChange(); }} />}
       {connectOpen && <ConnectModal org={org} taskKey={connectOpen} onClose={() => setConnectOpen(null)} onDone={(f) => { setConnectOpen(null); if (f) setFlash(f); load(); onChange(); }} />}
     </div>
   );
 }
 
-function UploadButton({ onFile, label }) {
+function UploadButton({ onFile, label, accept = '.pdf', primary }) {
   const ref = useRef(null);
   return (
     <>
-      <button className="btn-xs" onClick={() => ref.current?.click()}>{label}</button>
-      <input ref={ref} type="file" accept="application/pdf" style={{ display: 'none' }} onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ''; }} />
+      <button className={`btn-xs ${primary ? 'primary' : ''}`} onClick={() => ref.current?.click()}>{label}</button>
+      <input ref={ref} type="file" accept={accept} style={{ display: 'none' }} onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ''; }} />
     </>
+  );
+}
+
+/* ---------- SKU catalog: CSV → map columns → import into skus ---------- */
+function parseCSV(text) {
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(cell); cell = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += ch;
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c.trim() !== ''));
+}
+const SKU_FIELDS = [
+  ['sku', 'SKU', true, /^(variant )?sku$|^sku ?(code|id)?$|^item ?(number|no|#)$|^part ?(number|no)$/i],
+  ['name', 'Product name', false, /^(product )?(title|name)$|^item ?name$|^description$/i],
+  ['variant', 'Variant', false, /^variant( name| title)?$|^option1 value$|^size$|^color$/i],
+  ['barcode', 'Barcode / UPC', false, /barcode|^upc$|^ean$|^gtin$/i],
+  ['weight_oz', 'Weight', false, /weight|grams/i],
+  ['dims_in', 'Dimensions (in)', false, /dimension|dims|^l ?x ?w ?x ?h$/i],
+  ['declared_value', 'Price / declared value', false, /^(variant )?price$|^value$|^retail/i],
+  ['low_stock_threshold', 'Low-stock alert qty', false, /low ?stock|reorder/i],
+];
+function CatalogModal({ org, me, onClose, onDone }) {
+  const [file, setFile] = useState(null);
+  const [rows, setRows] = useState(null);
+  const [map, setMap] = useState({});
+  const [weightUnit, setWeightUnit] = useState('oz');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const ref = useRef(null);
+
+  const onFile = async (f) => {
+    if (!f) return; setErr(null);
+    if (!/\.csv$/i.test(f.name) && f.type !== 'text/csv') return setErr('Please upload a .csv file (export from Shopify, WooCommerce, or a spreadsheet as CSV).');
+    const text = await f.text();
+    const parsed = parseCSV(text);
+    if (parsed.length < 2) return setErr('That CSV has no data rows.');
+    const headers = parsed[0].map((h) => h.trim());
+    const m = {};
+    for (const [key, , , re] of SKU_FIELDS) { const idx = headers.findIndex((h) => re.test(h)); if (idx >= 0) m[key] = idx; }
+    if (headers.some((h) => /grams/i.test(h) && m.weight_oz === headers.indexOf(h))) setWeightUnit('g');
+    setFile(f); setRows(parsed); setMap(m);
+  };
+  const headers = rows ? rows[0] : [];
+  const data = rows ? rows.slice(1) : [];
+  const toOz = (v) => { const n = parseFloat(String(v).replace(/[^0-9.]/g, '')); if (!isFinite(n)) return ''; return weightUnit === 'g' ? (n / 28.3495).toFixed(2) : weightUnit === 'lb' ? (n * 16).toFixed(2) : String(n); };
+  const build = () => data.map((r) => {
+    const o = {}; for (const [key] of SKU_FIELDS) if (map[key] != null) o[key] = r[map[key]] ?? '';
+    if (o.weight_oz != null) o.weight_oz = toOz(o.weight_oz);
+    return o;
+  }).filter((o) => (o.sku || '').trim());
+  const preview = build().slice(0, 5);
+  const total = build().length;
+
+  const run = async () => {
+    setBusy(true); setErr(null);
+    const path = `${org.id}/sku_catalog/${crypto.randomUUID()}-${file.name.replace(/[^A-Za-z0-9._-]+/g, '_')}`;
+    const { error: upErr } = await supabase.storage.from('client-docs').upload(path, file, { contentType: 'text/csv' });
+    if (upErr) { setBusy(false); return setErr(upErr.message); }
+    await supabase.from('documents').insert({ org_id: org.id, kind: 'sku_catalog', title: `SKU Catalog — ${org.name}`, storage_path: path, mime: 'text/csv', size_bytes: file.size, task_key: 'sku_catalog', status: 'approved', reviewed_by: me.id, reviewed_at: new Date().toISOString(), uploaded_by: me.id });
+    const { data: res, error } = await supabase.rpc('import_sku_catalog', { p_org_id: org.id, p_rows: build() });
+    setBusy(false);
+    if (error) return setErr(error.message);
+    onDone({ kind: 'ok', text: `SKU catalog imported — ${res.inserted} new, ${res.updated} updated, ${res.total} active SKUs.` });
+  };
+
+  return (
+    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal wide">
+        <h3>SKU Catalog<span className="dot">.</span></h3>
+        {!rows ? <>
+          <p className="lead">Upload {org.name}’s product list as a CSV. One row per SKU — Shopify’s product export and WooCommerce’s CSV work without changes.</p>
+          <div className="drop" onClick={() => ref.current?.click()} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); onFile(e.dataTransfer.files?.[0]); }}>
+            <b>Drop a .csv here</b><span>or click to choose · needs at least a SKU column; name, variant, barcode, weight, dimensions and price are picked up when present</span>
+          </div>
+          <input ref={ref} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ''; }} />
+          {err && <div className="msg err" style={{ marginTop: 12 }}>{err}</div>}
+          <div className="row"><button className="btn-sm" onClick={onClose}>Cancel</button></div>
+        </> : <>
+          <p className="lead"><b>{file.name}</b> · {data.length.toLocaleString()} rows · <button className="linkbtn" onClick={() => { setRows(null); setFile(null); }}>choose a different file</button></p>
+          <div className="mapgrid">
+            {SKU_FIELDS.map(([key, label, required]) => (
+              <label key={key}><span>{label}{required && <i> *</i>}</span>
+                <select value={map[key] ?? ''} onChange={(e) => setMap((m) => ({ ...m, [key]: e.target.value === '' ? undefined : Number(e.target.value) }))}>
+                  <option value="">— skip —</option>
+                  {headers.map((h, i) => <option key={i} value={i}>{h || `(column ${i + 1})`}</option>)}
+                </select>
+                {key === 'weight_oz' && map.weight_oz != null && <select className="unit" value={weightUnit} onChange={(e) => setWeightUnit(e.target.value)}><option value="oz">oz</option><option value="g">g</option><option value="lb">lb</option></select>}
+              </label>
+            ))}
+          </div>
+          {map.sku == null ? <div className="msg err">Pick which column holds the SKU.</div> : (
+            <div className="previewwrap"><table className="preview"><thead><tr>{SKU_FIELDS.filter(([k]) => map[k] != null).map(([k, l]) => <th key={k}>{l}</th>)}</tr></thead>
+              <tbody>{preview.map((o, i) => <tr key={i}>{SKU_FIELDS.filter(([k]) => map[k] != null).map(([k]) => <td key={k}>{o[k]}</td>)}</tr>)}</tbody></table>
+              <div className="note">Showing {preview.length} of {total.toLocaleString()} SKUs. Existing SKUs with the same code are updated, not duplicated.</div></div>
+          )}
+          {err && <div className="msg err">{err}</div>}
+          <div className="row"><button className="btn-sm" onClick={onClose}>Cancel</button><button className="btn-sm primary" disabled={busy || map.sku == null || !total} onClick={run}>{busy ? 'Importing…' : `Import ${total.toLocaleString()} SKUs`}</button></div>
+        </>}
+      </div>
+    </div>
   );
 }
 
