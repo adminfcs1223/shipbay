@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase, forgetLocalSession } from './lib';
 import { isAuthHost, isAppHost, splitMode, authUrl, handoffToApp, takeHandoff } from './hosts';
+import Onboarding from './pages/Onboarding';
 
 const STAFF = ['shipbay_admin', 'shipbay_staff'];
 
@@ -130,23 +131,45 @@ function SignIn({ note }) {
   );
 }
 
-/* ---------- Signed-in shell — intentionally empty; screens are built one at a time ---------- */
+/* ---------- Signed-in app: left nav column + content ---------- */
+const Ico = {
+  onboarding: <svg className="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>,
+};
+const STAFF_NAV = [
+  { key: 'onboarding', label: 'Onboarding', icon: Ico.onboarding, page: Onboarding },
+];
+
 function Shell({ me }) {
+  const nav = me?.isStaff ? STAFF_NAV : [];
+  const [page, setPage] = useState(nav[0]?.key ?? null);
+  const active = nav.find((n) => n.key === page);
+  const Page = active?.page;
+  const signOut = async () => { await supabase.auth.signOut(); if (splitMode) window.location.replace(authUrl()); };
+
   return (
-    <div className="shell">
-      <header className="topbar">
+    <div className="app">
+      <aside className="sidenav">
         <a className="logo" href="/"><img src="/brand/06-horizontal-reverse.svg" alt="shipbay." /></a>
-        <div className="who">
-          {me && <><span className="role">{me.isStaff ? 'shipbay staff' : 'client'}</span><b>{me.orgName || me.full_name || me.email}</b></>}
-          <button className="out" onClick={async () => { await supabase.auth.signOut(); if (splitMode) window.location.replace(authUrl()); }}>Sign out</button>
+        <div className="tagline">shipbay.dashboard</div>
+        {nav.length > 0 && <div className="section">Operations</div>}
+        {nav.map((n) => (
+          <button key={n.key} className={`navitem ${page === n.key ? 'active' : ''}`} onClick={() => setPage(n.key)}>{n.icon}{n.label}</button>
+        ))}
+        <div className="me">
+          {me && <><b>{me.full_name || me.email}</b>{me.orgName || me.email}<br /><span className="role">{me.isStaff ? 'shipbay staff' : 'client'}</span></>}
+          <br /><button onClick={signOut}>Sign out</button>
         </div>
-      </header>
-      <main className="stage">
-        <div className="blank">
-          <img className="mark" src="/brand/09-mark.svg" alt="" />
-          <h2>Your dashboard is being set up<span className="dot">.</span></h2>
-          <p>{me?.isStaff ? 'Ops screens are coming online here, starting with client onboarding.' : 'Your onboarding manager will light this up as your brand goes live with shipbay.'}</p>
-        </div>
+      </aside>
+      <main className="content">
+        {Page ? <Page me={me} /> : (
+          <div className="stage">
+            <div className="blank">
+              <img className="mark" src="/brand/09-mark.svg" alt="" />
+              <h2>Your dashboard is being set up<span className="dot">.</span></h2>
+              <p>{me?.isStaff ? 'Ops screens are coming online here.' : 'Your onboarding manager will light this up as your brand goes live with shipbay.'}</p>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
