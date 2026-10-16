@@ -23,7 +23,7 @@ const PhaseIcon = ({ kind }) => {
     case 'paperwork': return <svg {...common}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h6" className="accent" /></svg>;
     case 'systems': return <svg {...common}><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /><path d="M7 10h3l2-3 2 6 2-3h1" className="accent" /></svg>;
     case 'inventory': return <svg {...common}><path d="M21 8l-9-5-9 5v8l9 5 9-5z" /><path d="M3 8l9 5 9-5" /><path d="M12 13v8" className="accent" /></svg>;
-    case 'golive': return <svg {...common}><path d="M12 2c3 3 4 6 4 9l-4 4-4-4c0-3 1-6 4-9z" /><path d="M8 11l-3 3 2 3M16 11l3 3-2 3" /><path d="M10 19l2 3 2-3" className="accent" /><circle cx="12" cy="9" r="1.5" className="accent" /></svg>;
+    case 'golive': return <svg {...common}><path d="M3 17l3-3h4l5-5a3 3 0 0 1 4-4l1 1a3 3 0 0 1-4 4l-5 5v4l-3 3" /><path d="M3 21l4-4" className="accent" /><path d="M14 3l7 7" className="accent" /></svg>;
     default: return null;
   }
 };
@@ -122,7 +122,7 @@ function AccountDetail({ account, me, onChange }) {
 
       <div className="facts">
         <div><small>Contact</small><span>{org.contact_name || '—'}</span><div className="sub2">{org.contact_email}{org.contact_phone ? ` · ${org.contact_phone}` : ''}</div></div>
-        <div><small>Status</small><span>{org.status === 'active' ? <span className="tag live">Live</span> : 'Onboarding'}{org.founding_account && <> <span className="tag founding solid">Founding account</span></>}</span></div>
+        <div><small>Status</small><span>{org.status === 'active' ? 'Live' : 'Onboarding'}</span>{org.founding_account && <span className="tag founding solid">Founding account</span>}</div>
         <div>
           <small>Est. go-live date</small>
           <input type="date" className="inlinedate" value={org.go_live_date || ''} onChange={(e) => patchOrg({ go_live_date: e.target.value || null })} />

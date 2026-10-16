@@ -141,7 +141,8 @@ const STAFF_NAV = [
 
 function Shell({ me }) {
   const nav = me?.isStaff ? STAFF_NAV : [];
-  const [page, setPage] = useState(nav[0]?.key ?? null);
+  const [page, setPage] = useState(null);
+  useEffect(() => { if (!page && nav.length) setPage(nav[0].key); }, [nav.length, page]);
   const active = nav.find((n) => n.key === page);
   const Page = active?.page;
   const signOut = async () => { await supabase.auth.signOut(); if (splitMode) window.location.replace(authUrl()); };
