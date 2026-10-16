@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib';
+import { CATEGORY, providerName } from '../providers';
 
 const DOC_KIND = { intake_form: 'intake_form', w9: 'w9', formation_cert: 'formation_cert', rate_card: 'rate_card', agreement: 'agreement', sla: 'sla' };
+const fn = async (name, body) => {
+  const { data, error } = await supabase.functions.invoke(name, { body });
+  if (error) { // FunctionsHttpError carries the JSON body the function returned
+    let msg = error.message; try { const j = await error.context?.json?.(); if (j?.error) msg = j.error; } catch { /* keep */ }
+    return { error: msg };
+  }
+  return data || {};
+};
 const BILLING = [
   ['ach', 'ACH / bank debit', 'We pull each invoice from the client’s bank account on the due date.'],
   ['card', 'Credit card on file', 'Card charged on the due date (processing fee may apply).'],
@@ -45,7 +54,9 @@ export default function Onboarding({ me }) {
   const load = async () => {
     const { data } = await supabase.from('v_onboarding_progress').select('*').in('status', ['onboarding', 'active']).order('created_at', { ascending: false });
     setAccounts(data || []);
-    setSelected((s) => s ?? data?.[0]?.org_id ?? null);
+    // coming back from a provider's OAuth screen: ?org=<id> lands on that account
+    const back = new URLSearchParams(window.location.search).get('org');
+    setSelected((s) => s ?? (back && data?.some((a) => a.org_id === back) ? back : null) ?? data?.[0]?.org_id ?? null);
   };
   useEffect(() => { load(); }, []);
 
@@ -92,16 +103,42 @@ function AccountDetail({ account, me, onChange }) {
   const [openPhase, setOpenPhase] = useState(null);
   const [editing, setEditing] = useState(null);
   const [billingOpen, setBillingOpen] = useState(false);
+  const [conns, setConns] = useState([]);
+  const [portalOpen, setPortalOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(null); // task key: label_access | shopify_connected
+  const [flash, setFlash] = useState(null);
+  const [busyId, setBusyId] = useState(null);
 
   const load = async () => {
-    const [{ data: o }, { data: t }, { data: d }] = await Promise.all([
+    const [{ data: o }, { data: t }, { data: d }, { data: c }] = await Promise.all([
       supabase.from('orgs').select('*').eq('id', account.org_id).single(),
       supabase.from('onboarding_tasks').select('*').eq('org_id', account.org_id).order('sort'),
       supabase.from('documents').select('*').eq('org_id', account.org_id).not('task_key', 'is', null).order('created_at', { ascending: false }),
+      supabase.from('integrations').select('*').eq('org_id', account.org_id).order('created_at'),
     ]);
-    setOrg(o); setTasks(t || []); setDocs(d || []);
+    setOrg(o); setTasks(t || []); setDocs(d || []); setConns(c || []);
   };
   useEffect(() => { load(); }, [account.org_id]);
+
+  // result of an OAuth round-trip: #conn=<provider>|ok|<message>
+  useEffect(() => {
+    const m = /conn=([^&]+)/.exec(window.location.hash);
+    if (!m) return;
+    const [provider, ok, msg] = decodeURIComponent(m[1]).split('|');
+    setFlash({ kind: ok === 'ok' ? 'ok' : 'err', text: ok === 'ok' ? `${providerName(provider)} connected.` : `${providerName(provider)}: ${msg}` });
+    setOpenPhase('systems');
+    history.replaceState(null, '', window.location.pathname);
+  }, []);
+
+  const connAction = async (c, action) => {
+    if (action === 'disconnect' && !confirm(`Disconnect ${providerName(c.provider)}? Stored credentials are wiped.`)) return;
+    setBusyId(c.id);
+    const r = await fn('integrations', { action, integration_id: c.id });
+    setBusyId(null);
+    if (r.error) setFlash({ kind: 'err', text: r.error });
+    else if (action === 'test') setFlash({ kind: r.ok ? 'ok' : 'err', text: r.ok ? `${providerName(c.provider)} is live.` : `${providerName(c.provider)}: ${r.error}` });
+    load(); onChange();
+  };
 
   const patchOrg = async (patch) => { await supabase.from('orgs').update(patch).eq('id', org.id); load(); onChange(); };
   const toggle = async (t) => {
@@ -131,9 +168,10 @@ function AccountDetail({ account, me, onChange }) {
   };
 
   if (!org || !tasks) return <div className="card"><div className="empty">Loading…</div></div>;
-  const done = tasks.filter((t) => t.done).length;
-  const pct = tasks.length ? Math.round((100 * done) / tasks.length) : 0;
-  const next = tasks.find((t) => !t.done);
+  const required = tasks.filter((t) => !t.optional);
+  const done = required.filter((t) => t.done).length;
+  const pct = required.length ? Math.round((100 * done) / required.length) : 0;
+  const next = required.find((t) => !t.done);
   const status = GO_LIVE_STATUS.find((s) => s[0] === org.go_live_status) || GO_LIVE_STATUS[0];
 
   return (
@@ -144,8 +182,9 @@ function AccountDetail({ account, me, onChange }) {
           <div className="bar big"><i style={{ width: `${pct}%` }} /></div>
           <div className="next">{next ? <><span className="pct">{pct}%</span> · next: <b>{next.label}</b></> : <><span className="pct">100%</span> · <b>all steps complete</b></>}</div>
         </div>
-        {org.status === 'onboarding' && done === tasks.length && <button className="btn-sm primary" onClick={markLive}>Mark live</button>}
+        {org.status === 'onboarding' && done === required.length && <button className="btn-sm primary" onClick={markLive}>Mark live</button>}
       </div>
+      {flash && <div className={`msg ${flash.kind} flash`}>{flash.text}<button onClick={() => setFlash(null)} aria-label="Dismiss">×</button></div>}
 
       <div className="facts">
         <div><small>Contact</small><span>{org.contact_name || '—'}</span><div className="sub2">{org.contact_email}{org.contact_phone ? ` · ${org.contact_phone}` : ''}</div></div>
@@ -162,7 +201,7 @@ function AccountDetail({ account, me, onChange }) {
 
       <div className="phases">
         {PHASES.map((p) => {
-          const list = tasks.filter((t) => t.phase === p.key);
+          const list = required.filter((t) => t.phase === p.key);
           const d = list.filter((t) => t.done).length;
           const ppct = list.length ? (100 * d) / list.length : 0;
           const complete = list.length > 0 && d === list.length;
@@ -180,20 +219,57 @@ function AccountDetail({ account, me, onChange }) {
       {openPhase && (
         <div className="phase open">
           {tasks.filter((t) => t.phase === openPhase).map((t) => {
-            const latest = docs.find((d) => d.task_key === t.key);
-            const state = t.done ? 'done' : t.kind === 'document' && latest ? 'pending' : t.kind === 'billing' && org.billing_method ? 'done' : 'open';
+            const mine = docs.filter((d) => d.task_key === t.key);
+            const latest = mine[0];
+            const multi = t.key === 'additional_docs';
+            const cat = CATEGORY[t.key];
+            const list = cat ? conns.filter((c) => c.category === cat.key && c.status !== 'disconnected') : [];
+            const state = t.done ? 'done'
+              : t.kind === 'document' && latest ? 'pending'
+              : t.kind === 'billing' && org.billing_method ? 'done'
+              : t.kind === 'portal' && org.portal_user_id ? 'done'
+              : t.kind === 'integration' && list.some((c) => c.status === 'connected') ? 'done'
+              : t.kind === 'integration' && list.length ? 'pending'
+              : 'open';
+            const title = { done: t.kind === 'document' ? 'Approved' : 'Complete', pending: t.kind === 'document' ? 'Uploaded — awaiting review' : 'Started — not verified yet', open: 'Not started' }[state];
             return (
               <div key={t.id} className={`task ${state}`}>
                 {t.kind === 'manual'
                   ? <input type="checkbox" checked={t.done} onChange={() => toggle(t)} />
-                  : <span className={`circle ${state}`} title={state === 'done' ? 'Approved' : state === 'pending' ? 'Uploaded — awaiting review' : 'Not started'}>{state === 'done' ? '✓' : state === 'pending' ? '–' : ''}</span>}
+                  : <span className={`circle ${state}`} title={title}>{state === 'done' ? '✓' : state === 'pending' ? '–' : ''}</span>}
                 <div>
-                  <div className="lbl">{t.label}
-                    {t.kind === 'document' && <UploadButton onFile={(f) => upload(t, f)} label={latest ? 'Replace PDF' : 'Upload PDF'} />}
+                  <div className="lbl">{t.label}{t.optional && <span className="opt">optional</span>}
+                    {t.kind === 'document' && <UploadButton onFile={(f) => upload(t, f)} label={multi ? 'Upload PDF' : latest ? 'Replace PDF' : 'Upload PDF'} />}
                     {t.kind === 'billing' && <button className="btn-xs" onClick={() => setBillingOpen(true)}>{org.billing_method ? 'Change billing method' : 'Add billing method'}</button>}
+                    {t.kind === 'portal' && <button className={`btn-xs ${org.portal_user_id ? '' : 'primary'}`} onClick={() => setPortalOpen(true)}>{org.portal_user_id ? 'Reset & resend' : 'Create'}</button>}
+                    {t.kind === 'integration' && <button className="btn-xs primary" onClick={() => setConnectOpen(t.key)}>Connect</button>}
                   </div>
-                  {t.kind === 'document' && latest && <div className="note">{latest.status === 'approved' ? 'Approved' : latest.status === 'rejected' ? 'Rejected — upload a corrected copy' : 'Uploaded, awaiting review'} · {fmt(latest.created_at)}{latest.review_note ? ` · ${latest.review_note}` : ''}</div>}
+                  {t.kind === 'document' && !multi && latest && <div className="note">{latest.status === 'approved' ? 'Approved' : latest.status === 'rejected' ? 'Rejected — upload a corrected copy' : 'Uploaded, awaiting review'} · {fmt(latest.created_at)}{latest.review_note ? ` · ${latest.review_note}` : ''}</div>}
+                  {multi && (mine.length ? (
+                    <ul className="doclist">
+                      {mine.map((d) => <li key={d.id}><span className={`dot2 ${d.status}`} />{d.title.replace(` — ${org.name}`, '')} <small>· {d.status === 'approved' ? 'approved' : d.status === 'rejected' ? 'rejected' : 'awaiting review'} · {fmt(d.created_at)}</small><button className="viewdoc" onClick={() => viewDoc(d)}>View</button></li>)}
+                    </ul>
+                  ) : <div className="note">Anything else the client sends over — insurance certificate, resale certificate, brand guidelines, prior 3PL reports.</div>)}
                   {t.kind === 'billing' && org.billing_method && <div className="note">{BILLING.find((b) => b[0] === org.billing_method)?.[1]}{org.billing_details?.summary ? ` · ${org.billing_details.summary}` : ''}</div>}
+                  {t.kind === 'portal' && <div className="note">{org.portal_user_id
+                    ? <>Login created {fmt(org.portal_created_at)} for <b>{org.contact_email}</b>{org.portal_invited_at ? <> · welcome email sent {fmt(org.portal_invited_at)}</> : <> · <span className="warn">welcome email not sent yet</span></>}</>
+                    : <>Creates the client’s shipbay.dashboard login from <b>{org.contact_email || 'their contact email'}</b> and emails them their details.</>}</div>}
+                  {t.kind === 'integration' && (list.length ? (
+                    <ul className="connlist">
+                      {list.map((c) => (
+                        <li key={c.id}>
+                          <span className={`pill ${c.status}`}>{c.status}</span>
+                          <b>{providerName(c.provider)}</b>{c.label && <span className="muted"> · {c.label}</span>}
+                          {c.status === 'error' && c.error && <span className="errtxt"> — {c.error}</span>}
+                          {c.meta?.carriers?.length > 0 && <span className="muted"> · {c.meta.carriers.slice(0, 4).join(', ')}{c.meta.carriers.length > 4 ? ` +${c.meta.carriers.length - 4}` : ''}</span>}
+                          <span className="acts">
+                            {c.auth_type === 'api_key' && <button className="edit" disabled={busyId === c.id} onClick={() => connAction(c, 'test')}>{busyId === c.id ? 'testing…' : 'test'}</button>}
+                            <button className="edit" disabled={busyId === c.id} onClick={() => connAction(c, 'disconnect')}>disconnect</button>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : <div className="note">{t.key === 'label_access' ? 'Pick the client’s label service (ShipStation, Shippo, UPS, FedEx, USPS…) and sign in — verified live.' : 'Pick the client’s store or marketplace (Shopify, WooCommerce, Amazon, TikTok Shop…) and sign in — verified live.'}</div>)}
                   {t.kind === 'manual' && (editing === t.id ? (
                     <input className="noteedit" autoFocus defaultValue={t.note || ''} placeholder="Add a note — who, what, when" onBlur={(e) => saveNote(t, e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveNote(t, e.target.value); if (e.key === 'Escape') setEditing(null); }} />
                   ) : (
@@ -201,7 +277,7 @@ function AccountDetail({ account, me, onChange }) {
                   ))}
                 </div>
                 <div className="when">
-                  {t.kind === 'document' && latest ? <button className="viewdoc" onClick={() => viewDoc(latest)}>View document</button> : (t.done && t.done_at ? fmt(t.done_at) : '')}
+                  {t.kind === 'document' && !multi && latest ? <button className="viewdoc" onClick={() => viewDoc(latest)}>View document</button> : (t.done && t.done_at ? fmt(t.done_at) : '')}
                 </div>
               </div>
             );
@@ -209,6 +285,8 @@ function AccountDetail({ account, me, onChange }) {
         </div>
       )}
       {billingOpen && <BillingModal org={org} onClose={() => setBillingOpen(false)} onSaved={() => { setBillingOpen(false); load(); onChange(); }} />}
+      {portalOpen && <PortalModal org={org} onClose={() => { setPortalOpen(false); load(); onChange(); }} />}
+      {connectOpen && <ConnectModal org={org} taskKey={connectOpen} onClose={() => setConnectOpen(null)} onDone={(f) => { setConnectOpen(null); if (f) setFlash(f); load(); onChange(); }} />}
     </div>
   );
 }
@@ -248,6 +326,132 @@ function BillingModal({ org, onClose, onSaved }) {
         <div className="field" style={{ marginTop: 14 }}><label>Reference (optional — never full account or card numbers)</label><input type="text" value={summary} onChange={(e) => setSummary(e.target.value)} placeholder={hint} /></div>
         {err && <div className="msg err">{err}</div>}
         <div className="row"><button className="btn-sm" onClick={onClose}>Cancel</button><button className="btn-sm primary" onClick={save}>Save billing method</button></div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Client Portal: confirm → generate login → email ---------- */
+function PortalModal({ org, onClose }) {
+  const reset = !!org.portal_user_id;
+  const [step, setStep] = useState('confirm'); // confirm | ready | sent
+  const [name, setName] = useState(org.contact_name || '');
+  const [email, setEmail] = useState(org.contact_email || '');
+  const [cred, setCred] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  const create = async () => {
+    setBusy(true); setErr(null);
+    const r = await fn('portal-access', { action: 'create', org_id: org.id, email: email.trim(), full_name: name.trim() });
+    setBusy(false);
+    if (r.error) return setErr(r.error);
+    setCred({ email: r.email, password: r.password }); setStep('ready');
+  };
+  const send = async () => {
+    setBusy(true); setErr(null);
+    const r = await fn('portal-access', { action: 'send_welcome', org_id: org.id, email: cred.email, password: cred.password });
+    setBusy(false);
+    if (r.error) return setErr(r.error);
+    setStep('sent');
+  };
+  const copy = async () => { try { await navigator.clipboard.writeText(`shipbay.dashboard login\nSign in: https://auth.shipbay3pl.com\nEmail: ${cred.email}\nTemporary password: ${cred.password}`); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* no clipboard */ } };
+
+  return (
+    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        {step === 'confirm' && <>
+          <h3>{reset ? 'Reset portal login' : 'Create client portal'}<span className="dot">.</span></h3>
+          <p className="lead">{reset ? `Generates a new temporary password for ${org.name}’s existing login.` : `Confirm who gets the login for ${org.name}. Their email becomes their username; a temporary password is generated for them.`}</p>
+          <div className="confirm">
+            <div><small>Brand</small><b>{org.name}</b>{org.founding_account && <span className="tag founding solid" style={{ marginLeft: 8, marginTop: 0 }}>Founding</span>}</div>
+            <div className="field"><label>Contact name</label><input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="First Last" /></div>
+            <div className="field"><label>Login email</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="owner@brand.com" disabled={reset} /></div>
+            <div><small>Role</small><b>Client admin</b> <span className="muted">— sees only {org.name}’s inventory, orders, shipments and billing</span></div>
+            <div><small>Signs in at</small><b>auth.shipbay3pl.com</b></div>
+          </div>
+          {err && <div className="msg err">{err}</div>}
+          <div className="row"><button className="btn-sm" onClick={onClose}>Cancel</button><button className="btn-sm primary" disabled={busy || !email.trim()} onClick={create}>{busy ? 'Generating…' : reset ? 'Confirm & reset password' : 'Confirm & generate login'}</button></div>
+        </>}
+        {step !== 'confirm' && <>
+          <h3>{step === 'sent' ? 'Welcome email sent' : 'Portal login ready'}<span className="dot">.</span></h3>
+          <p className="lead">{step === 'sent' ? <>Sent to <b>{cred.email}</b> — “Good news, your portal is ready.” The login step is checked off.</> : <>Shown once — email it to the client now, or copy it. It isn’t stored anywhere in plain text.</>}</p>
+          <div className="cred">
+            <div><small>Sign in at</small><code>auth.shipbay3pl.com</code></div>
+            <div><small>Email</small><code>{cred.email}</code></div>
+            <div><small>Temporary password</small><code>{cred.password}</code></div>
+          </div>
+          {err && <div className="msg err">{err}</div>}
+          <div className="row">
+            <button className="btn-sm" onClick={copy}>{copied ? 'Copied ✓' : 'Copy details'}</button>
+            <div className="spacer" />
+            {step === 'sent' ? <button className="btn-sm primary" onClick={onClose}>Done</button> : <><button className="btn-sm" onClick={onClose}>Close</button><button className="btn-sm primary" disabled={busy} onClick={send}>{busy ? 'Sending…' : 'Email login details'}</button></>}
+          </div>
+        </>}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Connect a shipping-label service or commerce channel ---------- */
+function ConnectModal({ org, taskKey, onClose, onDone }) {
+  const cat = CATEGORY[taskKey];
+  const [prov, setProv] = useState(null);
+  const [mode, setMode] = useState('oauth'); // for providers that offer both: oauth | api_key
+  const [vals, setVals] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const pick = (p) => { setProv(p); setMode(p.auth); setVals({}); setErr(null); };
+  const set = (k, v) => setVals((s) => ({ ...s, [k]: v }));
+  const fields = prov ? (mode === 'oauth' ? prov.oauthFields || [] : prov.fields || []) : [];
+  const ready = fields.every((f) => f.optional || (vals[f.key] || '').trim());
+
+  const go = async () => {
+    setBusy(true); setErr(null);
+    if (mode === 'oauth') {
+      const r = await fn('integrations', { action: 'oauth_start', org_id: org.id, category: cat.key, provider: prov.id, params: vals });
+      setBusy(false);
+      if (r.error) return setErr(r.error);
+      window.location.assign(r.url); // provider sign-in → back to the dashboard with the result
+      return;
+    }
+    const r = await fn('integrations', { action: 'connect', org_id: org.id, category: cat.key, provider: prov.id, credentials: vals });
+    setBusy(false);
+    if (r.error) return setErr(r.error);
+    onDone({ kind: 'ok', text: `${prov.name} connected${r.integration?.label ? ` — ${r.integration.label}` : ''}.` });
+  };
+
+  return (
+    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal wide">
+        <h3>{cat.title}<span className="dot">.</span></h3>
+        <p className="lead">{prov ? <><button className="linkbtn" onClick={() => setProv(null)}>← all {cat.key === 'shipping' ? 'services' : 'channels'}</button></> : `Choose what ${org.name} uses, then sign in. Credentials are verified live and kept server-side — never in the browser.`}</p>
+        {!prov && (
+          <div className="provgrid">
+            {cat.list.map((p) => (
+              <button key={p.id} className="prov" onClick={() => pick(p)}>
+                <b>{p.name}</b>
+                <small>{p.auth === 'oauth' ? 'Sign in with ' + p.name : p.auth === 'manual' ? 'Record account' : 'API keys'}</small>
+              </button>
+            ))}
+          </div>
+        )}
+        {prov && <>
+          <div className="provhead"><b>{prov.name}</b><span className="muted">{prov.help}</span></div>
+          {prov.auth === 'oauth' && prov.altAuth && (
+            <div className="seg"><button className={mode === 'oauth' ? 'on' : ''} onClick={() => setMode('oauth')}>Client signs in</button><button className={mode === 'api_key' ? 'on' : ''} onClick={() => setMode('api_key')}>Paste API token</button></div>
+          )}
+          {fields.map((f) => (
+            <div className="field" key={f.key}><label>{f.label}{f.optional && <span className="muted"> (optional)</span>}</label>
+              <input type={f.secret ? 'password' : 'text'} autoComplete="off" value={vals[f.key] || ''} placeholder={f.placeholder || ''} onChange={(e) => set(f.key, e.target.value)} />
+            </div>
+          ))}
+          {mode === 'oauth' && <div className="note" style={{ marginBottom: 12 }}>You’ll be sent to {prov.name} to approve ShipBay’s access, then returned here. {prov.needs?.length ? <>Needs ShipBay’s {prov.name} developer app registered (secrets: <code>{prov.needs.join(', ')}</code>).</> : null}</div>}
+          {prov.auth === 'manual' && <div className="note" style={{ marginBottom: 12 }}>{prov.name} has no public API, so this records the account (never a password) and marks the step connected.</div>}
+          {err && <div className="msg err">{err}</div>}
+          <div className="row"><button className="btn-sm" onClick={onClose}>Cancel</button><button className="btn-sm primary" disabled={busy || !ready} onClick={go}>{busy ? (mode === 'oauth' ? 'Opening…' : 'Verifying…') : mode === 'oauth' ? `Continue to ${prov.name} →` : prov.auth === 'manual' ? 'Save & connect' : 'Verify & connect'}</button></div>
+        </>}
       </div>
     </div>
   );

@@ -221,3 +221,52 @@ button { font-family: inherit; }
 .modal .option.on { border-color: var(--orange); background: var(--orange-tint); }
 .modal .option input { margin-top: 3px; accent-color: var(--orange); }
 .modal .option .small { font-size: 12.5px; color: var(--muted); }
+
+/* systems phase: portal login + connectors */
+.msg.flash { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; }
+.msg.flash button { margin-left: auto; background: none; border: 0; font-size: 18px; line-height: 1; cursor: pointer; color: inherit; opacity: .7; }
+.task .opt { font: 500 10px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted-2); border: 1px solid var(--line); border-radius: 99px; padding: 1px 7px; }
+.task .note .warn { color: var(--orange-soft); font-weight: 600; }
+.task .note b { color: var(--ink); font-weight: 600; }
+.btn-xs.primary { background: var(--orange); border-color: var(--orange); color: #fff; }
+.btn-xs.primary:hover { background: var(--orange-hover); color: #fff; }
+.doclist, .connlist { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.doclist li, .connlist li { font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.doclist small, .connlist .muted { color: var(--muted-2); }
+.doclist .viewdoc { font-size: 12.5px; }
+.dot2 { width: 8px; height: 8px; border-radius: 50%; background: #C9CED6; display: inline-block; }
+.dot2.pending { background: var(--orange); }
+.dot2.approved { background: var(--green); }
+.dot2.rejected { background: #B03A33; }
+.pill { font: 600 10px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; border-radius: 99px; background: #EEF0F3; color: var(--muted); }
+.pill.connected { background: rgba(30,158,111,.12); color: #177A56; }
+.pill.pending { background: rgba(255,107,21,.14); color: var(--orange-soft); }
+.pill.error { background: #FDECEA; color: #B03A33; }
+.connlist .errtxt { color: #B03A33; font-size: 12.5px; }
+.connlist .acts { display: inline-flex; gap: 10px; margin-left: 4px; }
+.connlist .acts .edit:disabled { opacity: .5; cursor: default; }
+
+.modal.wide { width: min(680px, 100%); }
+.modal .spacer { flex: 1; }
+.modal .confirm { display: grid; gap: 12px; margin: 14px 0 6px; }
+.modal .confirm > div > small { display: block; font: 500 10.5px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted-2); margin-bottom: 3px; }
+.modal .confirm .field { margin-bottom: 0; }
+.modal .muted { color: var(--muted); font-weight: 400; }
+.modal .cred { background: var(--navy, #101C2B); color: #fff; border-radius: 12px; padding: 16px 18px; display: grid; gap: 10px; margin: 12px 0 6px; }
+.modal .cred small { display: block; font: 500 10.5px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: rgba(255,255,255,.55); margin-bottom: 2px; }
+.modal .cred code { font: 600 15px var(--font-mono); color: #fff; word-break: break-all; }
+.modal .cred > div:last-child code { color: var(--orange); }
+.provgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-height: 52vh; overflow: auto; padding: 2px; }
+.prov { text-align: left; border: 1.5px solid var(--line); border-radius: 10px; padding: 11px 12px; background: #fff; cursor: pointer; display: grid; gap: 2px; }
+.prov:hover { border-color: var(--orange); }
+.prov b { font-size: 13.5px; }
+.prov small { font-size: 11.5px; color: var(--muted-2); }
+.provhead { display: flex; flex-direction: column; gap: 3px; margin: 0 0 14px; padding: 12px 14px; background: var(--orange-tint, #FFF4EC); border-radius: 10px; }
+.provhead b { font-size: 15px; }
+.provhead .muted { font-size: 12.5px; }
+.seg { display: inline-flex; border: 1.5px solid var(--line); border-radius: 9px; overflow: hidden; margin-bottom: 14px; }
+.seg button { padding: 7px 12px; border: 0; background: #fff; font: 600 12.5px var(--font-body); cursor: pointer; color: var(--muted); }
+.seg button.on { background: var(--ink); color: #fff; }
+.modal .note { font-size: 12.5px; color: var(--muted); }
+.modal .note code { font: 11.5px var(--font-mono); background: #EEF0F3; padding: 1px 5px; border-radius: 4px; }
+@media (max-width: 700px) { .provgrid { grid-template-columns: repeat(2, 1fr); } }
