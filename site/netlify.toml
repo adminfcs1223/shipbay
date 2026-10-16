@@ -29,23 +29,28 @@
   status = 200
 
 # Client portal is its own app (repo: /portal, Netlify project "shipbay-portal").
-# Change the target to https://portal.shipbay3pl.com once that domain is mapped.
+# Sign-in lives at auth.shipbay3pl.com; the app at dashboard.shipbay3pl.com.
 [[redirects]]
   from = "/portal"
-  to = "https://shipbay-portal.netlify.app"
+  to = "https://dashboard.shipbay3pl.com"
   status = 302
   force = true
 
 [[redirects]]
   from = "/portal/*"
-  to = "https://shipbay-portal.netlify.app/:splat"
+  to = "https://dashboard.shipbay3pl.com/:splat"
   status = 302
   force = true
 
-# legacy auth subdomain → client portal
 [[redirects]]
-  from = "https://auth.shipbay3pl.com/*"
-  to = "https://shipbay-portal.netlify.app/:splat"
+  from = "/dashboard"
+  to = "https://dashboard.shipbay3pl.com"
+  status = 302
+  force = true
+
+[[redirects]]
+  from = "/login"
+  to = "https://auth.shipbay3pl.com"
   status = 302
   force = true
 

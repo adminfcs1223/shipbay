@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './lib';
+import { isAuthHost, isAppHost, splitMode, authUrl, handoffToApp, takeHandoff } from './hosts';
 
 const STAFF = ['shipbay_admin', 'shipbay_staff'];
 
@@ -8,7 +9,12 @@ export default function App() {
   const [me, setMe] = useState(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    (async () => {
+      const t = isAppHost ? takeHandoff() : null;
+      if (t) await supabase.auth.setSession(t);
+      const { data } = await supabase.auth.getSession();
+      setSession(data.session);
+    })();
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -24,7 +30,15 @@ export default function App() {
   }, [session]);
 
   if (session === undefined) return null;
-  if (!session) return <SignIn />;
+  if (isAuthHost) {
+    // auth. never shows the app: with a session, pass it along; without, show sign-in
+    if (session) { handoffToApp(session); return null; }
+    return <SignIn />;
+  }
+  if (!session) {
+    if (isAppHost) { window.location.replace(authUrl()); return null; }
+    return <SignIn />;
+  }
   return <Shell me={me} />;
 }
 
@@ -38,13 +52,14 @@ function SignIn() {
 
   const submit = async (e) => {
     e.preventDefault(); setBusy(true); setMsg(null);
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pw });
+    const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pw });
+    if (!error && splitMode && data?.session) return handoffToApp(data.session);
     setBusy(false);
     if (error) setMsg({ kind: 'err', text: error.message === 'Invalid login credentials' ? 'That email and password don’t match. Try again or reset your password.' : error.message });
   };
   const reset = async () => {
     if (!email.trim()) return setMsg({ kind: 'err', text: 'Enter your work email first, then tap “Forgot password?”' });
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin });
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: authUrl() });
     setMsg(error ? { kind: 'err', text: error.message } : { kind: 'ok', text: 'Check your inbox — a reset link is on its way.' });
   };
 
@@ -97,7 +112,7 @@ function Shell({ me }) {
         <a className="logo" href="/"><img src="/brand/06-horizontal-reverse.svg" alt="shipbay." /></a>
         <div className="who">
           {me && <><span className="role">{me.isStaff ? 'shipbay staff' : 'client'}</span><b>{me.orgName || me.full_name || me.email}</b></>}
-          <button className="out" onClick={() => supabase.auth.signOut()}>Sign out</button>
+          <button className="out" onClick={async () => { await supabase.auth.signOut(); if (splitMode) window.location.replace(authUrl()); }}>Sign out</button>
         </div>
       </header>
       <main className="stage">
