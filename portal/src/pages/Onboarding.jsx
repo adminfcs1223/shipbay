@@ -1,5 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib';
+
+const DOC_KIND = { intake_form: 'intake_form', w9: 'w9', formation_cert: 'formation_cert', rate_card: 'rate_card', agreement: 'agreement', sla: 'sla' };
+const BILLING = [
+  ['ach', 'ACH / bank debit', 'We pull each invoice from the client’s bank account on the due date.'],
+  ['card', 'Credit card on file', 'Card charged on the due date (processing fee may apply).'],
+  ['wire', 'Wire transfer', 'Client wires each invoice; we send remittance details.'],
+  ['check', 'Check', 'Mailed to 115 Stryker Ln, Hillsborough NJ 08844.'],
+  ['net_terms', 'Net terms (invoice)', 'Invoice sent monthly; client pays by the due date.'],
+];
 
 const PHASES = [
   { key: 'paperwork', label: 'Paperwork', icon: 'paperwork' },
@@ -79,15 +88,18 @@ export default function Onboarding({ me }) {
 function AccountDetail({ account, me, onChange }) {
   const [org, setOrg] = useState(null);
   const [tasks, setTasks] = useState(null);
+  const [docs, setDocs] = useState([]);
   const [openPhase, setOpenPhase] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [billingOpen, setBillingOpen] = useState(false);
 
   const load = async () => {
-    const [{ data: o }, { data: t }] = await Promise.all([
+    const [{ data: o }, { data: t }, { data: d }] = await Promise.all([
       supabase.from('orgs').select('*').eq('id', account.org_id).single(),
       supabase.from('onboarding_tasks').select('*').eq('org_id', account.org_id).order('sort'),
+      supabase.from('documents').select('*').eq('org_id', account.org_id).not('task_key', 'is', null).order('created_at', { ascending: false }),
     ]);
-    setOrg(o); setTasks(t || []);
+    setOrg(o); setTasks(t || []); setDocs(d || []);
   };
   useEffect(() => { load(); }, [account.org_id]);
 
@@ -96,6 +108,21 @@ function AccountDetail({ account, me, onChange }) {
     const done = !t.done;
     await supabase.from('onboarding_tasks').update({ done, done_at: done ? new Date().toISOString() : null, done_by: done ? me.id : null }).eq('id', t.id);
     load(); onChange();
+  };
+  const upload = async (t, file) => {
+    if (!file) return;
+    if (file.type !== 'application/pdf') return alert('Please upload a PDF.');
+    const path = `${org.id}/${t.key}/${crypto.randomUUID()}-${file.name.replace(/[^A-Za-z0-9._-]+/g, '_')}`;
+    const { error: upErr } = await supabase.storage.from('client-docs').upload(path, file, { contentType: 'application/pdf', upsert: false });
+    if (upErr) return alert(upErr.message);
+    const { error } = await supabase.from('documents').insert({ org_id: org.id, kind: DOC_KIND[t.key] || 'other', title: `${t.label} — ${org.name}`, storage_path: path, mime: 'application/pdf', size_bytes: file.size, task_key: t.key, status: 'pending', uploaded_by: me.id });
+    if (error) return alert(error.message);
+    load(); onChange();
+  };
+  const viewDoc = async (d) => {
+    const { data, error } = await supabase.storage.from('client-docs').createSignedUrl(d.storage_path, 600);
+    if (error) return alert(error.message);
+    window.open(data.signedUrl, '_blank', 'noopener');
   };
   const saveNote = async (t, note) => { await supabase.from('onboarding_tasks').update({ note: note.trim() || null }).eq('id', t.id); setEditing(null); load(); };
   const markLive = async () => {
@@ -152,22 +179,76 @@ function AccountDetail({ account, me, onChange }) {
 
       {openPhase && (
         <div className="phase open">
-          {tasks.filter((t) => t.phase === openPhase).map((t) => (
-            <div key={t.id} className={`task ${t.done ? 'done' : ''}`}>
-              <input type="checkbox" checked={t.done} onChange={() => toggle(t)} />
-              <div>
-                <div className="lbl">{t.label}</div>
-                {editing === t.id ? (
-                  <input className="noteedit" autoFocus defaultValue={t.note || ''} placeholder="Add a note — who, what, when" onBlur={(e) => saveNote(t, e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveNote(t, e.target.value); if (e.key === 'Escape') setEditing(null); }} />
-                ) : (
-                  <div className="note">{t.note || <button className="edit" onClick={() => setEditing(t.id)}>+ note</button>}{t.note && <> · <button className="edit" onClick={() => setEditing(t.id)}>edit</button></>}</div>
-                )}
+          {tasks.filter((t) => t.phase === openPhase).map((t) => {
+            const latest = docs.find((d) => d.task_key === t.key);
+            const state = t.done ? 'done' : t.kind === 'document' && latest ? 'pending' : t.kind === 'billing' && org.billing_method ? 'done' : 'open';
+            return (
+              <div key={t.id} className={`task ${state}`}>
+                {t.kind === 'manual'
+                  ? <input type="checkbox" checked={t.done} onChange={() => toggle(t)} />
+                  : <span className={`circle ${state}`} title={state === 'done' ? 'Approved' : state === 'pending' ? 'Uploaded — awaiting review' : 'Not started'}>{state === 'done' ? '✓' : state === 'pending' ? '–' : ''}</span>}
+                <div>
+                  <div className="lbl">{t.label}
+                    {t.kind === 'document' && <UploadButton onFile={(f) => upload(t, f)} label={latest ? 'Replace PDF' : 'Upload PDF'} />}
+                    {t.kind === 'billing' && <button className="btn-xs" onClick={() => setBillingOpen(true)}>{org.billing_method ? 'Change billing method' : 'Add billing method'}</button>}
+                  </div>
+                  {t.kind === 'document' && latest && <div className="note">{latest.status === 'approved' ? 'Approved' : latest.status === 'rejected' ? 'Rejected — upload a corrected copy' : 'Uploaded, awaiting review'} · {fmt(latest.created_at)}{latest.review_note ? ` · ${latest.review_note}` : ''}</div>}
+                  {t.kind === 'billing' && org.billing_method && <div className="note">{BILLING.find((b) => b[0] === org.billing_method)?.[1]}{org.billing_details?.summary ? ` · ${org.billing_details.summary}` : ''}</div>}
+                  {t.kind === 'manual' && (editing === t.id ? (
+                    <input className="noteedit" autoFocus defaultValue={t.note || ''} placeholder="Add a note — who, what, when" onBlur={(e) => saveNote(t, e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveNote(t, e.target.value); if (e.key === 'Escape') setEditing(null); }} />
+                  ) : (
+                    <div className="note">{t.note || <button className="edit" onClick={() => setEditing(t.id)}>+ note</button>}{t.note && <> · <button className="edit" onClick={() => setEditing(t.id)}>edit</button></>}</div>
+                  ))}
+                </div>
+                <div className="when">
+                  {t.kind === 'document' && latest ? <button className="viewdoc" onClick={() => viewDoc(latest)}>View document</button> : (t.done && t.done_at ? fmt(t.done_at) : '')}
+                </div>
               </div>
-              <div className="when">{t.done && t.done_at ? fmt(t.done_at) : ''}</div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
+      {billingOpen && <BillingModal org={org} onClose={() => setBillingOpen(false)} onSaved={() => { setBillingOpen(false); load(); onChange(); }} />}
+    </div>
+  );
+}
+
+function UploadButton({ onFile, label }) {
+  const ref = useRef(null);
+  return (
+    <>
+      <button className="btn-xs" onClick={() => ref.current?.click()}>{label}</button>
+      <input ref={ref} type="file" accept="application/pdf" style={{ display: 'none' }} onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ''; }} />
+    </>
+  );
+}
+
+function BillingModal({ org, onClose, onSaved }) {
+  const [method, setMethod] = useState(org.billing_method || 'ach');
+  const [summary, setSummary] = useState(org.billing_details?.summary || '');
+  const [err, setErr] = useState(null);
+  const save = async () => {
+    const { error } = await supabase.from('orgs').update({ billing_method: method, billing_details: { summary: summary.trim() || null, set_at: new Date().toISOString() } }).eq('id', org.id);
+    if (error) setErr(error.message); else onSaved();
+  };
+  const hint = { ach: 'e.g. Chase ·· 4821 — authorization form on file', card: 'e.g. Visa ·· 6411, exp 09/28', wire: 'e.g. remittance details sent to AP', check: 'e.g. AP contact / mailing cadence', net_terms: 'e.g. Net 15, invoice to ap@brand.com' }[method];
+  return (
+    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <h3>Billing method<span className="dot">.</span></h3>
+        <p className="lead">How {org.name} pays their monthly statement.</p>
+        <div className="options">
+          {BILLING.map(([v, l, d]) => (
+            <label key={v} className={`option ${method === v ? 'on' : ''}`}>
+              <input type="radio" name="billing" value={v} checked={method === v} onChange={() => setMethod(v)} />
+              <div><b>{l}</b><div className="small">{d}</div></div>
+            </label>
+          ))}
+        </div>
+        <div className="field" style={{ marginTop: 14 }}><label>Reference (optional — never full account or card numbers)</label><input type="text" value={summary} onChange={(e) => setSummary(e.target.value)} placeholder={hint} /></div>
+        {err && <div className="msg err">{err}</div>}
+        <div className="row"><button className="btn-sm" onClick={onClose}>Cancel</button><button className="btn-sm primary" onClick={save}>Save billing method</button></div>
+      </div>
     </div>
   );
 }

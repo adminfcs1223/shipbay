@@ -205,3 +205,19 @@ button { font-family: inherit; }
 .phasetile .bar { width: 100%; margin-top: 2px; }
 .phase.open { padding: 0 18px 14px; border-top: 1px solid var(--line); }
 @media (max-width: 900px) { .phases { grid-template-columns: repeat(2, 1fr); } }
+
+/* ---------- Onboarding: document rows, status circles, billing options ---------- */
+.task .circle { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #C9CED6; display: grid; place-items: center; font-size: 13px; font-weight: 700; line-height: 1; margin-top: 1px; color: #fff; }
+.task .circle.pending { border-color: var(--orange); background: var(--orange); }
+.task .circle.done { border-color: var(--green); background: var(--green); }
+.task.pending .lbl, .task.done .lbl { text-decoration: none; color: var(--ink); }
+.task .lbl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.btn-xs { padding: 4px 10px; border-radius: 7px; border: 1.5px solid var(--line); background: #fff; font: 600 12px var(--font-body); color: var(--ink); cursor: pointer; }
+.btn-xs:hover { border-color: var(--orange); color: var(--orange-soft); }
+.task .viewdoc { background: none; border: 0; color: var(--orange-soft); font: 600 13px var(--font-body); cursor: pointer; white-space: nowrap; padding: 0; }
+.task .viewdoc:hover { text-decoration: underline; }
+.modal .options { display: grid; gap: 8px; }
+.modal .option { display: flex; gap: 12px; align-items: flex-start; padding: 11px 12px; border: 1.5px solid var(--line); border-radius: 10px; cursor: pointer; }
+.modal .option.on { border-color: var(--orange); background: var(--orange-tint); }
+.modal .option input { margin-top: 3px; accent-color: var(--orange); }
+.modal .option .small { font-size: 12.5px; color: var(--muted); }
