@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from './lib';
+import { supabase, forgetLocalSession } from './lib';
 import { isAuthHost, isAppHost, splitMode, authUrl, handoffToApp, takeHandoff } from './hosts';
 
 const STAFF = ['shipbay_admin', 'shipbay_staff'];
@@ -40,8 +40,8 @@ export default function App() {
 
   if (session === undefined) return null;
   if (isAuthHost) {
-    // auth. never shows the app: with a session, pass it along; without, show sign-in
-    if (session) { handoffToApp(session); return null; }
+    // auth. never shows the app: a stored session is handed to dashboard. once the server confirms it is still valid
+    if (session) return <AuthHandoff session={session} />;
     return <SignIn />;
   }
   if (!session) {
@@ -52,6 +52,18 @@ export default function App() {
     return <SignIn />;
   }
   return <Shell me={me} />;
+}
+
+function AuthHandoff({ session }) {
+  useEffect(() => {
+    (async () => {
+      const { error } = await supabase.auth.getUser();
+      if (error) { forgetLocalSession(); window.location.reload(); return; }
+      forgetLocalSession();
+      handoffToApp(session);
+    })();
+  }, [session]);
+  return null;
 }
 
 /* ---------- Sign-in (ported from site/portal.html) ---------- */
@@ -65,7 +77,7 @@ function SignIn({ note }) {
   const submit = async (e) => {
     e.preventDefault(); setBusy(true); setMsg(null);
     const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pw });
-    if (!error && splitMode && data?.session) { const sess = data.session; await supabase.auth.signOut({ scope: 'local' }); return handoffToApp(sess); }
+    if (!error && splitMode && data?.session) { forgetLocalSession(); return handoffToApp(data.session); }
     setBusy(false);
     if (error) setMsg({ kind: 'err', text: error.message === 'Invalid login credentials' ? 'That email and password don’t match. Try again or reset your password.' : error.message });
   };
