@@ -41,7 +41,7 @@ export default function App() {
   if (session === undefined) return null;
   if (isAuthHost) {
     // auth. never shows the app: a stored session is handed to dashboard. once the server confirms it is still valid
-    if (session) return <AuthHandoff session={session} />;
+    if (session) return <AuthHandoff session={session} onInvalid={() => setSession(null)} />;
     return <SignIn />;
   }
   if (!session) {
@@ -54,15 +54,17 @@ export default function App() {
   return <Shell me={me} />;
 }
 
-function AuthHandoff({ session }) {
+function AuthHandoff({ session, onInvalid }) {
   useEffect(() => {
+    let cancelled = false;
     (async () => {
-      const { error } = await supabase.auth.getUser();
-      if (error) { forgetLocalSession(); window.location.reload(); return; }
+      const { error } = await supabase.auth.getUser(session.access_token);
+      if (cancelled) return;
       forgetLocalSession();
-      handoffToApp(session);
+      if (error) onInvalid(); else handoffToApp(session);
     })();
-  }, [session]);
+    return () => { cancelled = true; };
+  }, [session, onInvalid]);
   return null;
 }
 
@@ -76,8 +78,8 @@ function SignIn({ note }) {
 
   const submit = async (e) => {
     e.preventDefault(); setBusy(true); setMsg(null);
-    const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pw });
-    if (!error && splitMode && data?.session) { forgetLocalSession(); return handoffToApp(data.session); }
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pw });
+    if (!error && isAuthHost) return; // stay busy; the session event mounts AuthHandoff, which carries it to dashboard.
     setBusy(false);
     if (error) setMsg({ kind: 'err', text: error.message === 'Invalid login credentials' ? 'That email and password don’t match. Try again or reset your password.' : error.message });
   };
