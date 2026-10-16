@@ -1,0 +1,12 @@
+# Netlify project "shipbay-portal": set Base directory = portal
+[build]
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
