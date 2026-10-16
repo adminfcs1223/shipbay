@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib';
 import { CATEGORY, providerName } from '../providers';
 
-const DOC_KIND = { intake_form: 'intake_form', w9: 'w9', formation_cert: 'formation_cert', rate_card: 'rate_card', agreement: 'agreement', sla: 'sla', packaging_spec: 'packaging_spec', returns_rules: 'returns_rules', packing_sops: 'packing_sops', sku_catalog: 'sku_catalog' };
+export const DOC_KIND = { intake_form: 'intake_form', w9: 'w9', formation_cert: 'formation_cert', rate_card: 'rate_card', agreement: 'agreement', sla: 'sla', packaging_spec: 'packaging_spec', returns_rules: 'returns_rules', packing_sops: 'packing_sops', sku_catalog: 'sku_catalog' };
 // what a document task accepts: default PDF only; 'pdf,doc,image' for specs / SOPs
-const ACCEPT = {
+export const ACCEPT = {
   pdf: { mimes: ['application/pdf'], ext: '.pdf', label: 'PDF' },
   'pdf,doc,image': { mimes: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'image/png', 'image/jpeg', 'image/webp', 'image/heic'], ext: '.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp,.heic', label: 'file' },
 };
-const acceptFor = (t) => ACCEPT[t.accept] || ACCEPT.pdf;
+export const acceptFor = (t) => ACCEPT[t.accept] || ACCEPT.pdf;
 const fn = async (name, body) => {
   const { data, error } = await supabase.functions.invoke(name, { body });
   if (error) { // FunctionsHttpError carries the JSON body the function returned
@@ -17,7 +17,7 @@ const fn = async (name, body) => {
   }
   return data || {};
 };
-const BILLING = [
+export const BILLING = [
   ['ach', 'ACH / bank debit', 'We pull each invoice from the client’s bank account on the due date.'],
   ['card', 'Credit card on file', 'Card charged on the due date (processing fee may apply).'],
   ['wire', 'Wire transfer', 'Client wires each invoice; we send remittance details.'],
@@ -25,7 +25,7 @@ const BILLING = [
   ['net_terms', 'Net terms (invoice)', 'Invoice sent monthly; client pays by the due date.'],
 ];
 
-const PHASES = [
+export const PHASES = [
   { key: 'paperwork', label: 'Paperwork', icon: 'paperwork' },
   { key: 'systems', label: 'Systems', icon: 'systems' },
   { key: 'inventory', label: 'Inventory', icon: 'inventory' },
@@ -38,10 +38,10 @@ const GO_LIVE_STATUS = [
   ['on_hold', 'On hold', 'muted'],
   ['complete', 'Complete', 'navy'],
 ];
-const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null);
+export const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null);
 
 /* Phase icons — shipbay theme: navy tile, orange accent, 2px strokes */
-const PhaseIcon = ({ kind }) => {
+export const PhaseIcon = ({ kind }) => {
   const common = { fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', viewBox: '0 0 24 24' };
   switch (kind) {
     case 'paperwork': return <svg {...common}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h6" className="accent" /></svg>;
@@ -250,6 +250,7 @@ function AccountDetail({ account, me, onChange }) {
               : t.kind === 'integration' && list.some((c) => c.status === 'connected') ? 'done'
               : t.kind === 'integration' && list.length ? 'pending'
               : t.kind === 'catalog' && skuCount > 0 ? 'done'
+              : t.kind === 'catalog' && latest ? 'pending'
               : t.kind === 'schedule' && t.scheduled_for ? 'done'
               : 'open';
             const catalogDoc = t.kind === 'catalog' ? latest : null;
@@ -322,7 +323,7 @@ function AccountDetail({ account, me, onChange }) {
   );
 }
 
-function UploadButton({ onFile, label, accept = '.pdf', primary }) {
+export function UploadButton({ onFile, label, accept = '.pdf', primary }) {
   const ref = useRef(null);
   return (
     <>

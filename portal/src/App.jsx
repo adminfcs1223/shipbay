@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { supabase, forgetLocalSession } from './lib';
 import { isAuthHost, isAppHost, splitMode, authUrl, handoffToApp, takeHandoff } from './hosts';
 import Onboarding from './pages/Onboarding';
+import ClientHome from './pages/ClientHome';
+import ClientDocuments from './pages/ClientDocuments';
 
 const STAFF = ['shipbay_admin', 'shipbay_staff'];
 
@@ -132,15 +134,22 @@ function SignIn({ note }) {
 }
 
 /* ---------- Signed-in app: left nav column + content ---------- */
+const svg = (d) => <svg className="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{d}</svg>;
 const Ico = {
-  onboarding: <svg className="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>,
+  onboarding: svg(<><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></>),
+  home: svg(<><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></>),
+  documents: svg(<><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></>),
 };
 const STAFF_NAV = [
   { key: 'onboarding', label: 'Onboarding', icon: Ico.onboarding, page: Onboarding },
 ];
+const CLIENT_NAV = [
+  { key: 'home', label: 'Overview', icon: Ico.home, page: ClientHome },
+  { key: 'documents', label: 'Documents', icon: Ico.documents, page: ClientDocuments },
+];
 
 function Shell({ me }) {
-  const nav = me?.isStaff ? STAFF_NAV : [];
+  const nav = !me ? [] : me.isStaff ? STAFF_NAV : CLIENT_NAV;
   const [page, setPage] = useState(null);
   useEffect(() => { if (!page && nav.length) setPage(nav[0].key); }, [nav.length, page]);
   const active = nav.find((n) => n.key === page);
@@ -152,7 +161,7 @@ function Shell({ me }) {
       <aside className="sidenav">
         <a className="logo" href="/"><img src="/brand/06-horizontal-reverse.svg" alt="shipbay." /></a>
         <div className="tagline">shipbay.dashboard</div>
-        {nav.length > 0 && <div className="section">Operations</div>}
+        {nav.length > 0 && <div className="section">{me?.isStaff ? 'Operations' : 'Your account'}</div>}
         {nav.map((n) => (
           <button key={n.key} className={`navitem ${page === n.key ? 'active' : ''}`} onClick={() => setPage(n.key)}>{n.icon}{n.label}</button>
         ))}
