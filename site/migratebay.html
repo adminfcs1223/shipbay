@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MigrateBay — shipbay.</title>
+<link rel="icon" type="image/svg+xml" href="assets/brand/08-icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#FFFFFF;--bg-soft:#F8F7F5;--line:#E8E6E1;--ink:#101C2B;--muted:#5A6473;--muted-2:#8A93A3;
+    --orange:#FF6B15;--orange-soft:#D14E00;--orange-tint:#FFF0E4;--orange-hover:#E85E0A;--green:#1E9E6F}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  img{max-width:100%;display:block}
+  .wrap{max-width:1200px;margin:0 auto;padding:0 24px}
+  h1,h2,h3{font-family:'Archivo',sans-serif;letter-spacing:-.01em}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  .dot{color:var(--orange)}
+  .eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:12.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--orange-soft);margin-bottom:16px}
+  .eyebrow::before{content:"";width:22px;height:2px;background:var(--orange)}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:16px 32px;border-radius:11px;font-weight:600;font-size:16px;font-family:'Archivo',sans-serif;transition:all .18s;cursor:pointer;border:none}
+  .btn-orange{background:var(--orange);color:#fff;box-shadow:0 8px 26px rgba(255,107,21,.32)}
+  .btn-orange:hover{background:var(--orange-hover);transform:translateY(-2px)}
+  .btn-outline{border:1.5px solid var(--ink);color:var(--ink);background:rgba(255,255,255,.6)}
+  .btn-outline:hover{background:var(--ink);color:#fff}
+  header{position:sticky;top:0;z-index:100;background:rgba(255,255,255,.92);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+  nav{display:flex;align-items:center;justify-content:space-between;height:76px}
+  .nav-logo img{height:38px;width:auto}
+  .nav-links{display:flex;gap:34px;font-size:15px;font-weight:500;color:var(--muted)}
+  .nav-links a:hover{color:var(--ink)}
+  .nav-links a.on{color:var(--ink);font-weight:600}
+  .nav-cta{display:flex;gap:14px;align-items:center}
+  .nav-cta .login{font-weight:600;font-size:15px;color:var(--muted)}
+  .nav-cta .btn{padding:11px 22px;font-size:15px}
+  h2{font-size:clamp(34px,4.2vw,52px);font-weight:700;line-height:1.1;color:var(--ink);margin-bottom:14px}
+  .sec-head{max-width:880px;margin-bottom:52px}
+  .sec-head p{font-size:18px;color:var(--muted);max-width:640px}
+  section{position:relative}
+  /* hero */
+  .hero{position:relative;padding:88px 0 80px;overflow:hidden;background:
+    radial-gradient(820px 460px at 92% -8%, var(--orange-tint) 0%, transparent 58%),
+    radial-gradient(620px 420px at -5% 75%, #FFF0E466 0%, transparent 60%), var(--bg)}
+  .hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:56px;align-items:center;position:relative;z-index:1}
+  .kicker{display:inline-flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:99px;padding:8px 18px 8px 10px;font-size:13.5px;color:var(--muted);margin-bottom:26px;box-shadow:0 2px 10px rgba(16,28,43,.05)}
+  .kicker .k-badge{background:var(--orange);color:#fff;font-family:'Archivo',sans-serif;font-weight:700;font-size:12.5px;padding:4px 12px;border-radius:99px}
+  h1{font-size:clamp(40px,5vw,62px);font-weight:700;line-height:1.06;color:var(--ink)}
+  h1 em{font-style:normal;color:var(--orange)}
+  .hero p.lede{margin:22px 0 32px;font-size:20px;color:var(--muted);max-width:530px;line-height:1.5}
+  .hero p.lede b{color:var(--ink)}
+  .hero-ctas{display:flex;gap:14px;flex-wrap:wrap}
+  .mig-panel{background:#fff;border:1px solid var(--line);border-radius:22px;padding:26px;box-shadow:0 24px 60px rgba(16,28,43,.09)}
+  .mig-panel .mp-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+  .mig-panel .mp-head b{font-family:'Archivo',sans-serif;font-size:14px}
+  .mig-panel .pill{font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 12px;border-radius:99px;background:rgba(30,158,111,.1);color:var(--green)}
+  .flowline{stroke:var(--orange);stroke-width:2.5;fill:none;stroke-dasharray:7 7;animation:dashmove 1.4s linear infinite}
+  @keyframes dashmove{to{stroke-dashoffset:-14}}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+  /* kpis */
+  .kpis{padding:84px 0 70px}
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr)}
+  .kpi{padding:28px 32px;border-left:1px solid var(--line)}
+  .kpi:first-child{border-left:none;padding-left:0}
+  .kpi b{display:block;font-family:'Archivo',sans-serif;font-size:46px;font-weight:700;color:var(--ink);line-height:1.05}
+  .kpi b em{font-style:normal;color:var(--orange)}
+  .kpi span{display:block;font-size:14.5px;color:var(--muted);margin-top:8px;line-height:1.45}
+  /* phases */
+  .phases{padding:100px 0;border-top:1px solid var(--line);background:
+    radial-gradient(720px 420px at 96% 100%, var(--orange-tint) 0%, transparent 58%), var(--bg-soft)}
+  .phase-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-top:52px}
+  .phase{background:#fff;border:1px solid var(--line);border-radius:18px;padding:28px 26px;position:relative;transition:all .2s}
+  .phase:hover{transform:translateY(-3px);box-shadow:0 18px 44px rgba(16,28,43,.09);border-color:var(--orange)}
+  .phase .pnum{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;color:var(--orange-soft);display:block;margin-bottom:12px}
+  .phase h3{font-size:19px;font-weight:600;margin-bottom:10px}
+  .phase p{font-size:14px;color:var(--muted);line-height:1.55}
+  .phase p b{color:var(--ink)}
+  /* expensive */
+  .why{padding:104px 0;overflow:hidden;background:
+    radial-gradient(760px 460px at 4% 8%, var(--orange-tint) 0%, transparent 60%), var(--bg)}
+  .why-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center}
+  .why p.big{font-size:19px;color:var(--muted);margin-bottom:18px;line-height:1.6}
+  .why p.big b{color:var(--ink)}
+  .savelist{display:grid;gap:13px;margin-top:8px}
+  .save{display:flex;gap:13px;background:#fff;border:1px solid var(--line);border-radius:13px;padding:16px 18px}
+  .save .tick{flex:none;width:26px;height:26px;border-radius:8px;background:var(--orange);color:#fff;display:grid;place-items:center;font-size:14px;font-weight:700;margin-top:2px}
+  .save b{display:block;font-size:15px;font-family:'Archivo',sans-serif}
+  .save small{font-size:13.5px;color:var(--muted);line-height:1.5}
+  /* modes */
+  .modes{padding:100px 0;border-top:1px solid var(--line)}
+  .mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:48px}
+  .mode{border:1.5px solid var(--line);border-radius:20px;padding:32px;background:#fff}
+  .mode.rec{border-color:var(--orange);background:linear-gradient(165deg,#FFF7F1 0%,#fff 55%)}
+  .mode .mtag{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;padding:5px 13px;border-radius:99px;background:var(--bg-soft);color:var(--muted);margin-bottom:16px}
+  .mode.rec .mtag{background:var(--orange);color:#fff}
+  .mode h3{font-size:22px;font-weight:600;margin-bottom:10px}
+  .mode p{font-size:15px;color:var(--muted);margin-bottom:14px}
+  .mode p b{color:var(--ink)}
+  .mode ul{list-style:none;display:grid;gap:9px}
+  .mode li{display:flex;gap:10px;font-size:14px;color:var(--muted)}
+  .mode li::before{content:"→";color:var(--orange);font-weight:700}
+  /* dashboard */
+  .mdash{padding:104px 0;border-top:1px solid var(--line);background:
+    radial-gradient(720px 420px at 100% 10%, var(--orange-tint) 0%, transparent 60%), var(--bg-soft)}
+  .md-grid{display:grid;grid-template-columns:.92fr 1.08fr;gap:60px;align-items:center}
+  .md-list{list-style:none;display:grid;gap:14px;margin:24px 0 28px}
+  .md-list li{display:flex;gap:13px;font-size:16px;color:var(--muted)}
+  .md-list li b{color:var(--ink)}
+  .md-list .tick{flex:none;width:24px;height:24px;border-radius:8px;background:var(--orange);color:#fff;display:grid;place-items:center;font-size:13px;font-weight:700;margin-top:2px}
+  .dashmock{background:var(--ink);border-radius:18px;padding:20px;color:#F6F5F1;box-shadow:0 30px 70px rgba(16,28,43,.25)}
+  .dm-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+  .dm-head .brand{display:flex;align-items:center;gap:10px;font-family:'Archivo',sans-serif;font-weight:600;font-size:13.5px}
+  .dm-head .pill{font-family:'IBM Plex Mono',monospace;font-size:10.5px;padding:4px 11px;border-radius:99px;background:rgba(232,122,51,.2);color:#F0B285}
+  .dm-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+  .dstat{background:#1B212B;border-radius:11px;padding:13px 15px}
+  .dstat b{display:block;font-family:'Archivo',sans-serif;font-size:20px;font-weight:700;color:#fff}
+  .dstat small{font-size:11px;color:#8A93A3}
+  .dstat .up{color:#5ED4A5;font-size:10.5px;font-family:'IBM Plex Mono',monospace}
+  .bar-row{margin-bottom:12px}
+  .bar-row .bl{display:flex;justify-content:space-between;font-size:11.5px;color:#8A93A3;margin-bottom:5px}
+  .bar-row .bl b{color:#fff;font-family:'IBM Plex Mono',monospace;font-size:11px}
+  .bar{height:8px;border-radius:99px;background:#1B212B;overflow:hidden}
+  .bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--orange),#FFA36B)}
+  .dm-note{font-size:11px;color:#8A93A3;border-top:1px solid #232A36;padding-top:11px;margin-top:4px}
+  .dm-note b{color:#5ED4A5}
+  /* cta */
+  .cta{padding:20px 24px 110px}
+  .cta-card{max-width:1152px;margin:0 auto;border-radius:24px;border:1px solid var(--orange);background:
+      radial-gradient(90% 140% at 88% -25%, var(--orange-tint) 0%, transparent 52%),
+      radial-gradient(60% 90% at 0% 110%, #FFF0E480 0%, transparent 55%), #fff;
+    padding:64px 56px;text-align:center;box-shadow:0 30px 80px rgba(16,28,43,.08)}
+  .cta-card p{font-size:17px;color:var(--muted);max-width:560px;margin:0 auto 30px}
+  footer{padding:60px 0 44px;border-top:1px solid var(--line);background:
+    radial-gradient(700px 380px at 90% 0%, var(--orange-tint) 0%, transparent 60%), var(--bg-soft)}
+  .foot-legal{font-size:12.5px;color:var(--muted-2);line-height:1.7;display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;align-items:center}
+  .foot-logo img{height:26px;width:auto}
+  @media(max-width:960px){
+    .nav-links,.nav-cta .login{display:none}
+    .hero-grid,.why-grid,.md-grid,.mode-grid{grid-template-columns:1fr}
+    .kpi-grid{grid-template-columns:1fr 1fr}
+    .kpi{border-left:none;padding-left:0;border-top:1px solid var(--line);padding-top:20px}
+    .phase-grid{grid-template-columns:1fr 1fr}
+  }
+  @media(max-width:600px){.phase-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <nav>
+      <a class="nav-logo" href="index.html"><img src="assets/brand/01-horizontal.svg" alt="shipbay."></a>
+      <div class="nav-links">
+        <a href="facility.html">Our Facilities</a>
+        <a href="pricing.html">Pricing</a>
+        <a href="index.html#how">How it works</a>
+        <a href="dashboard.html">Dashboard</a>
+      </div>
+      <div class="nav-cta">
+        <a class="login" href="portal.html">Log in</a>
+        <a class="btn btn-orange" href="start.html">Apply for an account</a>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <div class="kicker"><span class="k-badge">NEW</span> The switching program run by your next 3PL</div>
+      <h1>migrate<em>bay.</em><br>Switch 3PLs without the switching tax<span class="dot">.</span></h1>
+      <p class="lede">Everyone accepts that changing 3PLs is painfully expensive. <b>We didn't.</b> MigrateBay plans, negotiates, and runs your entire transition — and engineers the cost down at every step.</p>
+      <div class="hero-ctas">
+        <a class="btn btn-orange" href="start.html">Apply for an account</a>
+        <a class="btn btn-outline" href="#phases">See how it works</a>
+      </div>
+    </div>
+    <div class="mig-panel">
+      <div class="mp-head"><b>Your migration, coordinated</b><span class="pill">ZERO-DOWNTIME PLAN</span></div>
+      <svg viewBox="0 0 520 330" style="width:100%;height:auto" aria-label="MigrateBay migration flow — from your old 3PL through migratebay coordination to your shipbay warehouse">
+        <!-- old 3PL -->
+        <rect x="18" y="30" width="150" height="86" rx="14" fill="#F1F1EE" stroke="#DAD6CF"/>
+        <text x="93" y="66" text-anchor="middle" font-family="Archivo,sans-serif" font-size="14" font-weight="600" fill="#5A6473">Old 3PL</text>
+        <text x="93" y="88" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="#8A93A3">fast movers ship on</text>
+        <!-- inventory -->
+        <rect x="18" y="214" width="150" height="86" rx="14" fill="#F1F1EE" stroke="#DAD6CF"/>
+        <text x="93" y="250" text-anchor="middle" font-family="Archivo,sans-serif" font-size="14" font-weight="600" fill="#5A6473">Your inventory</text>
+        <text x="93" y="272" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="#8A93A3">audited &amp; counted</text>
+        <!-- hub -->
+        <rect x="200" y="118" width="120" height="96" rx="16" fill="#FFF0E4" stroke="#FF6B15" stroke-width="1.6"/>
+        <text x="260" y="158" text-anchor="middle" font-family="Archivo,sans-serif" font-size="14.5" font-weight="700" fill="#D14E00">migratebay.</text>
+        <text x="260" y="178" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9" fill="#D14E00">plan · negotiate · verify</text>
+        <!-- new -->
+        <rect x="352" y="118" width="150" height="96" rx="14" fill="#101C2B"/>
+        <text x="427" y="156" text-anchor="middle" font-family="Archivo,sans-serif" font-size="14" font-weight="600" fill="#fff">Your shipbay</text>
+        <text x="427" y="176" text-anchor="middle" font-family="Archivo,sans-serif" font-size="14" font-weight="600" fill="#fff">warehouse</text>
+        <text x="427" y="196" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="9.5" fill="#5ED4A5">vetted &amp; managed</text>
+        <!-- flows -->
+        <path class="flowline" d="M168 73 C 200 73, 210 118, 232 118"/>
+        <path class="flowline" d="M168 257 C 200 257, 210 214, 232 214"/>
+        <path class="flowline" d="M320 166 L 352 166"/>
+        <!-- phase ticks -->
+        <g font-family="IBM Plex Mono,monospace" font-size="9.5" fill="#8A93A3">
+          <circle cx="60" cy="322" r="0"/>
+          <text x="20" y="322">P1 DOCUMENT</text>
+          <text x="150" y="322">P2 PLAN &amp; TEST</text>
+          <text x="290" y="322">P3 OPTIMIZE</text>
+          <text x="415" y="322">P4 RECOUP</text>
+        </g>
+        <rect x="18" y="306" width="484" height="3" rx="2" fill="#EEE"/>
+        <rect x="18" y="306" width="360" height="3" rx="2" fill="#FF6B15"/>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<!-- KPIS -->
+<section class="kpis">
+  <div class="wrap">
+    <div class="kpi-grid">
+      <div class="kpi"><b>1,000+<em>.</em></b><span>Orders/mo — where MigrateBay makes sense</span></div>
+      <div class="kpi"><b>Phase <em>0</em></b><span>Cost-benefit analysis first — we tell you if the move even makes sense</span></div>
+      <div class="kpi"><b>2<em> modes</em></b><span>Parallel run or phased transfer — matched to your catalog</span></div>
+      <div class="kpi"><b>1<em> dashboard</em></b><span>migratebay.dashboard tracks the whole transition live</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- PHASES -->
+<section class="phases" id="phases">
+  <div class="wrap">
+    <div class="sec-head" style="margin-bottom:0">
+      <span class="eyebrow">The program</span>
+      <h2>Four phases. One team coordinating everything<span class="dot">.</span></h2>
+      <p>Strategic phasing, inventory auditing, goods-in processing, system integration, quality verification, storage optimization — handled.</p>
+    </div>
+    <div class="phase-grid">
+      <div class="phase"><span class="pnum">PHASE 1</span><h3>Document</h3>
+        <p>Your current fulfillment costs, operational requirements, and contract exit obligations — then a straight <b>cost-benefit analysis</b>. If the move doesn't make sense, we tell you.</p></div>
+      <div class="phase"><span class="pnum">PHASE 2</span><h3>Plan &amp; test</h3>
+        <p>Migration timeline, internal and customer-facing comms, then a <b>parallel run</b> or <b>phased transfer</b> — validated on a subset before anything critical moves.</p></div>
+      <div class="phase"><span class="pnum">PHASE 3</span><h3>Optimize</h3>
+        <p>Once live, we track your KPIs against your <b>old provider's baseline</b> and run regular business reviews to catch drift early.</p></div>
+      <div class="phase"><span class="pnum">PHASE 4</span><h3>Recoup</h3>
+        <p>Win back the margin the transition cost you — <b>retail placement</b> for smaller brands, <b>data-driven scaling</b> off your fulfillment KPIs for larger ones.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- WHY EXPENSIVE -->
+<section class="why">
+  <div class="wrap why-grid">
+    <div>
+      <span class="eyebrow">Why we built this</span>
+      <h2>Switching costs became an accepted evil. We looked closer<span class="dot">.</span></h2>
+      <p class="big">A lot of people quietly make a lot of money every time a brand changes 3PLs — and almost no one questions what actually makes it so expensive. <b>We did.</b> It's cheaper to let us use our network and negotiate on your behalf than to pay the switching tax alone.</p>
+    </div>
+    <div class="savelist">
+      <div class="save"><span class="tick">✓</span><span><b>We negotiate rates on your behalf</b><small>Carrier, storage, and transfer pricing through our network relationships — not retail rates.</small></span></div>
+      <div class="save"><span class="tick">✓</span><span><b>Partial liquidation, where it wins</b><small>Sometimes moving a SKU costs more than it's worth. We model it and tell you.</small></span></div>
+      <div class="save"><span class="tick">✓</span><span><b>Timed to your low-inventory cycle</b><small>Transitioning at your inventory trough can cut transfer costs dramatically.</small></span></div>
+      <div class="save"><span class="tick">✓</span><span><b>Exit obligations mapped up front</b><small>No surprise termination fees — your contract exit is part of Phase 1.</small></span></div>
+    </div>
+  </div>
+</section>
+
+<!-- MODES -->
+<section class="modes">
+  <div class="wrap">
+    <div class="sec-head" style="margin-bottom:0">
+      <span class="eyebrow">Two migration modes</span>
+      <h2>A mistake should cost you a few units — never your best-seller<span class="dot">.</span></h2>
+    </div>
+    <div class="mode-grid">
+      <div class="mode">
+        <span class="mtag">Fastest cutover</span>
+        <h3>Parallel run</h3>
+        <p><b>Both providers operate simultaneously</b> for a defined window while you migrate a subset of SKUs first.</p>
+        <ul>
+          <li>Subset of SKUs moves first</li>
+          <li>Performance validated before the rest follows</li>
+          <li>Best for smaller, simpler catalogs</li>
+        </ul>
+      </div>
+      <div class="mode rec">
+        <span class="mtag">Recommended · 100+ SKUs</span>
+        <h3>Phased transfer</h3>
+        <p><b>Slow movers and new inbound go first.</b> Fast movers keep shipping from the incumbent — and flip last, once the new warehouse has proven itself.</p>
+        <ul>
+          <li>Slow inventory + new receipts migrate first</li>
+          <li>Best-sellers stay live until performance is proven</li>
+          <li>More coordination — which is exactly what we do</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DASHBOARD -->
+<section class="mdash">
+  <div class="wrap md-grid">
+    <div>
+      <span class="eyebrow">migratebay.dashboard</span>
+      <h2>Watch your migration happen — live<span class="dot">.</span></h2>
+      <p style="color:var(--muted);font-size:17px">Every MigrateBay client gets a live transition dashboard from day one.</p>
+      <ul class="md-list">
+        <li><span class="tick">✓</span><span><b>Transfer progress</b> — SKUs and units moved, in real time.</span></li>
+        <li><span class="tick">✓</span><span><b>KPIs vs your old baseline</b> — accuracy and transit times, side by side.</span></li>
+        <li><span class="tick">✓</span><span><b>Business review notes</b> — what we found, what we're fixing, every week.</span></li>
+      </ul>
+      <a class="btn btn-orange" href="start.html">Apply for an account</a>
+    </div>
+    <div class="dashmock">
+      <div class="dm-head">
+        <div class="brand">migratebay.dashboard — Acme Wellness</div>
+        <span class="pill">MIGRATION LIVE · WEEK 3</span>
+      </div>
+      <div class="dm-stats">
+        <div class="dstat"><b>62%</b><small>SKUs migrated</small></div>
+        <div class="dstat"><b>8,410</b><small>Units transferred</small></div>
+        <div class="dstat"><b>0</b><small>Stockouts caused</small></div>
+      </div>
+      <div class="bar-row"><div class="bl"><span>Slow movers → new warehouse</span><b>100%</b></div><div class="bar"><i style="width:100%"></i></div></div>
+      <div class="bar-row"><div class="bl"><span>New inbound receipts → new warehouse</span><b>100%</b></div><div class="bar"><i style="width:100%"></i></div></div>
+      <div class="bar-row"><div class="bl"><span>Fast movers → new warehouse</span><b>18%</b></div><div class="bar"><i style="width:18%"></i></div></div>
+      <div class="dm-note">Accuracy vs old baseline: <b>99.8% ▲</b> (was 98.1%) &nbsp;·&nbsp; Avg transit: <b>1.8 days ▲</b> (was 2.6) &nbsp;·&nbsp; illustrative demo data</div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<div class="cta">
+  <div class="cta-card">
+    <span class="eyebrow" style="justify-content:center;display:inline-flex">Built for 1,000+ orders/mo</span>
+    <h2>Find out what switching would actually cost you<span class="dot">.</span></h2>
+    <p>We start with a cost-benefit analysis on your numbers, your contract, your exit obligations &mdash; and if staying put is the right call, we&rsquo;ll say so. If we run your migration, pricing is agreed up front and folded into a 12-month partnership. No surprises.</p>
+    <a class="btn btn-orange" href="start.html">Apply for an account</a>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-legal">
+      <span class="foot-logo"><img src="assets/brand/01-horizontal.svg" alt="shipbay."></span>
+      <span>&copy; 2026 shipbay. All rights reserved. &middot; <a href="privacy.html" style="text-decoration:underline">Privacy</a> &middot; <a href="terms.html" style="text-decoration:underline">Terms</a> &middot; 115 Stryker Ln, Hillsborough Township, NJ</span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

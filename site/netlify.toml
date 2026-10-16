@@ -1,0 +1,96 @@
+# shipbay. — static site, no build step
+[build]
+  publish = "."
+
+# Clean URLs
+[[redirects]]
+  from = "/crm"
+  to = "/crm.html"
+  status = 200
+
+[[redirects]]
+  from = "/book"
+  to = "/book.html"
+  status = 200
+
+[[redirects]]
+  from = "/facility"
+  to = "/facility.html"
+  status = 200
+
+[[redirects]]
+  from = "/pricing"
+  to = "/pricing.html"
+  status = 200
+
+[[redirects]]
+  from = "/dashboard"
+  to = "/dashboard.html"
+  status = 200
+
+# Client portal is its own app (repo: /portal, Netlify project "shipbay-portal").
+# Change the target to https://portal.shipbay3pl.com once that domain is mapped.
+[[redirects]]
+  from = "/portal"
+  to = "https://shipbay-portal.netlify.app"
+  status = 302
+  force = true
+
+[[redirects]]
+  from = "/portal/*"
+  to = "https://shipbay-portal.netlify.app/:splat"
+  status = 302
+  force = true
+
+# legacy auth subdomain → client portal
+[[redirects]]
+  from = "https://auth.shipbay3pl.com/*"
+  to = "https://shipbay-portal.netlify.app/:splat"
+  status = 302
+  force = true
+
+[[redirects]]
+  from = "/privacy"
+  to = "/privacy.html"
+  status = 200
+
+[[redirects]]
+  from = "/terms"
+  to = "/terms.html"
+  status = 200
+
+[[redirects]]
+  from = "/migratebay"
+  to = "/migratebay.html"
+  status = 200
+
+[[redirects]]
+  from = "/start"
+  to = "/start.html"
+  status = 200
+
+[[redirects]]
+  from = "/get-started"
+  to = "/start.html"
+  status = 200
+
+# Legacy URLs from the shiphl / partner-network era
+[[redirects]]
+  from = "/migratehl"
+  to = "/migratebay.html"
+  status = 301
+
+[[redirects]]
+  from = "/migratehl.html"
+  to = "/migratebay.html"
+  status = 301
+
+[[redirects]]
+  from = "/network"
+  to = "/facility.html"
+  status = 301
+
+[[redirects]]
+  from = "/network.html"
+  to = "/facility.html"
+  status = 301

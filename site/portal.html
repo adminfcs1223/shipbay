@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign in — shipbay.dashboard</title>
+<link rel="icon" type="image/svg+xml" href="assets/brand/08-icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="js/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  :root{
+    --bg:#FFFFFF; --bg-soft:#F6F7F9; --line:#E6E8EC;
+    --ink:#101C2B; --muted:#5A6473; --muted-2:#8A93A3;
+    --orange:#FF6B15; --orange-soft:#D14E00; --orange-tint:#FFF0E4; --orange-hover:#E85E0A;
+    --green:#1E9E6F;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.55;-webkit-font-smoothing:antialiased;min-height:100vh}
+  a{color:inherit;text-decoration:none}
+  .split{display:grid;grid-template-columns:1fr 1fr;min-height:100vh}
+  /* brand side */
+  .brandside{position:relative;background:
+    radial-gradient(720px 460px at 85% -10%, rgba(255,107,21,.28) 0%, transparent 58%),
+    radial-gradient(560px 420px at 0% 105%, rgba(255,107,21,.16) 0%, transparent 55%), #101C2B;
+    color:#F6F5F1;padding:56px 60px;display:flex;flex-direction:column;overflow:hidden}
+  .brandside .logo img{height:44px;width:auto}
+  .brandside .tagline{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#8A93A3;margin-top:10px}
+  .brandside h1{font-family:'Archivo',sans-serif;font-size:clamp(28px,3vw,38px);font-weight:700;line-height:1.15;margin-top:auto}
+  .brandside h1 em{font-style:normal;color:#E87A33}
+  .brandside p.sub{color:#8A93A3;font-size:15px;margin-top:14px;max-width:420px}
+  .mock{margin-top:36px;background:#1B212B;border:1px solid #242C38;border-radius:14px;padding:18px;box-shadow:0 30px 70px rgba(0,0,0,.4)}
+  .mock .mh{display:flex;justify-content:space-between;align-items:center;margin-bottom:13px}
+  .mock .mh b{font-family:'Archivo',sans-serif;font-size:12.5px}
+  .mock .pill{font-family:'IBM Plex Mono',monospace;font-size:10px;padding:3px 10px;border-radius:99px;background:rgba(30,158,111,.2);color:#5ED4A5}
+  .mock .mstats{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+  .mock .ms{background:#101C2B;border-radius:10px;padding:11px 13px}
+  .mock .ms b{display:block;font-family:'Archivo',sans-serif;font-size:17px;color:#fff}
+  .mock .ms small{font-size:10.5px;color:#8A93A3}
+  .brandside .foot{margin-top:34px;font-size:12px;color:#5A6473}
+  /* form side */
+  .formside{display:flex;flex-direction:column;padding:44px 56px;background:var(--bg)}
+  .formside .top{display:flex;justify-content:flex-end;font-size:14px;color:var(--muted)}
+  .formside .top a{color:var(--orange-soft);font-weight:600}
+  .formbox{margin:auto;width:100%;max-width:400px}
+  .formbox h2{font-family:'Archivo',sans-serif;font-size:27px;font-weight:700;letter-spacing:-.01em}
+  .formbox .dot{color:var(--orange)}
+  .formbox p.lead{color:var(--muted);font-size:15px;margin:8px 0 30px}
+  .field{margin-bottom:16px}
+  .field label{display:block;font-size:13px;font-weight:600;margin-bottom:7px}
+  .field input{width:100%;padding:13px 15px;border:1.5px solid var(--line);border-radius:10px;font-family:'Inter',sans-serif;font-size:15px;color:var(--ink);background:#fff;transition:border-color .15s}
+  .field input:focus{outline:none;border-color:var(--orange)}
+  .row-between{display:flex;justify-content:space-between;align-items:center;margin:4px 0 22px;font-size:13.5px}
+  .row-between label{display:flex;align-items:center;gap:8px;color:var(--muted);cursor:pointer}
+  .row-between input{accent-color:var(--orange)}
+  .row-between a{color:var(--orange-soft);font-weight:600}
+  .btn{width:100%;display:inline-flex;justify-content:center;align-items:center;gap:9px;padding:14px;border:none;border-radius:10px;background:var(--orange);color:#fff;font-family:'Archivo',sans-serif;font-weight:600;font-size:15.5px;cursor:pointer;box-shadow:0 6px 20px rgba(255,107,21,.28);transition:background .15s}
+  .btn:hover{background:var(--orange-hover)}
+  .btn:disabled{opacity:.6;cursor:default}
+  .msg{display:none;margin:0 0 16px;padding:11px 14px;border-radius:9px;font-size:13.5px}
+  .msg.err{background:#FDECEA;border:1px solid #E8B4B0;color:#B03A33}
+  .msg.ok{background:rgba(30,158,111,.08);border:1px solid rgba(30,158,111,.35);color:#177A56}
+  .msg.show{display:block}
+  .signup-note{margin-top:26px;padding-top:20px;border-top:1px solid var(--line);font-size:13px;color:var(--muted-2);line-height:1.6}
+  .signup-note b{color:var(--muted)}
+  .formside .legal{text-align:center;font-size:12px;color:var(--muted-2)}
+  .formside .legal a{color:var(--muted)}
+  /* signed-in state */
+  .welcome{display:none;margin:auto;width:100%;max-width:440px;text-align:center}
+  .welcome.show{display:block}
+  .welcome .big{width:64px;height:64px;border-radius:50%;background:rgba(30,158,111,.1);color:var(--green);display:grid;place-items:center;margin:0 auto 20px}
+  .welcome h2{font-family:'Archivo',sans-serif;font-size:24px;font-weight:700}
+  .welcome p{color:var(--muted);font-size:15px;margin:10px 0 24px}
+  .welcome .card{background:var(--bg-soft);border:1px solid var(--line);border-radius:14px;padding:22px;text-align:left;font-size:14px;color:var(--muted);line-height:1.7}
+  .welcome .card b{color:var(--ink)}
+  .welcome .out{display:inline-block;margin-top:22px;font-size:14px;color:var(--orange-soft);font-weight:600;cursor:pointer;background:none;border:none;font-family:'Inter',sans-serif}
+  @media(max-width:900px){
+    .split{grid-template-columns:1fr}
+    .brandside{padding:40px 28px;min-height:280px}
+    .mock{display:none}
+    .formside{padding:36px 24px}
+  }
+</style>
+</head>
+<body>
+
+<div class="split">
+  <aside class="brandside">
+    <div>
+      <a class="logo" href="index.html"><img src="assets/brand/06-horizontal-reverse.svg" alt="shipbay."></a>
+      <div class="tagline">shipbay.dashboard — client portal</div>
+    </div>
+    <h1>Your whole operation,<br>one dashboard<em>.</em></h1>
+    <p class="sub">Live inventory, orders, and itemized billing across your shipbay warehouse — synced straight from your store.</p>
+    <div class="mock" aria-hidden="true">
+      <div class="mh"><b>shipbay.dashboard</b><span class="pill">PRODUCT PREVIEW</span></div>
+      <div class="mstats">
+        <div class="ms"><b>2,847</b><small>Orders today</small></div>
+        <div class="ms"><b>14,208</b><small>Units on hand</small></div>
+        <div class="ms"><b>99.8%</b><small>Accuracy — 30d</small></div>
+      </div>
+    </div>
+    <div class="foot">© 2026 shipbay. · 115 Stryker Ln, Hillsborough Township, NJ</div>
+  </aside>
+
+  <main class="formside">
+    <div class="top">New to shipbay?&nbsp;<a href="book.html">Book a free consultation →</a></div>
+
+    <div class="formbox" id="loginBox">
+      <h2>Sign in to your portal<span class="dot">.</span></h2>
+      <p class="lead">Track orders, inventory, and billing for your brand.</p>
+      <div class="msg err" id="errMsg"></div>
+      <div class="msg ok" id="okMsg"></div>
+      <form id="loginForm">
+        <div class="field"><label for="p-email">Work email</label><input id="p-email" type="email" required placeholder="you@yourbrand.com" autocomplete="username"></div>
+        <div class="field"><label for="p-pass">Password</label><input id="p-pass" type="password" required placeholder="••••••••••" autocomplete="current-password"></div>
+        <div class="row-between">
+          <label><input type="checkbox" id="p-remember" checked> Keep me signed in</label>
+          <a href="#" id="forgot">Forgot password?</a>
+        </div>
+        <button class="btn" type="submit" id="p-go">Sign in to shipbay.dashboard</button>
+      </form>
+      <div class="signup-note"><b>Don't have a login yet?</b> Portal access is created by your onboarding manager when your brand goes live with shipbay — or <a href="book.html" style="color:var(--orange-soft);font-weight:600">book a consultation</a> to get started.</div>
+    </div>
+
+    <div class="welcome" id="welcomeBox">
+      <div class="big"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>
+      <h2>Welcome back<span class="dot" style="color:var(--orange)">.</span></h2>
+      <p id="welcomeWho">Signed in.</p>
+      <div class="card">
+        <b>Your dashboard is being provisioned.</b><br>
+        Your account team is wiring this login to your brand's live workspace — store sync, inventory, and billing. You'll get an email the moment it's ready. Questions in the meantime? Reply to your onboarding thread or call your rep — a US-based team member answers in under 8 minutes during business hours.
+      </div>
+      <button class="out" id="signOut">Sign out</button>
+    </div>
+
+    <div class="legal">Trouble signing in? <a href="book.html">Contact us</a> · <a href="index.html">shipbay</a></div>
+  </main>
+</div>
+
+<script>
+  const C = window.SHIPBAY_CONFIG || {};
+  const LIVE = !!(C.SUPABASE_URL && C.SUPABASE_ANON_KEY && window.supabase);
+  const sb = LIVE ? window.supabase.createClient(C.SUPABASE_URL, C.SUPABASE_ANON_KEY) : null;
+  const $ = id => document.getElementById(id);
+  function err(m){ $('okMsg').classList.remove('show'); const e=$('errMsg'); e.textContent=m; e.classList.add('show'); }
+  function ok(m){ $('errMsg').classList.remove('show'); const e=$('okMsg'); e.textContent=m; e.classList.add('show'); }
+  function showWelcome(email){
+    $('loginBox').style.display='none';
+    $('welcomeBox').classList.add('show');
+    $('welcomeWho').textContent = email;
+  }
+  function showLogin(){
+    $('loginBox').style.display='block';
+    $('welcomeBox').classList.remove('show');
+  }
+  $('loginForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (!LIVE) { err('Sign-in is temporarily unavailable. Please try again shortly or contact your account team.'); return; }
+    const btn=$('p-go'); btn.disabled=true; btn.textContent='Signing in…';
+    const { data, error } = await sb.auth.signInWithPassword({ email: $('p-email').value.trim(), password: $('p-pass').value });
+    btn.disabled=false; btn.textContent='Sign in to shipbay.dashboard';
+    if (error) { err(error.message === 'Invalid login credentials' ? 'That email and password don’t match our records. Check both, or use “Forgot password?”' : error.message); return; }
+    showWelcome(data.user.email);
+  });
+  $('forgot').addEventListener('click', async e => {
+    e.preventDefault();
+    if (!LIVE) { err('Password reset is temporarily unavailable — contact your account team.'); return; }
+    const email = $('p-email').value.trim();
+    if (!email) { err('Enter your work email above first, then click "Forgot password?" again.'); return; }
+    const { error } = await sb.auth.resetPasswordForEmail(email);
+    if (error) err(error.message);
+    else ok('If that email has portal access, a reset link is on its way.');
+  });
+  $('signOut').addEventListener('click', async () => { if (sb) await sb.auth.signOut(); showLogin(); });
+  if (LIVE) sb.auth.getSession().then(({data:{session}}) => { if (session) showWelcome(session.user.email); });
+</script>
+
+</body>
+</html>

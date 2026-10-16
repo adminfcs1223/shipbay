@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Book a Call — shipbay.</title>
+<link rel="icon" type="image/svg+xml" href="assets/brand/08-icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#FFFFFF; --bg-soft:#F8F7F5; --line:#E8E6E1;
+    --ink:#101C2B; --muted:#5A6473; --muted-2:#8A93A3;
+    --orange:#FF6B15; --orange-soft:#D14E00; --orange-tint:#FAE3D0; --orange-hover:#E85E0A;
+    --green:#1E9E6F;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  img{max-width:100%;display:block}
+  .wrap{max-width:1200px;margin:0 auto;padding:0 24px}
+  h1,h2,h3{font-family:'Archivo',sans-serif;letter-spacing:-.01em}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  .dot{color:var(--orange)}
+  .eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:12.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--orange-soft);margin-bottom:16px}
+  .eyebrow::before{content:"";width:22px;height:2px;background:var(--orange)}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:16px 32px;border-radius:11px;font-weight:600;font-size:16px;font-family:'Archivo',sans-serif;transition:all .18s;cursor:pointer;border:none}
+  .btn-orange{background:var(--orange);color:#fff;box-shadow:0 8px 26px rgba(255,107,21,.32)}
+  .btn-orange:hover{background:var(--orange-hover);transform:translateY(-2px)}
+  .btn-outline{border:1.5px solid var(--ink);color:var(--ink);background:rgba(255,255,255,.6)}
+  .btn-outline:hover{background:var(--ink);color:#fff}
+  .watermark{position:absolute;pointer-events:none;user-select:none;opacity:.035;z-index:0}
+  .watermark img{width:100%;height:auto}
+  header{position:sticky;top:0;z-index:100;background:rgba(255,255,255,.92);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+  nav{display:flex;align-items:center;justify-content:space-between;height:76px}
+  .nav-logo img{height:38px;width:auto}
+  .nav-links{display:flex;gap:34px;font-size:15px;font-weight:500;color:var(--muted)}
+  .nav-links a:hover{color:var(--ink)}
+  .nav-links a.on{color:var(--ink);font-weight:600}
+  .nav-cta{display:flex;gap:14px;align-items:center}
+  .nav-cta .login{font-weight:600;font-size:15px;color:var(--muted)}
+  .nav-cta .btn{padding:11px 22px;font-size:15px}
+  h2{font-size:clamp(34px,4.2vw,52px);font-weight:700;line-height:1.1;color:var(--ink);margin-bottom:14px}
+  .sec-head{max-width:880px;margin-bottom:52px}
+  .sec-head p{font-size:18px;color:var(--muted);max-width:620px}
+  section{position:relative}
+  /* orange ambience */
+  .amb-r{background:radial-gradient(760px 420px at 92% 0%, var(--orange-tint) 0%, transparent 62%)}
+  .amb-l{background:radial-gradient(760px 420px at 6% 100%, var(--orange-tint) 0%, transparent 62%)}
+  .amb-c{background:radial-gradient(900px 460px at 50% -20%, var(--orange-tint) 0%, transparent 65%)}
+  /* map */
+  .state{fill:#F1EEE9;stroke:#DAD6CF;stroke-width:1;cursor:pointer;transition:fill .15s}
+  .state:hover{fill:#F6E3D4}
+  .state.sel{fill:var(--orange-tint);stroke:var(--orange)}
+  .wh-dot{fill:var(--orange);pointer-events:none}
+  .wh-halo{fill:none;stroke:var(--orange);stroke-width:1.4;opacity:0;transform-origin:center;animation:pulse 3.4s ease-out infinite;pointer-events:none}
+  @keyframes pulse{0%{opacity:.7;transform:scale(.4)}70%{opacity:0;transform:scale(2.4)}100%{opacity:0}}
+  .map-lab{font-family:'IBM Plex Mono',monospace;font-size:11px;fill:#8A93A3;pointer-events:none}
+  .map-lab.hq{fill:var(--orange-soft);font-weight:600}
+  footer{padding:70px 0 44px;border-top:1px solid var(--line);background:
+    radial-gradient(760px 420px at 90% 0%, var(--orange-tint) 0%, transparent 58%), radial-gradient(560px 360px at 4% 100%, #F7D9C466 0%, transparent 60%), var(--bg-soft)}
+  .foot-top{display:flex;justify-content:space-between;align-items:flex-end;gap:40px;margin-bottom:56px;flex-wrap:wrap}
+  .foot-slogan{font-family:'Archivo',sans-serif;font-weight:700;font-size:clamp(32px,3.8vw,48px);line-height:1.1;color:var(--ink)}
+  .foot-slogan small{display:block;font-family:'Inter',sans-serif;font-weight:400;font-size:15.5px;color:var(--muted);margin-top:12px}
+  .foot-cols{display:grid;grid-template-columns:repeat(4,1fr);gap:32px;padding-top:48px;border-top:1px solid var(--line)}
+  .foot-cols h4{font-size:13.5px;color:var(--muted-2);font-weight:600;margin-bottom:16px}
+  .foot-cols a{display:block;margin-bottom:11px;font-size:14.5px;color:var(--muted)}
+  .foot-cols a:hover{color:var(--ink)}
+  .foot-legal{margin-top:52px;padding-top:26px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted-2);line-height:1.7;display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;align-items:center}
+  .foot-logo img{height:26px;width:auto}
+  @media(max-width:960px){
+    .nav-links,.nav-cta .login{display:none}
+    .foot-cols{grid-template-columns:1fr 1fr}
+  }
+  @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+  .book-hero{padding:80px 0 34px;text-align:center;background:radial-gradient(820px 440px at 50% -25%, var(--orange-tint) 0%, transparent 60%), radial-gradient(500px 360px at 100% 100%, #F7D9C455 0%, transparent 60%), var(--bg)}
+  .book-hero h1{font-size:clamp(36px,4.6vw,54px);font-weight:700}
+  .book-hero p{margin:16px auto 0;font-size:17px;color:var(--muted);max-width:540px}
+  .offer-line{display:inline-flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--orange);border-radius:99px;padding:9px 20px 9px 11px;font-size:14px;margin-bottom:22px;box-shadow:0 4px 14px rgba(255,107,21,.12)}
+  .offer-line .k{background:var(--orange);color:#fff;font-family:'Archivo',sans-serif;font-weight:700;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;padding:5px 12px;border-radius:99px}
+  .book-wrap{max-width:760px;margin:36px auto 110px;padding:0 24px}
+  .form-card{background:#fff;border:1px solid var(--line);border-radius:20px;padding:38px;box-shadow:0 24px 60px rgba(16,28,43,.08)}
+  .steps-ind{display:flex;gap:8px;justify-content:center;margin-bottom:30px}
+  .sdot{width:34px;height:5px;border-radius:99px;background:var(--line);transition:background .2s}
+  .sdot.on{background:var(--orange)}
+  .bstep{display:none}
+  .bstep.on{display:block;animation:fadeu .3s ease}
+  @keyframes fadeu{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .bstep h3{font-family:'Archivo',sans-serif;font-size:21px;margin-bottom:6px}
+  .bstep .sub{font-size:14px;color:var(--muted);margin-bottom:22px}
+  .asap{display:flex;align-items:center;justify-content:space-between;gap:14px;border:2px solid var(--orange);background:linear-gradient(120deg,var(--orange-tint),#fff 70%);border-radius:14px;padding:16px 20px;cursor:pointer;margin-bottom:22px;transition:all .15s}
+  .asap:hover{box-shadow:0 8px 24px rgba(255,107,21,.18)}
+  .asap.sel{background:var(--orange);color:#fff}
+  .asap.sel small{color:#FBE3D2}
+  .asap b{font-family:'Archivo',sans-serif;font-size:16.5px;display:block}
+  .asap small{font-size:12.5px;color:var(--muted)}
+  .asap .zap{font-size:22px}
+  .or-div{display:flex;align-items:center;gap:14px;margin-bottom:18px;color:var(--muted-2);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+  .or-div::before,.or-div::after{content:"";flex:1;height:1px;background:var(--line)}
+  .days{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:22px}
+  .day{border:1.5px solid var(--line);border-radius:12px;padding:12px 6px;text-align:center;cursor:pointer;transition:all .15s;background:#fff}
+  .day:hover{border-color:var(--orange)}
+  .day.sel{border-color:var(--orange);background:var(--orange-tint)}
+  .day b{display:block;font-family:'Archivo',sans-serif;font-size:16px}
+  .day small{font-size:11.5px;color:var(--muted-2)}
+  .slots{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .slot{border:1.5px solid var(--line);border-radius:10px;padding:11px 6px;text-align:center;font-size:14px;font-weight:600;cursor:pointer;transition:all .15s;background:#fff;color:var(--ink)}
+  .slot:hover{border-color:var(--orange)}
+  .slot.sel{background:var(--orange);border-color:var(--orange);color:#fff}
+  .bnav{display:flex;justify-content:space-between;margin-top:28px;gap:12px}
+  .bnav .btn{padding:13px 26px;font-size:15px}
+  .btn.ghost{background:none;border:1.5px solid var(--line);color:var(--muted)}
+  .btn.ghost:hover{border-color:var(--ink);color:var(--ink)}
+  .btn[disabled]{opacity:.4;pointer-events:none}
+  .frow{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .field{margin-bottom:16px}
+  .field label{display:block;font-size:13px;font-weight:600;margin-bottom:7px}
+  .field input,.field select,.field textarea{width:100%;padding:13px 15px;border:1.5px solid var(--line);border-radius:10px;font-family:'Inter',sans-serif;font-size:15px;background:#fff;transition:border-color .15s}
+  .field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--orange)}
+  .field textarea{resize:vertical;min-height:80px}
+  .picked{background:var(--orange-tint);border:1px solid var(--orange);border-radius:11px;padding:12px 16px;font-size:14px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center}
+  .picked b{font-family:'Archivo',sans-serif}
+  .picked button{background:none;border:none;color:var(--orange-soft);font-weight:600;cursor:pointer;font-size:13px;font-family:'Inter',sans-serif}
+  .form-ok{text-align:center;padding:26px 0 8px}
+  .form-ok .big{width:64px;height:64px;border-radius:50%;background:rgba(30,158,111,.1);color:var(--green);display:grid;place-items:center;margin:0 auto 18px}
+  .form-ok h3{font-size:23px;margin-bottom:8px}
+  .form-ok p{color:var(--muted);font-size:15px;max-width:420px;margin:0 auto}
+  .expect{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:32px}
+  .exp{background:var(--bg-soft);border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center}
+  .exp b{display:block;font-family:'Archivo',sans-serif;font-size:14px;margin-bottom:4px}
+  .exp small{font-size:12px;color:var(--muted-2)}
+  @media(max-width:700px){.frow{grid-template-columns:1fr}.days{grid-template-columns:repeat(3,1fr)}.slots{grid-template-columns:repeat(2,1fr)}.expect{grid-template-columns:1fr}}
+</style>
+<script src="js/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+</head>
+<body>
+
+<!-- Static form so Netlify registers "consultation" at deploy time (backup lead capture) -->
+<form name="consultation" data-netlify="true" netlify-honeypot="bot-field" hidden>
+  <input name="bot-field"><input name="name"><input name="email"><input name="brand">
+  <input name="phone"><input name="volume"><input name="current"><input name="notes"><input name="slot">
+</form>
+
+<header>
+  <div class="wrap">
+    <nav>
+      <a class="nav-logo" href="index.html"><img src="assets/brand/01-horizontal.svg" alt="shipbay."></a>
+      <div class="nav-links">
+        <a href="facility.html">Our Facilities</a>
+        <a href="pricing.html">Pricing</a>
+        <a href="index.html#how">How it works</a>
+        <a href="dashboard.html">Dashboard</a>
+      </div>
+      <div class="nav-cta">
+        <a class="login" href="portal.html">Log in</a>
+        <a class="btn btn-orange" href="start.html">Apply for an account</a>
+      </div>
+    </nav>
+  </div>
+</header>
+<div class="book-hero">
+  <div class="wrap">
+    <div class="offer-line"><span class="k">MigrateBay</span> Switching plan &amp; cost-benefit analysis — free, no commitment</div>
+    <h1>Book a call<span class="dot">.</span></h1>
+    <p>Pick a time. A US-based logistics specialist calls you — a real person, not a queue.</p>
+  </div>
+</div>
+
+<!-- Netlify Forms detection (hidden) -->
+<form name="consultation" netlify netlify-honeypot="bot-field" hidden>
+  <input name="name"><input name="email"><input name="brand"><input name="phone">
+  <input name="volume"><input name="current"><input name="notes"><input name="slot">
+</form>
+
+<div class="book-wrap">
+  <div class="form-card">
+    <div class="steps-ind"><span class="sdot on" id="sd1"></span><span class="sdot" id="sd2"></span><span class="sdot" id="sd3"></span></div>
+
+    <!-- STEP 1: calendar -->
+    <div class="bstep on" id="step1">
+      <div class="asap" id="asapBtn" onclick="pickAsap()">
+        <span class="zap">⚡</span>
+        <span style="flex:1"><b>As soon as possible</b><small>Next available specialist calls you during business hours</small></span>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </div>
+      <div class="or-div">or pick a time</div>
+      <h3>Choose a day<span class="dot">.</span></h3>
+      <p class="sub">Next available slots — all times Eastern.</p>
+      <div class="days" id="days"></div>
+      <h3 style="font-size:17px">Choose a time<span class="dot">.</span></h3>
+      <div class="slots" id="slots"></div>
+      <div class="bnav">
+        <span></span>
+        <button class="btn btn-orange" id="toStep2" disabled onclick="goStep(2)">Continue →</button>
+      </div>
+    </div>
+
+    <!-- STEP 2: details -->
+    <div class="bstep" id="step2">
+      <div class="picked"><span>📅 <b id="pickedLabel"></b> ET</span><button onclick="goStep(1)">Change</button></div>
+      <h3>Your details<span class="dot">.</span></h3>
+      <p class="sub">So the right expert takes your call.</p>
+      <form id="bookform" onsubmit="return submitBook(event)">
+        <div class="frow">
+          <div class="field"><label for="f-name">Full name</label><input id="f-name" required placeholder="Jordan Smith"></div>
+          <div class="field"><label for="f-email">Work email</label><input id="f-email" type="email" required placeholder="jordan@brand.com"></div>
+        </div>
+        <div class="frow">
+          <div class="field"><label for="f-brand">Brand / company</label><input id="f-brand" required placeholder="Acme Wellness"></div>
+          <div class="field"><label for="f-phone">Phone</label><input id="f-phone" type="tel" placeholder="(555) 555-5555"></div>
+        </div>
+        <div class="frow">
+          <div class="field"><label for="f-vol">Monthly orders</label>
+            <select id="f-vol" required><option value="">Select…</option><option>Under 500</option><option>500 – 2,000</option><option>2,000 – 10,000</option><option>10,000 – 50,000</option><option>50,000+</option></select>
+          </div>
+          <div class="field"><label for="f-cur">Current setup</label>
+            <select id="f-cur" required><option value="">Select…</option><option>Self-fulfilling</option><option>Using another 3PL</option><option>Amazon FBA only</option><option>Launching soon</option></select>
+          </div>
+        </div>
+        <div class="field"><label for="f-notes">What are you shipping? (optional)</label><textarea id="f-notes" placeholder="Products, channels, anything special — cold chain, kitting, oversized…"></textarea></div>
+        <div class="bnav">
+          <button type="button" class="btn ghost" onclick="goStep(1)">← Back</button>
+          <button class="btn btn-orange" type="submit">Confirm my consultation</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- STEP 3: confirmation -->
+    <div class="bstep" id="step3">
+      <div class="form-ok">
+        <div class="big"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>
+        <h3>You're booked<span class="dot">.</span></h3>
+        <p id="confirmCopy">A US-based logistics specialist will call you at your chosen time — and confirm by email.</p>
+      </div>
+    </div>
+  </div>
+  <div class="expect">
+    <div class="exp"><b>Exact numbers</b><small>Your catalog priced line by line</small></div>
+    <div class="exp"><b>Real cost analysis</b><small>Line-item pricing, no teaser rates</small></div>
+    <div class="exp"><b>Free switching plan</b><small>We minimize the cost to the max</small></div>
+  </div>
+</div>
+<footer>
+  <div class="wrap">
+    <div class="foot-top">
+      <div class="foot-slogan">One partner.<br>Problem solved<span class="dot">.</span>
+        <small>115 Stryker Ln, Bldg 4 Unit 10, Hillsborough Township, NJ 08844 &middot; Fulfillment under one roof.</small>
+      </div>
+      <a class="btn btn-orange" href="book.html">Book a call</a>
+    </div>
+    <div class="foot-cols">
+      <div>
+        <h4>Facility</h4>
+        <a href="facility.html">Our facilities</a>
+        <a href="pricing.html">Pricing</a>
+        <a href="index.html#how">How it works</a>
+        <a href="book.html">Become a network facility</a>
+      </div>
+      <div>
+        <h4>Platform</h4>
+        <a href="dashboard.html">shipbay.dashboard</a>
+        <a href="dashboard.html#integrations">Integrations</a>
+        <a href="dashboard.html#wms">WMS features</a>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <a href="#">About</a>
+        <a href="#">Pricing</a>
+        <a href="book.html">Contact</a>
+        <a href="crm.html">Sales team login</a>
+      </div>
+      <div>
+        <h4>The warehouse</h4>
+        <a href="facility.html">115 Stryker Ln, Bldg 4 Unit 10</a>
+        <a href="facility.html">Hillsborough Township, NJ 08844</a>
+        <a href="book.html">Book a call</a>
+      </div>
+    </div>
+    <div class="foot-legal">
+      <span class="foot-logo"><img src="assets/brand/01-horizontal.svg" alt="shipbay."></span>
+      <span>&copy; 2026 shipbay. All rights reserved. &middot; <a href="privacy.html" style="color:inherit;text-decoration:underline">Privacy</a> &middot; <a href="terms.html" style="color:inherit;text-decoration:underline">Terms</a></span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // build next 5 business days
+  const daysEl = document.getElementById('days');
+  const slotsEl = document.getElementById('slots');
+  const times = ['9:00 AM','9:30 AM','10:00 AM','11:00 AM','12:00 PM','1:30 PM','2:00 PM','3:00 PM','4:00 PM','4:30 PM'];
+  let selDay = null, selTime = null, asap = false;
+  function pickAsap() {
+    asap = true; selDay = new Date(); selTime = 'ASAP';
+    document.getElementById('asapBtn').classList.add('sel');
+    document.querySelectorAll('.day,.slot').forEach(x=>x.classList.remove('sel'));
+    check();
+    goStep(2);
+  }
+  const fmtD = d => d.toLocaleDateString('en-US', {weekday:'short'});
+  const fmtN = d => d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+  const days = [];
+  let cur = new Date();
+  while (days.length < 5) {
+    cur = new Date(cur.getTime() + 86400000);
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6) days.push(new Date(cur));
+  }
+  days.forEach((d,i) => {
+    const el = document.createElement('div');
+    el.className = 'day'; el.innerHTML = `<small>${fmtD(d)}</small><b>${fmtN(d)}</b>`;
+    el.onclick = () => {
+      asap = false; document.getElementById('asapBtn').classList.remove('sel');
+      document.querySelectorAll('.day').forEach(x=>x.classList.remove('sel'));
+      el.classList.add('sel'); selDay = d; check();
+    };
+    daysEl.appendChild(el);
+  });
+  times.forEach(t => {
+    const el = document.createElement('div');
+    el.className = 'slot'; el.textContent = t;
+    el.onclick = () => {
+      asap = false; document.getElementById('asapBtn').classList.remove('sel');
+      document.querySelectorAll('.slot').forEach(x=>x.classList.remove('sel'));
+      el.classList.add('sel'); selTime = t; check();
+    };
+    slotsEl.appendChild(el);
+  });
+  function check() {
+    document.getElementById('toStep2').disabled = !(selDay && selTime);
+  }
+  function goStep(n) {
+    [1,2,3].forEach(i => {
+      document.getElementById('step'+i).classList.toggle('on', i===n);
+      document.getElementById('sd'+i).classList.toggle('on', i<=n);
+    });
+    if (n===2) document.getElementById('pickedLabel').textContent = asap
+      ? 'As soon as possible — next available expert'
+      : selDay.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}) + ' · ' + selTime;
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+  async function submitBook(e) {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Booking…'; }
+    const lead = {
+      name: document.getElementById('f-name').value,
+      email: document.getElementById('f-email').value,
+      brand: document.getElementById('f-brand').value,
+      phone: document.getElementById('f-phone').value,
+      volume: document.getElementById('f-vol').value,
+      current: document.getElementById('f-cur').value,
+      notes: document.getElementById('f-notes').value,
+      slot: asap ? 'ASAP' : (selDay.toDateString() + ' ' + selTime),
+      source: 'website', created: new Date().toISOString(), stage: 'new'
+    };
+    // 1) Primary capture: Supabase — the lead lands in the CRM pipeline instantly.
+    try {
+      const C = window.SHIPBAY_CONFIG || {};
+      if (C.SUPABASE_URL && C.SUPABASE_ANON_KEY && window.supabase) {
+        const sb = window.supabase.createClient(C.SUPABASE_URL, C.SUPABASE_ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+        const { error } = await sb.from('leads').insert({
+          name: lead.name, email: lead.email, brand: lead.brand, phone: lead.phone,
+          volume: lead.volume, current_setup: lead.current, notes: lead.notes,
+          slot: lead.slot, source: 'website', stage: 'new',
+          activity: [{ t: 'Lead created from website booking', when: new Date().toISOString() }]
+        });
+        if (error) console.warn('Supabase insert failed:', error.message);
+        else console.log('Lead saved to CRM pipeline.');
+      } else {
+        console.warn('Supabase not configured or supabase-js not loaded — using backup capture only.');
+      }
+    } catch (err) { console.warn('Supabase capture skipped:', err); }
+    if (btn) { btn.disabled = false; btn.textContent = 'Book my free call'; }
+    // 2) Backup capture: Netlify Forms (works on any Netlify deploy, no backend needed).
+    const fd = new URLSearchParams();
+    fd.append('form-name','consultation');
+    Object.entries({name:lead.name,email:lead.email,brand:lead.brand,phone:lead.phone,volume:lead.volume,current:lead.current,notes:lead.notes,slot:lead.slot}).forEach(([k,v])=>fd.append(k,v||''));
+    fetch('/', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:fd.toString()}).catch(()=>{});
+    document.getElementById('confirmCopy').innerHTML = asap
+      ? `<b>As soon as possible</b><br>A US-based logistics specialist will call you shortly during business hours.`
+      : `<b>${document.getElementById('pickedLabel').textContent} ET</b><br>A US-based logistics specialist will call you then — and confirm by email.`;
+    goStep(3);
+    return false;
+  }
+</script>
+
+</body>
+</html>

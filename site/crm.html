@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>shipbay crm — Sales Pipeline</title>
+<link rel="icon" type="image/svg+xml" href="assets/brand/08-icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#FFFFFF; --bg-soft:#F8F7F5; --line:#E8E6E1;
+    --ink:#101C2B; --muted:#5A6473; --muted-2:#8A93A3;
+    --orange:#FF6B15; --orange-soft:#D14E00; --orange-tint:#FAE3D0; --orange-hover:#E85E0A;
+    --green:#1E9E6F;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  img{max-width:100%;display:block}
+  .wrap{max-width:1200px;margin:0 auto;padding:0 24px}
+  h1,h2,h3{font-family:'Archivo',sans-serif;letter-spacing:-.01em}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  .dot{color:var(--orange)}
+  .eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:12.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--orange-soft);margin-bottom:16px}
+  .eyebrow::before{content:"";width:22px;height:2px;background:var(--orange)}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:16px 32px;border-radius:11px;font-weight:600;font-size:16px;font-family:'Archivo',sans-serif;transition:all .18s;cursor:pointer;border:none}
+  .btn-orange{background:var(--orange);color:#fff;box-shadow:0 8px 26px rgba(255,107,21,.32)}
+  .btn-orange:hover{background:var(--orange-hover);transform:translateY(-2px)}
+  .btn-outline{border:1.5px solid var(--ink);color:var(--ink);background:rgba(255,255,255,.6)}
+  .btn-outline:hover{background:var(--ink);color:#fff}
+  .watermark{position:absolute;pointer-events:none;user-select:none;opacity:.035;z-index:0}
+  .watermark img{width:100%;height:auto}
+  header{position:sticky;top:0;z-index:100;background:rgba(255,255,255,.92);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+  nav{display:flex;align-items:center;justify-content:space-between;height:76px}
+  .nav-logo img{height:38px;width:auto}
+  .nav-links{display:flex;gap:34px;font-size:15px;font-weight:500;color:var(--muted)}
+  .nav-links a:hover{color:var(--ink)}
+  .nav-links a.on{color:var(--ink);font-weight:600}
+  .nav-cta{display:flex;gap:14px;align-items:center}
+  .nav-cta .login{font-weight:600;font-size:15px;color:var(--muted)}
+  .nav-cta .btn{padding:11px 22px;font-size:15px}
+  h2{font-size:clamp(34px,4.2vw,52px);font-weight:700;line-height:1.1;color:var(--ink);margin-bottom:14px}
+  .sec-head{max-width:880px;margin-bottom:52px}
+  .sec-head p{font-size:18px;color:var(--muted);max-width:620px}
+  section{position:relative}
+  /* orange ambience */
+  .amb-r{background:radial-gradient(760px 420px at 92% 0%, var(--orange-tint) 0%, transparent 62%)}
+  .amb-l{background:radial-gradient(760px 420px at 6% 100%, var(--orange-tint) 0%, transparent 62%)}
+  .amb-c{background:radial-gradient(900px 460px at 50% -20%, var(--orange-tint) 0%, transparent 65%)}
+  /* map */
+  .state{fill:#F1EEE9;stroke:#DAD6CF;stroke-width:1;cursor:pointer;transition:fill .15s}
+  .state:hover{fill:#F6E3D4}
+  .state.sel{fill:var(--orange-tint);stroke:var(--orange)}
+  .wh-dot{fill:var(--orange);pointer-events:none}
+  .wh-halo{fill:none;stroke:var(--orange);stroke-width:1.4;opacity:0;transform-origin:center;animation:pulse 3.4s ease-out infinite;pointer-events:none}
+  @keyframes pulse{0%{opacity:.7;transform:scale(.4)}70%{opacity:0;transform:scale(2.4)}100%{opacity:0}}
+  .map-lab{font-family:'IBM Plex Mono',monospace;font-size:11px;fill:#8A93A3;pointer-events:none}
+  .map-lab.hq{fill:var(--orange-soft);font-weight:600}
+  footer{padding:70px 0 44px;border-top:1px solid var(--line);background:
+    radial-gradient(760px 420px at 90% 0%, var(--orange-tint) 0%, transparent 58%), radial-gradient(560px 360px at 4% 100%, #F7D9C466 0%, transparent 60%), var(--bg-soft)}
+  .foot-top{display:flex;justify-content:space-between;align-items:flex-end;gap:40px;margin-bottom:56px;flex-wrap:wrap}
+  .foot-slogan{font-family:'Archivo',sans-serif;font-weight:700;font-size:clamp(32px,3.8vw,48px);line-height:1.1;color:var(--ink)}
+  .foot-slogan small{display:block;font-family:'Inter',sans-serif;font-weight:400;font-size:15.5px;color:var(--muted);margin-top:12px}
+  .foot-cols{display:grid;grid-template-columns:repeat(4,1fr);gap:32px;padding-top:48px;border-top:1px solid var(--line)}
+  .foot-cols h4{font-size:13.5px;color:var(--muted-2);font-weight:600;margin-bottom:16px}
+  .foot-cols a{display:block;margin-bottom:11px;font-size:14.5px;color:var(--muted)}
+  .foot-cols a:hover{color:var(--ink)}
+  .foot-legal{margin-top:52px;padding-top:26px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted-2);line-height:1.7;display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;align-items:center}
+  .foot-logo img{height:26px;width:auto}
+  @media(max-width:960px){
+    .nav-links,.nav-cta .login{display:none}
+    .foot-cols{grid-template-columns:1fr 1fr}
+  }
+  @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+  body{background:#F3F4F6}
+  .crm{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+  /* sidebar */
+  .side{background:var(--ink);color:#C6CCD6;padding:22px 16px;display:flex;flex-direction:column;gap:4px}
+  .side .logo{display:flex;align-items:center;gap:10px;padding:6px 10px 22px;font-family:'Archivo',sans-serif;font-weight:700;color:#fff;font-size:16px}
+  .side .logo img{height:30px;width:30px;border-radius:8px}
+  .side a{display:flex;align-items:center;gap:11px;padding:11px 12px;border-radius:9px;font-size:14px;font-weight:500;color:#9AA3B2;transition:all .15s}
+  .side a:hover{background:#1B212B;color:#fff}
+  .side a.on{background:var(--orange);color:#fff;font-weight:600}
+  .side .grow{flex:1}
+  .side .demo{font-size:11px;color:#6B7484;padding:12px;border:1px dashed #39445466;border-radius:10px;line-height:1.5}
+  /* top */
+  .main{display:flex;flex-direction:column;min-width:0}
+  .topbar{background:#fff;border-bottom:1px solid var(--line);padding:14px 26px;display:flex;align-items:center;gap:16px}
+  .topbar h1{font-size:19px;font-family:'Archivo',sans-serif;font-weight:700}
+  .search{flex:1;max-width:340px;position:relative}
+  .search input{width:100%;padding:10px 14px 10px 38px;border:1.5px solid var(--line);border-radius:10px;font-size:14px;font-family:'Inter',sans-serif}
+  .search input:focus{outline:none;border-color:var(--orange)}
+  .search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted-2)}
+  .topbar .sp{flex:1}
+  .tbtn{padding:10px 18px;border-radius:9px;font-weight:600;font-size:13.5px;font-family:'Archivo',sans-serif;cursor:pointer;border:1.5px solid var(--line);background:#fff;color:var(--ink);transition:all .15s}
+  .tbtn:hover{border-color:var(--ink)}
+  .tbtn.orange{background:var(--orange);border-color:var(--orange);color:#fff}
+  .tbtn.orange:hover{background:var(--orange-hover)}
+  /* stats */
+  .statsrow{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:20px 26px 6px}
+  .scard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .scard b{display:block;font-family:'Archivo',sans-serif;font-size:26px;font-weight:700}
+  .scard small{font-size:12px;color:var(--muted-2)}
+  .scard .sla{color:var(--green);font-size:11.5px;font-weight:600}
+  .scard .sla.bad{color:#D14343}
+  /* board */
+  .board{display:grid;grid-template-columns:repeat(5,minmax(230px,1fr));gap:14px;padding:20px 26px 34px;overflow-x:auto;align-items:start}
+  .col{background:#EBEDF0;border-radius:14px;padding:12px;min-height:200px}
+  .col-h{display:flex;justify-content:space-between;align-items:center;padding:2px 6px 12px;font-family:'Archivo',sans-serif;font-weight:600;font-size:13.5px}
+  .col-h .cnt{background:#fff;border-radius:99px;padding:1px 10px;font-size:12px;color:var(--muted)}
+  .col.over{outline:2px dashed var(--orange);outline-offset:-4px}
+  .lead{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:grab;transition:box-shadow .15s}
+  .lead:hover{box-shadow:0 8px 22px rgba(16,28,43,.1)}
+  .lead.dragging{opacity:.5}
+  .lead .l-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+  .lead b{font-size:14px;display:block}
+  .lead .brand{font-size:12.5px;color:var(--muted);margin-bottom:8px}
+  .lead .meta{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+  .tag{font-family:'IBM Plex Mono',monospace;font-size:10px;padding:3px 8px;border-radius:99px;background:#F3F4F6;color:var(--muted)}
+  .tag.hot{background:var(--orange-tint);color:var(--orange-soft)}
+  .lead .l-foot{display:flex;justify-content:space-between;align-items:center}
+  .rep-sel{font-size:11.5px;border:1px solid var(--line);border-radius:8px;padding:4px 6px;font-family:'Inter',sans-serif;color:var(--muted);background:#fff;max-width:120px}
+  .l-av{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff;font-family:'Archivo',sans-serif}
+  .l-av.unassigned{background:#C9CED6;color:#5A6473}
+  /* drawer */
+  .drawer-veil{position:fixed;inset:0;background:rgba(16,28,43,.4);z-index:150;display:none}
+  .drawer-veil.open{display:block}
+  .drawer{position:fixed;top:0;right:-460px;width:440px;max-width:92vw;height:100vh;background:#fff;z-index:160;box-shadow:-20px 0 60px rgba(0,0,0,.2);transition:right .25s ease;display:flex;flex-direction:column}
+  .drawer.open{right:0}
+  .d-head{padding:22px 24px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:flex-start}
+  .d-head h3{font-family:'Archivo',sans-serif;font-size:19px}
+  .d-head small{color:var(--muted)}
+  .d-head .mx{width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:#fff;cursor:pointer;color:var(--muted)}
+  .d-body{padding:20px 24px;overflow-y:auto;flex:1}
+  .d-row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #F3F4F6;font-size:13.5px}
+  .d-row span{color:var(--muted)}
+  .d-row b{text-align:right}
+  .d-sec{font-family:'Archivo',sans-serif;font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-2);margin:20px 0 10px}
+  .note{background:#F8F7F5;border:1px solid var(--line);border-radius:10px;padding:10px 13px;font-size:13px;margin-bottom:8px}
+  .note small{display:block;color:var(--muted-2);font-size:11px;margin-top:4px}
+  .d-foot{padding:16px 24px;border-top:1px solid var(--line);display:flex;gap:10px}
+  .d-foot input{flex:1;padding:11px 13px;border:1.5px solid var(--line);border-radius:9px;font-size:13.5px;font-family:'Inter',sans-serif}
+  .d-foot input:focus{outline:none;border-color:var(--orange)}
+  /* modal add lead */
+  .m-veil{position:fixed;inset:0;background:rgba(16,28,43,.5);z-index:170;display:none;align-items:center;justify-content:center;padding:20px}
+  .m-veil.open{display:flex}
+  .m-card{background:#fff;border-radius:18px;width:100%;max-width:480px;padding:32px}
+  .m-card h3{font-family:'Archivo',sans-serif;font-size:20px;margin-bottom:18px}
+  .m-card .frow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .m-card .field{margin-bottom:13px}
+  .m-card label{display:block;font-size:12.5px;font-weight:600;margin-bottom:5px}
+  .m-card input,.m-card select{width:100%;padding:11px 13px;border:1.5px solid var(--line);border-radius:9px;font-size:14px;font-family:'Inter',sans-serif}
+  .m-card input:focus,.m-card select:focus{outline:none;border-color:var(--orange)}
+  .m-card .actions{display:flex;justify-content:flex-end;gap:10px;margin-top:8px}
+  .banner{margin:18px 26px 0;background:var(--orange-tint);border:1px solid var(--orange);border-radius:12px;padding:12px 18px;font-size:13px;color:var(--orange-soft)}
+  .banner b{color:var(--ink)}
+  @media(max-width:900px){.crm{grid-template-columns:1fr}.side{flex-direction:row;overflow-x:auto;align-items:center}.side .grow,.side .demo{display:none}.statsrow{grid-template-columns:1fr 1fr}}
+</style>
+<script src="js/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+</head>
+<body>
+
+<!-- team login (shown in live mode when signed out) -->
+<div class="m-veil" id="loginModal" style="background:rgba(16,28,43,.92);backdrop-filter:blur(6px)">
+  <div class="m-card" style="max-width:400px;text-align:center">
+    <h3 style="margin-bottom:4px">shipbay<span class="dot">.</span>salesdesk</h3>
+    <p style="font-size:12.5px;color:#8A93A3;margin-bottom:20px;font-family:'IBM Plex Mono',monospace;letter-spacing:.1em">SALES TEAM SIGN IN</p>
+    <form onsubmit="return doLogin(event)">
+      <div class="field"><input id="login-email" type="email" required placeholder="you@shipbay" autocomplete="username"></div>
+      <div class="field"><input id="login-pass" type="password" required placeholder="Password" autocomplete="current-password"></div>
+      <p id="login-err" style="display:none;color:#D9534F;font-size:13px;margin-bottom:10px"></p>
+      <button class="tbtn orange" type="submit" style="width:100%;justify-content:center">Sign in</button>
+    </form>
+    <p style="font-size:11.5px;color:#8A93A3;margin-top:16px;line-height:1.6">Accounts are created by your admin in Supabase → Authentication → Users.</p>
+    <a href="index.html" style="display:inline-block;margin-top:12px;font-size:13px;color:#8A93A3">← Back to site</a>
+  </div>
+</div>
+
+<div class="crm">
+  <aside class="side">
+    <div class="logo"><img src="assets/brand/08-icon.svg" alt="">shipbay crm</div>
+    <a class="on" href="#"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg> Opportunities</a>
+    <a href="#"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg> Contacts</a>
+    <a href="#"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Calls</a>
+    <a href="#"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20v-6M6 20v-10M18 20v-4"/><path d="M3 20h18"/></svg> Reports</a>
+    <a href="#" onclick="document.getElementById('cmsModal').classList.add('open');return false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> Website</a>
+    <a href="#"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Settings</a>
+    <div class="grow"></div>
+    <div class="demo" id="modeBox"><b style="color:#FFA36B">DEMO MODE</b><br>Connect Supabase to receive live leads from book.html. All site content — offers, stats, testimonials — is edited under <b style="color:#fff">Website</b> and published to the live site.</div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <h1>Sales Pipeline</h1>
+      <div class="search">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+        <input id="q" placeholder="Search leads, brands…" oninput="render()">
+      </div>
+      <div class="sp"></div>
+      <button class="tbtn" onclick="roundRobin()">⚡ Auto-assign unclaimed</button>
+      <button class="tbtn orange" onclick="document.getElementById('addModal').classList.add('open')">+ New lead</button>
+    </div>
+
+    <div class="banner">📞 <b>SLA: every new lead gets a US-based rep response in under 8 minutes.</b> Timer starts when a lead hits "New".</div>
+
+    <div class="statsrow">
+      <div class="scard"><b id="st-total">0</b><small>Open opportunities</small></div>
+      <div class="scard"><b id="st-new">0</b><small>New — awaiting first touch</small> <span class="sla" id="st-sla">SLA on track</span></div>
+      <div class="scard"><b id="st-booked">0</b><small>Consultations booked</small></div>
+      <div class="scard"><b id="st-won">0</b><small>Won this month</small></div>
+    </div>
+
+    <div class="board" id="board"></div>
+  </div>
+</div>
+
+<!-- drawer -->
+<div class="drawer-veil" id="dveil" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+  <div class="d-head">
+    <div><h3 id="d-name">Lead</h3><small id="d-brand"></small></div>
+    <button class="mx" onclick="closeDrawer()">✕</button>
+  </div>
+  <div class="d-body">
+    <div class="d-row"><span>Email</span><b id="d-email"></b></div>
+    <div class="d-row"><span>Phone</span><b id="d-phone"></b></div>
+    <div class="d-row"><span>Monthly orders</span><b id="d-vol"></b></div>
+    <div class="d-row"><span>Current setup</span><b id="d-cur"></b></div>
+    <div class="d-row"><span>Requested slot</span><b id="d-slot"></b></div>
+    <div class="d-row"><span>Assigned rep</span><b id="d-rep"></b></div>
+    <div class="d-row"><span>Source</span><b id="d-src"></b></div>
+    <div id="d-intake"></div>
+    <div class="d-sec">Notes &amp; activity</div>
+    <div id="d-notes"></div>
+  </div>
+  <div class="d-foot">
+    <input id="noteInput" placeholder="Add a note… (Enter to save)" onkeydown="if(event.key==='Enter')addNote()">
+    <button class="tbtn orange" onclick="addNote()">Add</button>
+  </div>
+</div>
+
+<!-- add lead modal -->
+<div class="m-veil" id="addModal">
+  <div class="m-card">
+    <h3>New lead<span class="dot">.</span></h3>
+    <form onsubmit="return addLead(event)">
+      <div class="frow">
+        <div class="field"><label>Name</label><input id="a-name" required></div>
+        <div class="field"><label>Brand</label><input id="a-brand" required></div>
+      </div>
+      <div class="frow">
+        <div class="field"><label>Email</label><input id="a-email" type="email" required></div>
+        <div class="field"><label>Phone</label><input id="a-phone"></div>
+      </div>
+      <div class="frow">
+        <div class="field"><label>Monthly orders</label>
+          <select id="a-vol"><option>Under 500</option><option>500 – 2,000</option><option>2,000 – 10,000</option><option>10,000 – 50,000</option><option>50,000+</option></select>
+        </div>
+        <div class="field"><label>Source</label>
+          <select id="a-src"><option>website</option><option>referral</option><option>cold outreach</option><option>event</option></select>
+        </div>
+      </div>
+      <div class="actions">
+        <button type="button" class="tbtn" onclick="document.getElementById('addModal').classList.remove('open')">Cancel</button>
+        <button class="tbtn orange" type="submit">Add lead</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- website CMS modal -->
+<div class="m-veil" id="cmsModal">
+  <div class="m-card" style="max-width:560px">
+    <h3>Website content<span class="dot">.</span></h3>
+    <p style="font-size:13px;color:var(--muted);margin:-8px 0 18px">Everything adjustable on the site is managed here. In production, saving publishes straight to the live pages.</p>
+    <div class="field"><label>Popup offer headline</label><input value="Switch 3PLs free of charge."></div>
+    <div class="field"><label>Popup offer body</label><input value="We know switching can be expensive — we minimize the cost to the max."></div>
+    <div class="frow">
+      <div class="field"><label>Warehouse count</label><input value="200+"></div>
+      <div class="field"><label>Accuracy stat</label><input value="99.8%"></div>
+    </div>
+    <div class="frow">
+      <div class="field"><label>Rep response SLA</label><input value="<8 min"></div>
+      <div class="field"><label>Delivery default state</label><input value="New Jersey"></div>
+    </div>
+    <div class="field"><label>Testimonial #1 (brand)</label><input value="Souled Worldwide — Apparel &amp; lifestyle"></div>
+    <div class="actions">
+      <button type="button" class="tbtn" onclick="document.getElementById('cmsModal').classList.remove('open')">Close</button>
+      <button type="button" class="tbtn orange" onclick="alert('Demo mode — in production this publishes to the live site via the site config table.');document.getElementById('cmsModal').classList.remove('open')">Save &amp; publish</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============ shipbay crm ============
+   LIVE MODE  — js/config.js has Supabase keys: team sign-in required,
+                leads load from the `leads` table and update in realtime.
+   DEMO MODE  — keys empty: in-memory sample data, nothing persists.
+*/
+const C = window.SHIPBAY_CONFIG || {};
+const LIVE = !!(C.SUPABASE_URL && C.SUPABASE_ANON_KEY && window.supabase);
+const sb = LIVE ? window.supabase.createClient(C.SUPABASE_URL, C.SUPABASE_ANON_KEY) : null;
+
+let REPS = [
+  {id:'mk', name:'Marcus K.', color:'#FF6B15'},
+  {id:'ap', name:'Alicia P.', color:'#1E9E6F'},
+  {id:'jr', name:'James R.', color:'#4F5DEF'},
+  {id:'td', name:'Tanya D.', color:'#D14E00'},
+];
+const STAGES = [
+  {id:'new', name:'New'},
+  {id:'contacted', name:'Contacted'},
+  {id:'booked', name:'Consultation booked'},
+  {id:'proposal', name:'Proposal sent'},
+  {id:'won', name:'Won'},
+];
+let seq = 100;
+const DEMO_LEADS = [
+  {id:1, name:'Dana Whitfield', brand:'Peak Paws Supply', email:'dana@peakpaws.com', phone:'(908) 555-0114', vol:'2,000 – 10,000', cur:'Using another 3PL', slot:'Tue 10:00 AM', rep:'mk', stage:'new', src:'website', mins:3, notes:[{t:'Lead created from book.html', when:'3 min ago'}]},
+  {id:2, name:'Omar Reyes', brand:'Voltbar Energy', email:'omar@voltbar.co', phone:'(347) 555-0182', vol:'10,000 – 50,000', cur:'Self-fulfilling', slot:'Tue 1:30 PM', rep:null, stage:'new', src:'website', mins:6, notes:[{t:'Lead created from book.html', when:'6 min ago'}]},
+  {id:3, name:'Priya Shah', brand:'Lumen Home', email:'priya@lumenhome.com', phone:'(732) 555-0139', vol:'500 – 2,000', cur:'Launching soon', slot:'Wed 9:30 AM', rep:'ap', stage:'contacted', src:'referral', mins:44, notes:[{t:'Left voicemail, sent intro email', when:'40 min ago'}]},
+  {id:4, name:'Chris Donnelly', brand:'Ironline Fitness', email:'chris@ironline.fit', phone:'(215) 555-0167', vol:'2,000 – 10,000', cur:'Using another 3PL', slot:'Wed 2:00 PM', rep:'jr', stage:'booked', src:'website', mins:180, notes:[{t:'Consultation confirmed — oversized SKUs, needs freight-class', when:'2 hr ago'}]},
+  {id:5, name:'Maya Chen', brand:'Glowora', email:'maya@glowora.com', phone:'(646) 555-0126', vol:'10,000 – 50,000', cur:'Using another 3PL', slot:'Thu 11:00 AM', rep:'ap', stage:'proposal', src:'website', mins:1440, notes:[{t:'Sent proposal — full rate card + onboarding plan', when:'Yesterday'}]},
+  {id:6, name:'Luis Ortega', brand:'Nova + North', email:'luis@novanorth.com', phone:'(917) 555-0198', vol:'2,000 – 10,000', cur:'Amazon FBA only', slot:'Fri 9:00 AM', rep:'td', stage:'won', src:'event', mins:4320, notes:[{t:'Signed! Onboarding kickoff Monday', when:'3 days ago'}]},
+  {id:7, name:'Sarah Kim', brand:'Bloom Botanics', email:'sarah@bloombotanics.com', phone:'(201) 555-0171', vol:'500 – 2,000', cur:'Self-fulfilling', slot:'Fri 3:00 PM', rep:null, stage:'new', src:'website', mins:1, notes:[{t:'Lead created from book.html', when:'1 min ago'}]},
+];
+let leads = LIVE ? [] : DEMO_LEADS;
+let openLead = null, dragId = null;
+
+function repById(id){ return REPS.find(r => String(r.id) === String(id)); }
+function findLead(id){ return leads.find(x => String(x.id) === String(id)); }
+function fmtWhen(w){
+  if (!w) return '';
+  const t = Date.parse(w);
+  if (isNaN(t) || !/\d{4}-\d{2}-\d{2}T/.test(w)) return w; // demo strings pass through
+  const m = Math.floor((Date.now() - t) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + ' min ago';
+  if (m < 1440) return Math.floor(m / 60) + ' hr ago';
+  return Math.floor(m / 1440) + ' day' + (Math.floor(m/1440) > 1 ? 's' : '') + ' ago';
+}
+function nowISO(){ return new Date().toISOString(); }
+
+/* ---- live data layer ---- */
+function fromRow(r){
+  return {
+    id: r.id, name: r.name, brand: r.brand, email: r.email, phone: r.phone,
+    vol: r.volume || '—', cur: r.current_setup || '—', slot: r.slot || 'To schedule',
+    rep: r.rep, stage: r.stage || 'new', src: r.source || 'website', created: r.created_at, intake: r.intake || null,
+    mins: Math.max(0, Math.round((Date.now() - new Date(r.created_at).getTime()) / 60000)),
+    notes: (r.activity || []).slice().reverse()
+  };
+}
+function toActivity(l){ return (l.notes || []).slice().reverse(); }
+async function persistLead(l){
+  if (!LIVE) return;
+  const { error } = await sb.from('leads')
+    .update({ stage: l.stage, rep: l.rep, activity: toActivity(l) })
+    .eq('id', l.id);
+  if (error) console.warn('Save failed:', error.message);
+}
+function crmAlert(msg){
+  let el = document.getElementById('crm-alert');
+  if (!msg) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'crm-alert';
+    el.style.cssText = 'margin:0 26px 12px;padding:11px 16px;border-radius:10px;background:#FDECEA;border:1px solid #D9534F;color:#B03A33;font-size:13.5px;font-weight:500';
+    const banner = document.querySelector('.banner');
+    banner.parentNode.insertBefore(el, banner);
+  }
+  el.textContent = msg;
+}
+async function reloadLeads(){
+  const { data, error } = await sb.from('leads').select('*').order('created_at', { ascending: false });
+  if (error) { crmAlert('Could not load leads: ' + error.message); return; }
+  leads = data.map(fromRow);
+  render();
+}
+async function loadReps(){
+  const { data } = await sb.from('reps').select('*').order('created_at');
+  if (data && data.length) REPS = data.map(r => ({ id: r.id, name: r.name, color: r.color || '#FF6B15' }));
+}
+
+/* ---- auth ---- */
+async function doLogin(e){
+  e.preventDefault();
+  const err = document.getElementById('login-err');
+  err.style.display = 'none';
+  const { error } = await sb.auth.signInWithPassword({
+    email: document.getElementById('login-email').value.trim(),
+    password: document.getElementById('login-pass').value
+  });
+  if (error) { err.textContent = error.message; err.style.display = 'block'; return false; }
+  enterApp();
+  return false;
+}
+async function doLogout(){
+  await sb.auth.signOut();
+  document.getElementById('loginModal').classList.add('open');
+}
+async function enterApp(){
+  document.getElementById('loginModal').classList.remove('open');
+  const { data: { user } } = await sb.auth.getUser();
+  document.getElementById('modeBox').innerHTML =
+    '<b style="color:#5ED4A5">● LIVE</b><br>Signed in as <b style="color:#fff">' + (user ? user.email : '') + '</b>' +
+    '<br><a href="#" onclick="doLogout();return false" style="color:#FFA36B">Sign out</a>';
+  try {
+    const { data: onTeam, error: teamErr } = await sb.rpc('is_team');
+    if (!teamErr && onTeam === false) {
+      crmAlert('Your login works, but this email is not on the sales team list yet — leads will not appear. Admin: add it to the team_members table in Supabase.');
+    }
+  } catch (e) {}
+  await loadReps();
+  await reloadLeads();
+  sb.channel('leads-live')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => reloadLeads())
+    .subscribe();
+  setInterval(() => { leads.forEach(l => { if (l.created) l.mins = Math.max(0, Math.round((Date.now() - new Date(l.created).getTime())/60000)); }); render(); }, 60000);
+}
+
+function render() {
+  const q = document.getElementById('q').value.toLowerCase();
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+  STAGES.forEach(st => {
+    const items = leads.filter(l => l.stage===st.id && (!q || (l.name+l.brand+l.email).toLowerCase().includes(q)));
+    const col = document.createElement('div');
+    col.className = 'col'; col.dataset.stage = st.id;
+    col.ondragover = e => { e.preventDefault(); col.classList.add('over'); };
+    col.ondragleave = () => col.classList.remove('over');
+    col.ondrop = e => {
+      e.preventDefault(); col.classList.remove('over');
+      const l = findLead(dragId);
+      if (l) { l.stage = st.id; l.notes.unshift({t:'Moved to "'+st.name+'"', when:nowISO()}); render(); persistLead(l); }
+    };
+    col.innerHTML = `<div class="col-h">${st.name}<span class="cnt">${items.length}</span></div>`;
+    items.forEach(l => {
+      const rep = repById(l.rep);
+      const card = document.createElement('div');
+      card.className = 'lead'; card.draggable = true;
+      card.ondragstart = () => { dragId = l.id; card.classList.add('dragging'); };
+      card.ondragend = () => card.classList.remove('dragging');
+      card.onclick = e => { if (e.target.tagName !== 'SELECT') openDrawer(l.id); };
+      const slaTag = l.stage==='new' ? `<span class="tag ${l.mins>8?'':'hot'}">${l.mins>8?'SLA MISSED':'SLA '+(8-l.mins)+'m left'}</span>` : '';
+      card.innerHTML = `
+        <div class="l-top"><div><b>${l.name}</b><span class="brand">${l.brand}</span></div>
+        ${rep ? `<span class="l-av" style="background:${rep.color}" title="${rep.name}">${rep.name.split(' ')[0][0]}${rep.name.split(' ')[1][0]}</span>` : '<span class="l-av unassigned" title="Unassigned">–</span>'}</div>
+        <div class="meta"><span class="tag">${l.vol}</span><span class="tag">${l.src}</span>${slaTag}</div>
+        <div class="l-foot">
+          <select class="rep-sel" onchange="assign('${l.id}', this.value)" onclick="event.stopPropagation()">
+            <option value="">Assign rep…</option>
+            ${REPS.map(r=>`<option value="${r.id}" ${l.rep===r.id?'selected':''}>${r.name}</option>`).join('')}
+          </select>
+          <span class="tag">📅 ${l.slot}</span>
+        </div>`;
+      col.appendChild(card);
+    });
+    board.appendChild(col);
+  });
+  // stats
+  document.getElementById('st-total').textContent = leads.filter(l=>l.stage!=='won').length;
+  const news = leads.filter(l=>l.stage==='new');
+  document.getElementById('st-new').textContent = news.length;
+  const missed = news.some(l=>l.mins>8);
+  const sla = document.getElementById('st-sla');
+  sla.textContent = missed ? 'SLA missed — call now' : 'SLA on track';
+  sla.className = 'sla' + (missed?' bad':'');
+  document.getElementById('st-booked').textContent = leads.filter(l=>l.stage==='booked').length;
+  document.getElementById('st-won').textContent = leads.filter(l=>l.stage==='won').length;
+}
+
+function assign(id, repId) {
+  const l = findLead(id);
+  if (!l) return;
+  l.rep = repId || null;
+  const r = repById(repId);
+  l.notes.unshift({t: r ? 'Assigned to '+r.name : 'Unassigned', when:nowISO()});
+  render();
+  persistLead(l);
+}
+
+function roundRobin() {
+  let i = 0;
+  leads.filter(l=>!l.rep).forEach(l => {
+    l.rep = REPS[i % REPS.length].id;
+    l.notes.unshift({t:'Auto-assigned to '+repById(l.rep).name+' (round-robin)', when:nowISO()});
+    i++;
+    persistLead(l);
+  });
+  render();
+}
+
+function openDrawer(id) {
+  openLead = findLead(id);
+  if (!openLead) return;
+  const l = openLead;
+  document.getElementById('d-name').textContent = l.name;
+  document.getElementById('d-brand').textContent = l.brand;
+  document.getElementById('d-email').textContent = l.email;
+  document.getElementById('d-phone').textContent = l.phone || '—';
+  document.getElementById('d-vol').textContent = l.vol;
+  document.getElementById('d-cur').textContent = l.cur || '—';
+  document.getElementById('d-slot').textContent = l.slot;
+  document.getElementById('d-rep').textContent = l.rep ? repById(l.rep).name : 'Unassigned';
+  document.getElementById('d-src').textContent = l.src;
+  const ib = document.getElementById('d-intake');
+  if (l.intake) {
+    const I = l.intake, e = t => String(t==null?'':t).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    const ch = I.channels||{}; const chparts=[];
+    if (ch.dtc) chparts.push('DTC '+(ch.dtc.vol||'?')+'/mo'); if (ch.fba) chparts.push('FBA '+(ch.fba.vol||'?')+'/mo');
+    if (ch.fbm) chparts.push('FBM '+(ch.fbm.vol||'?')+'/mo'); if (ch.b2b) chparts.push('B2B '+(ch.b2b.vol||'?')+' + '+(ch.b2b.ltl||'0')+' LTL'+(ch.b2b.edi==='Yes'?' · EDI':''));
+    const row = (k,v) => v ? `<div class="d-row"><span>${k}</span><b>${e(v)}</b></div>` : '';
+    ib.innerHTML = '<div class="d-sec">Match intake</div>' +
+      row('Status', I.status) + row('Website', I.site) + row('Warehouse pref', I.geo) +
+      row('Channels', chparts.join(' · ')) + row('Platforms', (I.platforms||[]).join(', ')) +
+      row('Categories', (I.cats||[]).join(', ')) + row('Specialty', (I.specs||[]).join(', ')) +
+      row('Ships', I.shipdesc) + row('SKUs', I.skus) + row('Weights', (I.weights||[]).join(', ')) +
+      row('Pallets/mo', I.pallets) +
+      row('Temperature', I.temp==='Yes' ? ((I.tempconds||[]).join(', ')||'Yes')+(I.tempdesc?' — '+I.tempdesc:'') : I.temp) +
+      row('Lot tracking', I.lot) + row('Value-adds', (I.vas||[]).join(', ')) +
+      row('Timeline', I.timeline) + row('Extra notes', I.notes) + row('Heard via', I.heard);
+  } else ib.innerHTML = '';
+  document.getElementById('d-notes').innerHTML = l.notes.map(n=>`<div class="note">${n.t}<small>${fmtWhen(n.when)}</small></div>`).join('');
+  document.getElementById('drawer').classList.add('open');
+  document.getElementById('dveil').classList.add('open');
+}
+function closeDrawer() {
+  document.getElementById('drawer').classList.remove('open');
+  document.getElementById('dveil').classList.remove('open');
+}
+function addNote() {
+  const inp = document.getElementById('noteInput');
+  if (!inp.value.trim() || !openLead) return;
+  openLead.notes.unshift({t:inp.value.trim(), when:nowISO()});
+  inp.value = '';
+  persistLead(openLead);
+  openDrawer(openLead.id);
+}
+function addLead(e) {
+  e.preventDefault();
+  const v = id => document.getElementById(id).value;
+  if (LIVE) {
+    sb.from('leads').insert({
+      name: v('a-name'), brand: v('a-brand'), email: v('a-email'), phone: v('a-phone'),
+      volume: v('a-vol'), slot: 'To schedule', stage: 'new', source: v('a-src'),
+      activity: [{ t: 'Lead created manually', when: nowISO() }]
+    }).then(({ error }) => {
+      if (error) { alert('Could not save lead: ' + error.message); return; }
+      reloadLeads();
+    });
+  } else {
+    leads.unshift({
+      id: ++seq, name: v('a-name'), brand: v('a-brand'), email: v('a-email'), phone: v('a-phone'),
+      vol: v('a-vol'), cur: '—', slot:'To schedule', rep:null, stage:'new',
+      src: v('a-src'), mins:0,
+      notes:[{t:'Lead created manually', when:nowISO()}]
+    });
+    render();
+  }
+  document.getElementById('addModal').classList.remove('open');
+  e.target.reset();
+  return false;
+}
+
+/* ---- boot ---- */
+if (LIVE) {
+  render(); // empty board behind the login veil
+  sb.auth.getSession().then(({ data: { session } }) => {
+    if (session) enterApp();
+    else document.getElementById('loginModal').classList.add('open');
+  });
+} else {
+  render();
+}
+</script>
+
+</body>
+</html>

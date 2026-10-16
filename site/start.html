@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Apply for an account — shipbay.</title>
+<link rel="icon" type="image/svg+xml" href="assets/brand/08-icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="js/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  :root{--bg:#FFFFFF;--bg-soft:#F6F7F9;--line:#E6E8EC;--ink:#101C2B;--muted:#5A6473;--muted-2:#8A93A3;
+    --orange:#FF6B15;--orange-soft:#D14E00;--orange-tint:#FFF0E4;--orange-hover:#E85E0A;--green:#1E9E6F}
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  /* top bar */
+  .topbar{position:sticky;top:0;z-index:100;background:rgba(255,255,255,.94);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+  .tb-in{max-width:860px;margin:0 auto;padding:12px 20px}
+  .tb-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .tb-row .logo img{height:30px;width:auto;display:block}
+  .autosave{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--muted)}
+  .autosave i{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block}
+  .pct{font-size:14px;color:var(--muted)}
+  .pct b{color:var(--ink);font-size:15px}
+  .tb-row .exit{margin-left:auto;font-size:13.5px;font-weight:600;color:var(--muted-2)}
+  .tb-row .exit:hover{color:var(--ink)}
+  .segs{display:flex;gap:8px;margin-top:10px}
+  .seg{flex:1;height:5px;border-radius:99px;background:#EEF0F3;overflow:hidden}
+  .seg i{display:block;height:100%;width:0%;background:var(--orange);border-radius:99px;transition:width .35s}
+  /* layout */
+  main{max-width:860px;margin:0 auto;padding:34px 20px 130px}
+  .eyebrow{font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:var(--orange-soft);margin-bottom:8px}
+  h1{font-family:'Archivo',sans-serif;font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.01em;line-height:1.12}
+  h1 .dot{color:var(--orange)}
+  .lede{color:var(--muted);font-size:16.5px;margin:12px 0 30px;max-width:640px}
+  .qlabel{font-size:16px;font-weight:600;margin:26px 0 4px}
+  .qhint{font-size:14px;color:var(--muted-2);margin-bottom:12px}
+  .qhead{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+  .count{flex:none;font-size:13px;color:var(--muted);background:var(--bg-soft);border:1px solid var(--line);border-radius:99px;padding:4px 13px}
+  input.txt,textarea.txt,select.txt{width:100%;padding:14px 16px;border:1.5px solid var(--line);border-radius:11px;font-family:'Inter',sans-serif;font-size:15.5px;color:var(--ink);background:#fff;transition:border-color .15s}
+  input.txt:focus,textarea.txt:focus,select.txt:focus{outline:none;border-color:var(--orange)}
+  textarea.txt{min-height:110px;resize:vertical}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .small-in{max-width:260px}
+  /* big choice cards */
+  .choices{display:grid;gap:12px}
+  .choice{border:1.5px solid var(--line);border-radius:14px;padding:18px 20px;cursor:pointer;transition:all .14s;background:#fff}
+  .choice:hover{border-color:var(--muted-2)}
+  .choice b{font-family:'Archivo',sans-serif;font-size:16.5px;display:block}
+  .choice small{color:var(--muted-2);font-size:13.5px}
+  .choice.sel{border-color:var(--orange);background:#FFFBF8;box-shadow:0 4px 16px rgba(255,107,21,.1)}
+  .choice.sel b{color:var(--orange-soft)}
+  /* channel cards */
+  .chan{border:1.5px solid var(--line);border-radius:14px;background:#fff;overflow:hidden;transition:border-color .15s}
+  .chan.sel{border-color:var(--orange)}
+  .chan-h{display:flex;align-items:flex-start;gap:13px;padding:16px 18px;cursor:pointer}
+  .chan-h .ic{flex:none;width:40px;height:40px;border-radius:11px;background:var(--bg-soft);display:grid;place-items:center;color:var(--muted);transition:all .15s}
+  .chan.sel .chan-h .ic{background:var(--orange);color:#fff}
+  .chan-h b{font-family:'Archivo',sans-serif;font-size:16px}
+  .chan.sel .chan-h b{color:var(--orange-soft)}
+  .chan-h .tagb{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.05em;padding:3px 9px;border-radius:6px;margin:3px 0 4px}
+  .tagb.ship{background:#FFF0E4;color:var(--orange-soft)}
+  .tagb.bulk{background:#FDF6E3;color:#8A6D1A}
+  .chan-h p{font-size:13.5px;color:var(--muted)}
+  .chan-h .box{flex:none;width:24px;height:24px;border:1.5px solid var(--line);border-radius:7px;margin-left:auto;display:grid;place-items:center;color:#fff;font-size:13px;transition:all .15s}
+  .chan.sel .chan-h .box{background:var(--orange);border-color:var(--orange)}
+  .chan-b{display:none;border-top:1px solid var(--line);background:var(--bg-soft);padding:16px 18px}
+  .chan.sel .chan-b{display:block}
+  .chan-b label{display:block;font-size:13.5px;font-weight:600;margin:10px 0 5px}
+  .chan-b label:first-child{margin-top:0}
+  .chan-b small{display:block;font-size:12px;color:var(--muted-2);margin-bottom:6px}
+  .yesno{display:flex;gap:8px;margin-top:6px}
+  .yn{padding:9px 22px;border:1.5px solid var(--line);border-radius:9px;background:#fff;font-family:'Inter',sans-serif;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer}
+  .yn.sel{border-color:var(--orange);color:var(--orange-soft);background:#FFFBF8}
+  /* chips */
+  .chips{display:flex;flex-wrap:wrap;gap:9px}
+  .chip{padding:9px 17px;border:1.5px solid var(--line);border-radius:99px;background:#fff;font-size:14px;font-weight:500;color:var(--muted);cursor:pointer;transition:all .13s;font-family:'Inter',sans-serif}
+  .chip:hover{border-color:var(--muted-2)}
+  .chip.sel{border-color:var(--orange);background:var(--orange);color:#fff;font-weight:600}
+  /* value-add cards */
+  .vahead{font-family:'Archivo',sans-serif;font-weight:600;font-size:16px;color:var(--orange-soft);margin:30px 0 4px}
+  .vahint{font-size:13.5px;color:var(--muted-2);margin-bottom:12px}
+  .vas{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+  .va{border:1.5px solid var(--line);border-radius:13px;padding:15px 16px;background:#fff;cursor:pointer;transition:all .13s;position:relative}
+  .va:hover{border-color:var(--muted-2)}
+  .va.sel{border-color:var(--orange);background:#FFFBF8}
+  .va b{font-size:14.5px;display:block;margin-bottom:2px}
+  .va.sel b{color:var(--orange-soft)}
+  .va small{font-size:12.5px;color:var(--muted-2);line-height:1.45}
+  .va .box{position:absolute;top:13px;right:13px;width:21px;height:21px;border:1.5px solid var(--line);border-radius:6px;display:grid;place-items:center;color:#fff;font-size:11px}
+  .va.sel .box{background:var(--orange);border-color:var(--orange)}
+  /* temp block */
+  .subcard{border:1.5px solid var(--line);border-radius:14px;padding:18px;background:var(--bg-soft);margin-top:12px}
+  .tempopts{display:grid;gap:9px;margin-top:6px}
+  .topt{display:flex;align-items:center;gap:11px;border:1.5px solid var(--line);border-radius:10px;background:#fff;padding:12px 14px;font-size:14.5px;cursor:pointer}
+  .topt .box{width:20px;height:20px;border:1.5px solid var(--line);border-radius:6px;display:grid;place-items:center;color:#fff;font-size:11px}
+  .topt.sel{border-color:var(--orange)}
+  .topt.sel .box{background:var(--orange);border-color:var(--orange)}
+  /* review */
+  .rev{border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin-bottom:16px;background:#fff}
+  .rev-h{display:flex;align-items:center;gap:12px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+  .rev-h i{font-style:normal;width:28px;height:28px;border-radius:50%;background:var(--orange-tint);color:var(--orange-soft);display:grid;place-items:center;font-weight:700;font-size:13.5px;font-family:'Archivo',sans-serif}
+  .rev-h b{font-family:'Archivo',sans-serif;font-size:16.5px;flex:1}
+  .rev-h button{border:1.5px solid var(--line);background:#fff;border-radius:8px;padding:6px 16px;font-family:'Inter',sans-serif;font-size:13px;font-weight:600;color:var(--orange-soft);cursor:pointer}
+  .rev dl{display:grid;grid-template-columns:150px 1fr;gap:7px 16px;font-size:14px}
+  .rev dt{color:var(--muted-2)}
+  .rev dd{color:var(--ink);word-break:break-word}
+  /* footer nav */
+  .navfoot{position:fixed;bottom:0;left:0;right:0;z-index:90;background:rgba(255,255,255,.96);backdrop-filter:blur(10px);border-top:1px solid var(--line)}
+  .nf-in{max-width:860px;margin:0 auto;padding:13px 20px;display:flex;align-items:center;gap:14px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:13px 30px;border-radius:11px;font-family:'Archivo',sans-serif;font-weight:600;font-size:15.5px;cursor:pointer;border:none;transition:all .15s}
+  .btn-back{background:#fff;border:1.5px solid var(--line);color:var(--muted)}
+  .btn-back:hover{border-color:var(--muted-2);color:var(--ink)}
+  .btn-go{background:var(--orange);color:#fff;margin-left:auto;box-shadow:0 6px 18px rgba(255,107,21,.28)}
+  .btn-go:hover{background:var(--orange-hover)}
+  .btn-go:disabled{opacity:.55;cursor:default;box-shadow:none}
+  .stepmeta{font-size:13px;color:var(--muted-2)}
+  .stepmeta b{display:block;color:var(--ink);font-size:14px}
+  .err{display:none;color:#B03A33;font-size:14px;font-weight:500;margin-top:16px}
+  .err.show{display:block}
+  /* done screen */
+  .done-badge{display:inline-flex;align-items:center;gap:9px;background:rgba(30,158,111,.1);color:var(--green);font-family:'Archivo',sans-serif;font-weight:700;font-size:13px;letter-spacing:.08em;border-radius:99px;padding:9px 20px;margin-bottom:18px}
+  .done-badge i{width:9px;height:9px;border-radius:50%;background:var(--green)}
+  .steps-done{display:grid;gap:11px;margin:26px 0}
+  .sd{display:flex;align-items:center;gap:13px;border:1.5px solid var(--line);border-radius:13px;padding:15px 18px;background:#fff}
+  .sd.on{border-color:var(--orange)}
+  .sd .ic{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--orange);color:#fff;font-size:14px}
+  .sd.pending .ic{background:#fff;border:2px solid var(--orange);color:var(--orange)}
+  .sd small{display:block;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:var(--muted-2)}
+  .sd b{font-family:'Archivo',sans-serif;font-size:15.5px}
+  .next-card{border:1px solid var(--line);border-radius:16px;padding:24px;background:var(--bg-soft)}
+  .next-card h3{font-family:'Archivo',sans-serif;font-size:18px;margin-bottom:16px}
+  .nx{margin-bottom:16px}
+  .nx:last-child{margin-bottom:0}
+  .nx .when{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;background:var(--orange-tint);color:var(--orange-soft);border-radius:99px;padding:4px 12px;margin-bottom:6px}
+  .nx p{font-size:14.5px;color:var(--muted)}
+  .nx p b{color:var(--ink)}
+  @media(max-width:700px){
+    .grid2,.vas{grid-template-columns:1fr}
+    .rev dl{grid-template-columns:1fr;gap:2px}
+    .rev dt{margin-top:8px}
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="tb-in">
+    <div class="tb-row">
+      <a class="logo" href="index.html"><img src="assets/brand/01-horizontal.svg" alt="shipbay."></a>
+      <span class="autosave"><i></i><span id="saveword">Draft autosaves</span></span>
+      <span class="pct"><b id="pctNum">0%</b> complete</span>
+      <a class="exit" href="index.html">Exit ✕</a>
+    </div>
+    <div class="segs" id="segs"></div>
+  </div>
+</div>
+
+<main id="main"></main>
+
+<div class="navfoot" id="navfoot">
+  <div class="nf-in">
+    <button class="btn btn-back" id="btnBack">← Back</button>
+    <div class="stepmeta" id="stepMeta"></div>
+    <button class="btn btn-go" id="btnGo">Continue →</button>
+  </div>
+</div>
+
+<script>
+/* ================= shipbay match intake ================= */
+const CATS = ['Apparel & Accessories','Beauty & Skincare','Supplements & Wellness','Electronics','Food & Beverage (shelf-stable)','Home Goods','Pet Products','Toys & Games','Fitness & Outdoor','Books & Media','Other'];
+const SPECS = ['Alcohol','Big & Bulky Items','CBD / THC Products','Dangerous Goods','FDA Approved Products','Fragile / High-Value','Perishable','Automotive'];
+const WEIGHTS = ['Under 1 lb','1 – 5 lb','5 – 20 lb','20 – 50 lb','50+ lb / oversized'];
+const PLATFORMS = ['Shopify','WooCommerce','BigCommerce','Amazon','TikTok Shop','Walmart','Etsy','eBay','Faire','Other'];
+const VA_APPAREL = [
+  ['Alterations or Repair','Hemming, mending, and on-site repairs'],
+  ['Label Tagging','Hangtags, brand tags, care labels applied pre-ship'],
+  ['Laundry','Pre-pack washing, pressing, and freshening'],
+  ['Printing (DTF)','Direct-to-film transfers for short runs'],
+  ['Printing (DTG)','Direct-to-garment full-color printing']];
+const VA_OTHER = [
+  ['Kitting & Subscription Boxes','Multi-SKU bundles built to spec'],
+  ['Labeling or Relabeling','SKU labels, barcodes, compliance stickers'],
+  ['Custom Packaging & Presentation','Branded boxes, inserts, unboxing experience'],
+  ['Returns & Reverse Logistics','Returns processing, restocking, refurb'],
+  ['Retail Display Assembly','Retail-ready POP and display units'],
+  ['Product Auditing & QA','Per-unit defect screening before pack-out'],
+  ['Shipping Insurance & Claims','Declared value coverage, claims recovery'],
+  ['International / Cross-border','Exports, customs docs, market entry']];
+const TL = [['ASAP','Within 2 weeks'],['30 to 60 days','Typical runway'],['60 to 90 days','Planning ahead'],['Greater than 90 days','Long-term plan']];
+const CUR = [['Self-fulfilling','Packing in-house or garage/office'],['Using another 3PL','Ready for a better fit'],['Amazon FBA only','Expanding beyond FBA'],['Launching soon','Pre-launch, planning ahead']];
+
+const blank = {
+  name:'',email:'',phone:'',biz:'',site:'',status:'',
+  geo:'',channels:{}, platforms:[],
+  cats:[],specs:[],shipdesc:'',skus:'',weights:[],
+  pallets:'',storenotes:'',temp:'',tempconds:[],tempdesc:'',lot:'',
+  vas:[],timeline:'',current:'',notes:'',heard:''
+};
+let S = JSON.parse(JSON.stringify(blank));
+try { const saved = localStorage.getItem('shipbay-intake'); if (saved) S = Object.assign(S, JSON.parse(saved)); } catch(e){}
+let step = 0; // 0..5 (5 = review)
+const NSTEPS = 6;
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function save(){
+  try { localStorage.setItem('shipbay-intake', JSON.stringify(S)); } catch(e){}
+  const w = $('saveword'); w.textContent='Saving…'; setTimeout(()=>w.textContent='Draft autosaves',600);
+  paintProgress();
+}
+function sectionScore(){
+  const s = [
+    (S.name&&S.email&&S.biz)?1:( (S.name||S.email||S.biz)?0.5:0 ),
+    (Object.keys(S.channels).length?0.6:0)+(S.geo?0.4:0),
+    (S.cats.length?0.5:0)+(S.skus?0.25:0)+(S.weights.length?0.25:0),
+    (S.pallets!==''?0.6:0)+(S.temp?0.4:0),
+    (S.timeline?0.6:0)+(S.current?0.4:0),
+    0
+  ];
+  return s;
+}
+function paintProgress(){
+  const sc = sectionScore();
+  const pct = Math.min(100, Math.round((sc.slice(0,5).reduce((a,b)=>a+b,0)/5)*100));
+  $('pctNum').textContent = (step===5?100:pct) + '%';
+  document.querySelectorAll('.seg i').forEach((el,i)=>{
+    el.style.width = (i<step ? 100 : i===step ? Math.max(18, sc[Math.min(i,4)]*100) : 0) + '%';
+  });
+}
+
+/* ---------- renderers ---------- */
+const STEPS = [
+  { n:'Step 1 · Who you are', t:'Tell us about your brand', meta:'Contact & business', render: r1, valid: () =>
+      S.name.trim() && /.+@.+\..+/.test(S.email) && S.biz.trim() ? '' : 'Name, a valid work email, and your brand name are required.' },
+  { n:'Step 2 · Where and how you sell', t:'Your channels and footprint', meta:'Sales channels & volume', render: r2, valid: () =>
+      Object.keys(S.channels).length ? '' : 'Select at least one sales channel to continue.' },
+  { n:'Step 3 · What you ship', t:'What do you sell?', meta:'Products & specs', render: r3, valid: () =>
+      S.cats.length ? '' : 'Pick at least one product category.' },
+  { n:'Step 4 · How product is stored', t:'Storage specifications', meta:'Storage & conditions', render: r4, valid: () =>
+      S.temp ? '' : 'Tell us whether your product needs temperature control.' },
+  { n:'Step 5 · Final details', t:'Value-add services & timing', meta:'Value-adds & timeline', render: r5, valid: () =>
+      S.timeline && S.current ? '' : 'Pick your timeline and current setup.' },
+  { n:'Review', t:'Review and confirm', meta:'Review & submit', render: r6, valid: () => '' },
+];
+
+function field(label, hint, inner){ return `<div class="qlabel">${label}</div>${hint?`<div class="qhint">${hint}</div>`:''}${inner}`; }
+function chips(list, selArr, key){
+  return `<div class="chips" data-chips="${key}">` + list.map(c =>
+    `<button type="button" class="chip ${selArr.includes(c)?'sel':''}" data-v="${esc(c)}">${esc(c)}</button>`).join('') + `</div>`;
+}
+
+function r1(){ return `
+  <div class="eyebrow">${STEPS[0].n}</div><h1>Tell us about your brand<span class="dot">.</span></h1>
+  <p class="lede">This builds your match profile — our team uses it to confirm fit and build your exact quote at our Hillsborough, NJ warehouse.</p>
+  <div class="grid2">
+    <div>${field('Full name','', `<input class="txt" id="f-name" value="${esc(S.name)}" placeholder="Jordan Smith">`)}</div>
+    <div>${field('Work email','', `<input class="txt" id="f-email" type="email" value="${esc(S.email)}" placeholder="jordan@brand.com">`)}</div>
+  </div>
+  <div class="grid2">
+    <div>${field('Phone <span style="color:var(--muted-2);font-weight:400">· Optional</span>','', `<input class="txt" id="f-phone" value="${esc(S.phone)}" placeholder="(555) 555-5555">`)}</div>
+    <div>${field('Business name','', `<input class="txt" id="f-biz" value="${esc(S.biz)}" placeholder="Acme Wellness">`)}</div>
+  </div>
+  ${field('Website <span style="color:var(--muted-2);font-weight:400">· Optional</span>','', `<input class="txt" id="f-site" value="${esc(S.site)}" placeholder="https://yourbrand.com">`)}
+  ${field('Business status','', `
+    <div class="choices">
+      <div class="choice ${S.status==='Selling Now'?'sel':''}" data-status="Selling Now"><b>Selling Now</b><small>We have consistent sales</small></div>
+      <div class="choice ${S.status==='Pre-Revenue'?'sel':''}" data-status="Pre-Revenue"><b>Pre-Revenue</b><small>Estimating order volume</small></div>
+    </div>`)}
+`;}
+
+function chanCard(key, name, tag, tagcls, desc, body){
+  const on = !!S.channels[key];
+  return `<div class="chan ${on?'sel':''}" id="chan-${key}">
+    <div class="chan-h" data-chan="${key}">
+      <span class="ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></span>
+      <span style="flex:1"><b>${name}</b><br><span class="tagb ${tagcls}">${tag}</span><p>${desc}</p></span>
+      <span class="box">✓</span>
+    </div>
+    <div class="chan-b">${body}</div>
+  </div>`;
+}
+function r2(){
+  const c = S.channels;
+  const vol = (k,label) => `<label>${label}</label><small>Enter 0 if pre-launch.</small>
+    <input class="txt small-in" data-cv="${k}" inputmode="numeric" value="${esc((c[k]&&c[k].vol)||'')}" placeholder="e.g. 2500">`;
+  return `
+  <div class="eyebrow">${STEPS[1].n}</div><h1>Where do you sell your products?<span class="dot">.</span></h1>
+  <p class="lede">Select every channel you use or plan to launch soon — each expands for volume details.</p>
+  ${field('Where are your customers concentrated?','Cities, regions, states — whatever\'s most useful. If you\'re open to anywhere, just say so.',
+    `<textarea class="txt" id="f-geo" placeholder="e.g. Mostly Northeast + Florida; growing on the West Coast.">${esc(S.geo)}</textarea>`)}
+  <div class="qhead"><div class="qlabel">Sales channels</div><span class="count">${Object.keys(c).length} selected</span></div>
+  <div class="qhint">Each selection expands for volume details.</div>
+  <div class="choices">
+    ${chanCard('dtc','Direct-to-Consumer (DTC)','3PL SHIPS TO CUSTOMER','ship','Orders from your own website — Shopify, WooCommerce, BigCommerce, etc.', vol('dtc','DTC orders per month'))}
+    ${chanCard('fba','Fulfillment By Amazon (FBA)','3PL SENDS BULK INVENTORY','bulk','You send inventory in bulk to Amazon and Amazon ships to the end customer.', vol('fba','FBA units per month'))}
+    ${chanCard('fbm','Fulfillment By Merchant (FBM)','3PL SHIPS TO CUSTOMER','ship','You sell on Amazon and your 3PL ships directly to the end customer.', vol('fbm','FBM orders per month'))}
+    ${chanCard('b2b','Retail / Wholesale (B2B)','3PL SENDS BULK SHIPMENTS','bulk','You ship to retailers, distributors, or wholesale accounts.',
+      vol('b2b','Small parcel shipments / mo') +
+      `<label>LTL shipments / mo</label><small>Less-than-truckload (palletized).</small><input class="txt small-in" data-cx="ltl" inputmode="numeric" value="${esc((c.b2b&&c.b2b.ltl)||'')}">
+       <label>Do you require EDI?</label><small>Common for Target, Walmart, Whole Foods, Costco.</small>
+       <div class="yesno"><button type="button" class="yn ${(c.b2b&&c.b2b.edi)==='Yes'?'sel':''}" data-edi="Yes">Yes</button><button type="button" class="yn ${(c.b2b&&c.b2b.edi)==='No'?'sel':''}" data-edi="No">No</button></div>`)}
+  </div>
+  ${field('Which platforms do you run on? <span style="color:var(--muted-2);font-weight:400">· Optional</span>','So your dashboard integrations are ready on day one.', chips(PLATFORMS, S.platforms, 'platforms'))}
+`;}
+
+function r3(){ return `
+  <div class="eyebrow">${STEPS[2].n}</div><h1>What do you sell?<span class="dot">.</span></h1>
+  <p class="lede">Some categories need specialty handling or certifications — we match you only to facilities equipped for what you ship.</p>
+  <div class="qhead"><div class="qlabel">Product categories</div><span class="count">${S.cats.length} selected</span></div>
+  <div class="qhint">Select all that apply.</div>
+  ${chips(CATS, S.cats, 'cats')}
+  <div class="qhead"><div class="qlabel">Specialty products</div><span class="count">${S.specs.length} selected</span></div>
+  <div class="qhint">Check all that apply — even for a small subset of your catalog. Affects match eligibility.</div>
+  ${chips(SPECS, S.specs, 'specs')}
+  ${field('In one sentence, describe what you ship','Helps our matching team sanity-check tricky cases.',
+    `<textarea class="txt" id="f-shipdesc" placeholder="e.g. Hemp-derived wellness tinctures, shipped DTC and to independent retailers.">${esc(S.shipdesc)}</textarea>`)}
+  ${field('Total active SKUs','Enter 0 if pre-launch.', `<input class="txt small-in" id="f-skus" inputmode="numeric" value="${esc(S.skus)}" placeholder="e.g. 120">`)}
+  <div class="qhead"><div class="qlabel">Weight ranges you ship</div><span class="count">${S.weights.length} selected</span></div>
+  <div class="qhint">Select all that apply — a warehouse needs to know its floor and ceiling.</div>
+  ${chips(WEIGHTS, S.weights, 'weights')}
+`;}
+
+function r4(){ return `
+  <div class="eyebrow">${STEPS[3].n}</div><h1>Storage specifications<span class="dot">.</span></h1>
+  <p class="lede">How much inventory do you typically hold? We use this to size your match.</p>
+  ${field('Monthly pallet storage','Number of pallets stored on average. Enter 0 if pre-launch.', `<input class="txt small-in" id="f-pallets" inputmode="numeric" value="${esc(S.pallets)}" placeholder="e.g. 25">`)}
+  ${field('Additional storage details <span style="color:var(--muted-2);font-weight:400">· Optional</span>','Anything unusual about your inventory shape, seasonality, or handling needs.',
+    `<textarea class="txt" id="f-storenotes" placeholder="e.g. We hold ~30 pallets year-round and spike to ~80 in Q4.">${esc(S.storenotes)}</textarea>`)}
+  ${field('Does your product require specific temperatures during storage?','Temperature-controlled warehousing is a specialty service — it narrows the match pool significantly.',
+    `<div class="yesno">
+       <button type="button" class="yn ${S.temp==='Yes'?'sel':''}" data-temp="Yes">Yes — needs a specific range</button>
+       <button type="button" class="yn ${S.temp==='No'?'sel':''}" data-temp="No">No — normal warehouse is fine</button>
+     </div>`)}
+  <div id="tempblock" style="display:${S.temp==='Yes'?'block':'none'}">
+    <div class="subcard">
+      <div class="qlabel" style="margin-top:0">Which conditions apply?</div>
+      <div class="tempopts">
+        ${['Refrigerated Storage — 32–50°F','Frozen Storage — below 32°F','Temperature Controlled Storage'].map(t=>
+          `<div class="topt ${S.tempconds.includes(t)?'sel':''}" data-tc="${esc(t)}"><span class="box">✓</span>${esc(t)}</div>`).join('')}
+      </div>
+      <div class="qlabel">Temperature description</div>
+      <textarea class="txt" id="f-tempdesc" placeholder="e.g. Product must stay under 95°F — excessive heat causes it to degrade or melt.">${esc(S.tempdesc)}</textarea>
+    </div>
+  </div>
+  ${field('Do you need lot / expiration tracking?','Common for supplements, food, and cosmetics.',
+    `<div class="yesno">
+       <button type="button" class="yn ${S.lot==='Yes'?'sel':''}" data-lot="Yes">Yes</button>
+       <button type="button" class="yn ${S.lot==='No'?'sel':''}" data-lot="No">No</button>
+     </div>`)}
+`;}
+
+function vaCards(list){
+  return `<div class="vas">` + list.map(([t,d]) =>
+    `<div class="va ${S.vas.includes(t)?'sel':''}" data-va="${esc(t)}"><span class="box">✓</span><b>${esc(t)}</b><small>${esc(d)}</small></div>`).join('') + `</div>`;
+}
+function r5(){
+  const apparel = S.cats.includes('Apparel & Accessories');
+  return `
+  <div class="eyebrow">${STEPS[4].n}</div><h1>Value-add services<span class="dot">.</span></h1>
+  <p class="lede">We tailored these based on what you ship. Skip anything that doesn't apply.</p>
+  ${apparel ? `<div class="vahead">Recommended for apparel</div><div class="vahint">Services typically offered for apparel brands. Select any that apply.</div>${vaCards(VA_APPAREL)}` : ''}
+  <div class="vahead">${apparel?'Other services':'Popular services'}</div><div class="vahint">Universal value-adds available across categories.</div>
+  ${vaCards(VA_OTHER)}
+  <div class="qlabel" style="margin-top:34px">When do you need to be shipping with your new warehouse?</div>
+  <div class="choices" style="margin-top:10px">
+    ${TL.map(([t,d])=>`<div class="choice ${S.timeline===t?'sel':''}" data-tl="${esc(t)}"><b>${esc(t)}</b><small>${esc(d)}</small></div>`).join('')}
+  </div>
+  <div class="qlabel">Your current fulfillment setup</div>
+  <div class="choices" style="margin-top:10px">
+    ${CUR.map(([t,d])=>`<div class="choice ${S.current===t?'sel':''}" data-cur="${esc(t)}"><b>${esc(t)}</b><small>${esc(d)}</small></div>`).join('')}
+  </div>
+  ${field('Anything else we should know? <span style="color:var(--muted-2);font-weight:400">· Optional</span>','Seasonal spikes, specific markets, past 3PL issues — all useful context.',
+    `<textarea class="txt" id="f-notes" placeholder="e.g. Q4 subscription surge (3x volume). Previous 3PL missed ship-by dates two months running.">${esc(S.notes)}</textarea>`)}
+  ${field('How did you hear about shipbay? <span style="color:var(--muted-2);font-weight:400">· Optional</span>','',
+    `<input class="txt" id="f-heard" value="${esc(S.heard)}" placeholder="e.g. Google search, a referral, LinkedIn…">`)}
+`;}
+
+function chanSummary(){
+  const parts = [];
+  const c = S.channels;
+  if (c.dtc) parts.push(`DTC ${c.dtc.vol||'?'} orders/mo`);
+  if (c.fba) parts.push(`FBA ${c.fba.vol||'?'} units/mo`);
+  if (c.fbm) parts.push(`FBM ${c.fbm.vol||'?'} orders/mo`);
+  if (c.b2b) parts.push(`B2B ${c.b2b.vol||'?'} parcels + ${c.b2b.ltl||'0'} LTL/mo${c.b2b.edi==='Yes'?' · EDI':''}`);
+  return parts.join(' · ') || '—';
+}
+function r6(){
+  const d = (v) => esc(v && String(v).trim() ? v : '—');
+  const rev = (n, title, go, rows) => `
+    <div class="rev"><div class="rev-h"><i>${n}</i><b>${title}</b><button data-goto="${go}">Edit</button></div>
+    <dl>${rows.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></div>`;
+  return `
+  <div class="eyebrow">Final check</div><h1>Review and confirm<span class="dot">.</span></h1>
+  <p class="lede">Look over your answers — any section can still be edited. Submit when everything looks right.</p>
+  ${rev(1,'Who you are',0,[['Name',d(S.name)],['Email',d(S.email)],['Phone',d(S.phone)],['Business',d(S.biz)],['Website',d(S.site)],['Status',d(S.status)]])}
+  ${rev(2,'Where and how you sell',1,[['Warehouse location',d(S.geo)],['Channels',esc(chanSummary())],['Platforms',d(S.platforms.join(', '))]])}
+  ${rev(3,'What you ship',2,[['Categories',d(S.cats.join(', '))],['Specialty',d(S.specs.join(', '))],['Description',d(S.shipdesc)],['Active SKUs',d(S.skus)],['Weights',d(S.weights.join(', '))]])}
+  ${rev(4,'Storage',3,[['Pallets / month',d(S.pallets)],['Temperature',d(S.temp==='Yes'?(S.tempconds.join(', ')||'Yes')+(S.tempdesc?' — '+S.tempdesc:''):S.temp)],['Lot tracking',d(S.lot)],['Notes',d(S.storenotes)]])}
+  ${rev(5,'Final details',4,[['Value-adds',d(S.vas.join(', '))],['Timeline',d(S.timeline)],['Current setup',d(S.current)],['Anything else',d(S.notes)],['Heard about us',d(S.heard)]])}
+  <div class="err" id="submitErr"></div>
+`;}
+
+function doneScreen(){
+  $('navfoot').style.display='none';
+  $('pctNum').textContent='100%';
+  document.querySelectorAll('.seg i').forEach(el=>el.style.width='100%');
+  $('main').innerHTML = `
+    <div class="done-badge"><i></i>REQUEST APPROVED</div>
+    <h1>You're on our floor's calendar now<span class="dot">.</span></h1>
+    <p class="lede">Your match profile is with our team — here's exactly what happens next.</p>
+    <div class="steps-done">
+      <div class="sd on"><span class="ic">✓</span><span><small>STEP 1 · DONE</small><b>You told us about your brand</b></span></div>
+      <div class="sd on"><span class="ic">✓</span><span><small>STEP 2 · DONE</small><b>Your profile is in our pipeline</b></span></div>
+      <div class="sd on pending"><span class="ic">●</span><span><small>STEP 3 · STARTING</small><b>We select your warehouse</b></span></div>
+    </div>
+    <div class="next-card">
+      <h3>What happens next</h3>
+      <div class="nx"><span class="when">TODAY</span><p>A <b>US-based specialist</b> reaches out to confirm your details.</p></div>
+      <div class="nx"><span class="when">WITHIN 24H</span><p>We review your profile against our floor — <b>fit, capacity, and your exact rates</b> from the published rate card.</p></div>
+      <div class="nx"><span class="when">WITHIN 48H</span><p>You get your <b>quote and onboarding plan</b>: line-item pricing from the published rate card, and — if you're switching — your free MigrateBay switching plan.</p></div>
+    </div>
+    <p style="margin-top:26px"><a href="index.html" style="color:var(--orange-soft);font-weight:600">← Back to shipbay</a></p>
+  `;
+  window.scrollTo(0,0);
+}
+
+/* ---------- wiring ---------- */
+function render(){
+  const st = STEPS[step];
+  $('main').innerHTML = st.render();
+  $('btnBack').style.visibility = step===0 ? 'hidden' : 'visible';
+  $('btnGo').textContent = step===5 ? 'Apply →' : 'Continue →';
+  $('stepMeta').innerHTML = `<b>${step===5?'Review':'Step '+(step+1)+' of 5'}</b>${st.meta}`;
+  paintProgress();
+  wire();
+  window.scrollTo(0,0);
+}
+function wire(){
+  const M = $('main');
+  M.querySelectorAll('input.txt,textarea.txt').forEach(el=>{
+    el.addEventListener('input', () => {
+      const map = {'f-name':'name','f-email':'email','f-phone':'phone','f-biz':'biz','f-site':'site','f-geo':'geo',
+        'f-shipdesc':'shipdesc','f-skus':'skus','f-pallets':'pallets','f-storenotes':'storenotes','f-tempdesc':'tempdesc',
+        'f-notes':'notes','f-heard':'heard'};
+      if (map[el.id]) { S[map[el.id]] = el.value; save(); }
+      if (el.dataset.cv) { const k=el.dataset.cv; S.channels[k]=S.channels[k]||{}; S.channels[k].vol=el.value; save(); }
+      if (el.dataset.cx) { S.channels.b2b=S.channels.b2b||{}; S.channels.b2b[el.dataset.cx]=el.value; save(); }
+    });
+  });
+  M.querySelectorAll('[data-status]').forEach(el=>el.onclick=()=>{ S.status=el.dataset.status; save(); render(); });
+  M.querySelectorAll('[data-chan]').forEach(el=>el.onclick=(e)=>{
+    if (e.target.closest('.chan-b')) return;
+    const k=el.dataset.chan;
+    if (S.channels[k]) delete S.channels[k]; else S.channels[k]={vol:''};
+    save(); render();
+  });
+  M.querySelectorAll('[data-edi]').forEach(el=>el.onclick=()=>{ S.channels.b2b=S.channels.b2b||{}; S.channels.b2b.edi=el.dataset.edi; save(); render(); });
+  M.querySelectorAll('[data-chips]').forEach(box=>{
+    const key=box.dataset.chips;
+    box.querySelectorAll('.chip').forEach(ch=>ch.onclick=()=>{
+      const v=ch.dataset.v, arr=S[key];
+      const i=arr.indexOf(v); if(i>=0)arr.splice(i,1); else arr.push(v);
+      save(); render();
+    });
+  });
+  M.querySelectorAll('[data-temp]').forEach(el=>el.onclick=()=>{ S.temp=el.dataset.temp; save(); render(); });
+  M.querySelectorAll('[data-tc]').forEach(el=>el.onclick=()=>{
+    const v=el.dataset.tc, i=S.tempconds.indexOf(v); if(i>=0)S.tempconds.splice(i,1); else S.tempconds.push(v); save(); render(); });
+  M.querySelectorAll('[data-lot]').forEach(el=>el.onclick=()=>{ S.lot=el.dataset.lot; save(); render(); });
+  M.querySelectorAll('[data-va]').forEach(el=>el.onclick=()=>{
+    const v=el.dataset.va, i=S.vas.indexOf(v); if(i>=0)S.vas.splice(i,1); else S.vas.push(v); save(); render(); });
+  M.querySelectorAll('[data-tl]').forEach(el=>el.onclick=()=>{ S.timeline=el.dataset.tl; save(); render(); });
+  M.querySelectorAll('[data-cur]').forEach(el=>el.onclick=()=>{ S.current=el.dataset.cur; save(); render(); });
+  M.querySelectorAll('[data-goto]').forEach(el=>el.onclick=()=>{ step=+el.dataset.goto; render(); });
+}
+$('btnBack').onclick = () => { if (step>0){ step--; render(); } };
+$('btnGo').onclick = async () => {
+  const msg = STEPS[step].valid();
+  if (msg) { showErr(msg); return; }
+  if (step < 5) { step++; render(); return; }
+  await submit();
+};
+function showErr(msg){
+  let e = $('stepErr');
+  if (!e) { e=document.createElement('div'); e.id='stepErr'; e.className='err show'; $('main').appendChild(e); }
+  e.className='err show'; e.textContent=msg;
+  e.scrollIntoView({behavior:'smooth',block:'center'});
+}
+
+/* ---------- submit ---------- */
+async function submit(){
+  const btn=$('btnGo'); btn.disabled=true; btn.textContent='Submitting…';
+  const totalOrders = ['dtc','fbm'].reduce((a,k)=>a+(parseInt((S.channels[k]||{}).vol)||0),0);
+  const volLabel = totalOrders ? `~${totalOrders.toLocaleString()} orders/mo` : chanSummary();
+  const lead = {
+    name:S.name.trim(), email:S.email.trim(), brand:S.biz.trim(), phone:S.phone.trim(),
+    volume: volLabel, current_setup: S.current, notes: S.shipdesc || S.notes,
+    slot: null, source: 'MigrateBay — Get started', stage: 'new',
+    activity: [{t:'Match request submitted from Get started intake', when:new Date().toISOString()}],
+    intake: S
+  };
+  let ok=false;
+  try {
+    const C = window.SHIPBAY_CONFIG||{};
+    if (C.SUPABASE_URL && C.SUPABASE_ANON_KEY && window.supabase) {
+      const sb = window.supabase.createClient(C.SUPABASE_URL, C.SUPABASE_ANON_KEY, {auth:{persistSession:false,autoRefreshToken:false}});
+      const { error } = await sb.from('leads').insert(lead);
+      if (!error) ok=true; else console.warn('Intake insert failed:', error.message);
+    }
+  } catch(e){ console.warn(e); }
+  if (!ok) {
+    // backup: Netlify Forms
+    try {
+      const fd=new URLSearchParams(); fd.append('form-name','consultation');
+      fd.append('name',lead.name); fd.append('email',lead.email); fd.append('brand',lead.brand);
+      fd.append('phone',lead.phone); fd.append('volume',lead.volume); fd.append('current',lead.current_setup||'');
+      fd.append('notes','MATCH INTAKE: '+JSON.stringify(S).slice(0,900)); fd.append('slot','—');
+      fetch('/',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:fd.toString()}).catch(()=>{});
+    } catch(e){}
+  }
+  try { localStorage.removeItem('shipbay-intake'); } catch(e){}
+  doneScreen();
+}
+
+/* ---------- boot ---------- */
+$('segs').innerHTML = Array.from({length:5},()=>'<span class="seg"><i></i></span>').join('');
+render();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pricing — shipbay.</title>
+<link rel="icon" type="image/svg+xml" href="assets/brand/08-icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#FFFFFF;--bg-soft:#F8F7F5;--line:#E8E6E1;--ink:#101C2B;--muted:#5A6473;--muted-2:#8A93A3;
+    --orange:#FF6B15;--orange-soft:#D14E00;--orange-tint:#FFF0E4;--orange-hover:#E85E0A;--green:#1E9E6F}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  img{max-width:100%;display:block}
+  .wrap{max-width:1200px;margin:0 auto;padding:0 24px}
+  h1,h2,h3{font-family:'Archivo',sans-serif;letter-spacing:-.01em}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  .dot{color:var(--orange)}
+  .eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:12.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--orange-soft);margin-bottom:16px}
+  .eyebrow::before{content:"";width:22px;height:2px;background:var(--orange)}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:16px 32px;border-radius:11px;font-weight:600;font-size:16px;font-family:'Archivo',sans-serif;transition:all .18s;cursor:pointer;border:none}
+  .btn-orange{background:var(--orange);color:#fff;box-shadow:0 8px 26px rgba(255,107,21,.32)}
+  .btn-orange:hover{background:var(--orange-hover);transform:translateY(-2px)}
+  .btn-outline{border:1.5px solid var(--ink);color:var(--ink);background:rgba(255,255,255,.6)}
+  .btn-outline:hover{background:var(--ink);color:#fff}
+  header{position:sticky;top:0;z-index:100;background:rgba(255,255,255,.92);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+  nav{display:flex;align-items:center;justify-content:space-between;height:76px}
+  .nav-logo img{height:38px;width:auto}
+  .nav-links{display:flex;gap:34px;font-size:15px;font-weight:500;color:var(--muted)}
+  .nav-links a:hover{color:var(--ink)}
+  .nav-links a.on{color:var(--ink);font-weight:600}
+  .nav-cta{display:flex;gap:14px;align-items:center}
+  .nav-cta .login{font-weight:600;font-size:15px;color:var(--muted)}
+  .nav-cta .btn{padding:11px 22px;font-size:15px}
+  h2{font-size:clamp(34px,4.2vw,52px);font-weight:700;line-height:1.1;color:var(--ink);margin-bottom:14px}
+  .sec-head{max-width:880px;margin-bottom:52px}
+  .sec-head p{font-size:18px;color:var(--muted);max-width:640px}
+  section{position:relative}
+  /* hero */
+  .hero{position:relative;padding:88px 0 80px;overflow:hidden;background:
+    radial-gradient(820px 460px at 92% -8%, var(--orange-tint) 0%, transparent 58%),
+    radial-gradient(620px 420px at -5% 75%, #FFF0E466 0%, transparent 60%), var(--bg)}
+  .hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:56px;align-items:center;position:relative;z-index:1}
+  .kicker{display:inline-flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:99px;padding:8px 18px 8px 10px;font-size:13.5px;color:var(--muted);margin-bottom:26px;box-shadow:0 2px 10px rgba(16,28,43,.05)}
+  .kicker .k-badge{background:var(--orange);color:#fff;font-family:'Archivo',sans-serif;font-weight:700;font-size:12.5px;padding:4px 12px;border-radius:99px}
+  h1{font-size:clamp(40px,5vw,62px);font-weight:700;line-height:1.06;color:var(--ink)}
+  h1 em{font-style:normal;color:var(--orange)}
+  .hero p.lede{margin:22px 0 32px;font-size:20px;color:var(--muted);max-width:530px;line-height:1.5}
+  .hero p.lede b{color:var(--ink)}
+  .hero-ctas{display:flex;gap:14px;flex-wrap:wrap}
+  .mig-panel{background:#fff;border:1px solid var(--line);border-radius:22px;padding:26px;box-shadow:0 24px 60px rgba(16,28,43,.09)}
+  .mig-panel .mp-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+  .mig-panel .mp-head b{font-family:'Archivo',sans-serif;font-size:14px}
+  .mig-panel .pill{font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 12px;border-radius:99px;background:rgba(30,158,111,.1);color:var(--green)}
+  .flowline{stroke:var(--orange);stroke-width:2.5;fill:none;stroke-dasharray:7 7;animation:dashmove 1.4s linear infinite}
+  @keyframes dashmove{to{stroke-dashoffset:-14}}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+  /* kpis */
+  .kpis{padding:84px 0 70px}
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr)}
+  .kpi{padding:28px 32px;border-left:1px solid var(--line)}
+  .kpi:first-child{border-left:none;padding-left:0}
+  .kpi b{display:block;font-family:'Archivo',sans-serif;font-size:46px;font-weight:700;color:var(--ink);line-height:1.05}
+  .kpi b em{font-style:normal;color:var(--orange)}
+  .kpi span{display:block;font-size:14.5px;color:var(--muted);margin-top:8px;line-height:1.45}
+  /* phases */
+  .phases{padding:100px 0;border-top:1px solid var(--line);background:
+    radial-gradient(720px 420px at 96% 100%, var(--orange-tint) 0%, transparent 58%), var(--bg-soft)}
+  .phase-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-top:52px}
+  .phase{background:#fff;border:1px solid var(--line);border-radius:18px;padding:28px 26px;position:relative;transition:all .2s}
+  .phase:hover{transform:translateY(-3px);box-shadow:0 18px 44px rgba(16,28,43,.09);border-color:var(--orange)}
+  .phase .pnum{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;color:var(--orange-soft);display:block;margin-bottom:12px}
+  .phase h3{font-size:19px;font-weight:600;margin-bottom:10px}
+  .phase p{font-size:14px;color:var(--muted);line-height:1.55}
+  .phase p b{color:var(--ink)}
+  /* expensive */
+  .why{padding:104px 0;overflow:hidden;background:
+    radial-gradient(760px 460px at 4% 8%, var(--orange-tint) 0%, transparent 60%), var(--bg)}
+  .why-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center}
+  .why p.big{font-size:19px;color:var(--muted);margin-bottom:18px;line-height:1.6}
+  .why p.big b{color:var(--ink)}
+  .savelist{display:grid;gap:13px;margin-top:8px}
+  .save{display:flex;gap:13px;background:#fff;border:1px solid var(--line);border-radius:13px;padding:16px 18px}
+  .save .tick{flex:none;width:26px;height:26px;border-radius:8px;background:var(--orange);color:#fff;display:grid;place-items:center;font-size:14px;font-weight:700;margin-top:2px}
+  .save b{display:block;font-size:15px;font-family:'Archivo',sans-serif}
+  .save small{font-size:13.5px;color:var(--muted);line-height:1.5}
+  /* modes */
+  .modes{padding:100px 0;border-top:1px solid var(--line)}
+  .mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:48px}
+  .mode{border:1.5px solid var(--line);border-radius:20px;padding:32px;background:#fff}
+  .mode.rec{border-color:var(--orange);background:linear-gradient(165deg,#FFF7F1 0%,#fff 55%)}
+  .mode .mtag{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;padding:5px 13px;border-radius:99px;background:var(--bg-soft);color:var(--muted);margin-bottom:16px}
+  .mode.rec .mtag{background:var(--orange);color:#fff}
+  .mode h3{font-size:22px;font-weight:600;margin-bottom:10px}
+  .mode p{font-size:15px;color:var(--muted);margin-bottom:14px}
+  .mode p b{color:var(--ink)}
+  .mode ul{list-style:none;display:grid;gap:9px}
+  .mode li{display:flex;gap:10px;font-size:14px;color:var(--muted)}
+  .mode li::before{content:"→";color:var(--orange);font-weight:700}
+  /* dashboard */
+  .mdash{padding:104px 0;border-top:1px solid var(--line);background:
+    radial-gradient(720px 420px at 100% 10%, var(--orange-tint) 0%, transparent 60%), var(--bg-soft)}
+  .md-grid{display:grid;grid-template-columns:.92fr 1.08fr;gap:60px;align-items:center}
+  .md-list{list-style:none;display:grid;gap:14px;margin:24px 0 28px}
+  .md-list li{display:flex;gap:13px;font-size:16px;color:var(--muted)}
+  .md-list li b{color:var(--ink)}
+  .md-list .tick{flex:none;width:24px;height:24px;border-radius:8px;background:var(--orange);color:#fff;display:grid;place-items:center;font-size:13px;font-weight:700;margin-top:2px}
+  .dashmock{background:var(--ink);border-radius:18px;padding:20px;color:#F6F5F1;box-shadow:0 30px 70px rgba(16,28,43,.25)}
+  .dm-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+  .dm-head .brand{display:flex;align-items:center;gap:10px;font-family:'Archivo',sans-serif;font-weight:600;font-size:13.5px}
+  .dm-head .pill{font-family:'IBM Plex Mono',monospace;font-size:10.5px;padding:4px 11px;border-radius:99px;background:rgba(232,122,51,.2);color:#F0B285}
+  .dm-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+  .dstat{background:#1B212B;border-radius:11px;padding:13px 15px}
+  .dstat b{display:block;font-family:'Archivo',sans-serif;font-size:20px;font-weight:700;color:#fff}
+  .dstat small{font-size:11px;color:#8A93A3}
+  .dstat .up{color:#5ED4A5;font-size:10.5px;font-family:'IBM Plex Mono',monospace}
+  .bar-row{margin-bottom:12px}
+  .bar-row .bl{display:flex;justify-content:space-between;font-size:11.5px;color:#8A93A3;margin-bottom:5px}
+  .bar-row .bl b{color:#fff;font-family:'IBM Plex Mono',monospace;font-size:11px}
+  .bar{height:8px;border-radius:99px;background:#1B212B;overflow:hidden}
+  .bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--orange),#FFA36B)}
+  .dm-note{font-size:11px;color:#8A93A3;border-top:1px solid #232A36;padding-top:11px;margin-top:4px}
+  .dm-note b{color:#5ED4A5}
+  /* cta */
+  .cta{padding:20px 24px 110px}
+  .cta-card{max-width:1152px;margin:0 auto;border-radius:24px;border:1px solid var(--orange);background:
+      radial-gradient(90% 140% at 88% -25%, var(--orange-tint) 0%, transparent 52%),
+      radial-gradient(60% 90% at 0% 110%, #FFF0E480 0%, transparent 55%), #fff;
+    padding:64px 56px;text-align:center;box-shadow:0 30px 80px rgba(16,28,43,.08)}
+  .cta-card p{font-size:17px;color:var(--muted);max-width:560px;margin:0 auto 30px}
+  footer{padding:60px 0 44px;border-top:1px solid var(--line);background:
+    radial-gradient(700px 380px at 90% 0%, var(--orange-tint) 0%, transparent 60%), var(--bg-soft)}
+  .foot-legal{font-size:12.5px;color:var(--muted-2);line-height:1.7;display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;align-items:center}
+  .foot-logo img{height:26px;width:auto}
+  @media(max-width:960px){
+    .nav-links,.nav-cta .login{display:none}
+    .hero-grid,.why-grid,.md-grid,.mode-grid{grid-template-columns:1fr}
+    .kpi-grid{grid-template-columns:1fr 1fr}
+    .kpi{border-left:none;padding-left:0;border-top:1px solid var(--line);padding-top:20px}
+    .phase-grid{grid-template-columns:1fr 1fr}
+  }
+  @media(max-width:600px){.phase-grid{grid-template-columns:1fr}}
+
+  .rate-wrap{overflow-x:auto}
+  table.rates{width:100%;border-collapse:collapse;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 20px 50px rgba(16,28,43,.07);font-size:14.5px}
+  table.rates th{background:var(--ink);color:#fff;text-align:left;padding:14px 18px;font-family:'Archivo',sans-serif;font-size:13px;letter-spacing:.03em}
+  table.rates td{padding:13px 18px;border-top:1px solid var(--line);vertical-align:top}
+  table.rates td.price{font-family:'Archivo',sans-serif;font-weight:700;color:var(--ink);white-space:nowrap}
+  table.rates td.note{color:var(--muted);font-size:13px}
+  table.rates tr.grp td{background:var(--orange-tint);font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.12em;color:var(--orange-soft);padding:8px 18px}
+  .chipsrow{display:flex;gap:10px;flex-wrap:wrap;margin:22px 0 0}
+  .pchipx{background:#fff;border:1px solid var(--orange);border-radius:99px;padding:9px 18px;font-size:13.5px;font-weight:600}
+  table.cmp{width:100%;border-collapse:collapse;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 20px 50px rgba(16,28,43,.07);font-size:13.5px}
+  table.cmp th{background:var(--ink);color:#fff;text-align:left;padding:12px 14px;font-family:'Archivo',sans-serif;font-size:12.5px}
+  table.cmp td{padding:11px 14px;border-top:1px solid var(--line);color:var(--muted)}
+  table.cmp td b{color:var(--ink)}
+  table.cmp tr.us td{background:#FFF4EB}
+  table.cmp tr.us td, table.cmp tr.us td b{color:var(--ink);font-weight:600}
+  .scen{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:40px}
+  .scard2{background:#fff;border:1.5px solid var(--line);border-radius:18px;padding:26px}
+  .scard2.mid{border-color:var(--orange)}
+  .scard2 .t{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.12em;color:var(--muted-2)}
+  .scard2 h3{font-family:'Archivo',sans-serif;font-size:21px;margin:6px 0 14px}
+  .scard2 .big{font-family:'Archivo',sans-serif;font-size:34px;font-weight:800;color:var(--orange-soft)}
+  .scard2 .big small{font-size:14px;color:var(--muted);font-weight:400}
+  .scard2 p{font-size:13px;color:var(--muted);margin-top:10px}
+  .finenote{font-size:12.5px;color:var(--muted-2);margin-top:26px;max-width:880px;line-height:1.7}
+  @media(max-width:960px){.scen{grid-template-columns:1fr}}
+  /* v8 tiers + rate card form */
+  .tier-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .tier{background:#fff;border:1.5px solid var(--line);border-radius:18px;padding:28px 26px}
+  .tier.best{border-color:var(--orange);background:linear-gradient(165deg,#FFF7F1 0%,#fff 60%);box-shadow:0 22px 54px rgba(255,107,21,.13)}
+  .tier .tt{display:block;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.12em;color:var(--muted-2);margin-bottom:12px}
+  .tier.best .tt{color:var(--orange-soft)}
+  .tier b{display:block;font-family:'Archivo',sans-serif;font-weight:900;font-size:40px;letter-spacing:-.03em;color:var(--ink);line-height:1}
+  .tier b em{font-style:normal;color:var(--orange);font-size:16px;font-weight:700}
+  .tier .td{display:block;font-family:'Archivo',sans-serif;font-weight:600;font-size:14.5px;margin-top:8px}
+  .tier small{display:block;font-size:12.5px;color:var(--muted);margin-top:8px;line-height:1.55}
+  @media(max-width:880px){.tier-grid{grid-template-columns:1fr}}
+  .rc-form{background:#fff;border:1px solid var(--line);border-radius:18px;padding:28px;box-shadow:0 20px 50px rgba(16,28,43,.07)}
+  .rc-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+  .rc-form input,.rc-form select{width:100%;padding:14px 16px;border:1.5px solid var(--line);border-radius:11px;font-family:'Inter',sans-serif;font-size:15px;color:var(--ink);background:#fff}
+  .rc-form input:focus,.rc-form select:focus{outline:none;border-color:var(--orange)}
+  @media(max-width:640px){.rc-row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <nav>
+      <a class="nav-logo" href="index.html"><img src="assets/brand/01-horizontal.svg" alt="shipbay."></a>
+      <div class="nav-links">
+        <a href="facility.html">Our Facilities</a>
+        <a class="on" href="pricing.html">Pricing</a>
+        <a href="index.html#how">How it works</a>
+        <a href="dashboard.html">Dashboard</a>
+      </div>
+      <div class="nav-cta">
+        <a class="login" href="portal.html">Log in</a>
+        <a class="btn btn-orange" href="start.html">Apply for an account</a>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<div class="hero" style="padding:80px 0 60px">
+  <div class="wrap" style="position:relative;z-index:1">
+    <div class="kicker"><span class="k-badge">NJ</span> Central-NJ 3PL &mdash; volume pricing below</div>
+    <h1 style="max-width:840px">Our best rates, up front<span class="dot">.</span></h1>
+    <p class="lede" style="max-width:620px">Volume pricing below. Want every line item? <b><a href="#ratecard" style="color:var(--orange-soft);text-decoration:underline;text-underline-offset:3px">We&rsquo;ll email you the full rate card.</a></b></p>
+    <div class="chipsrow">
+      <span class="pchipx">$0 setup</span>
+      <span class="pchipx">No order minimums</span>
+      <span class="pchipx">No peak-season storage surcharge</span>
+      <span class="pchipx">Month-to-month</span>
+    </div>
+  </div>
+</div>
+
+<section style="padding:70px 0;background:var(--bg-soft);border-top:1px solid var(--line)" id="rates">
+  <div class="wrap">
+    <div class="sec-head" style="margin-bottom:34px">
+      <span class="eyebrow">Volume pricing</span>
+      <h2>The more you ship, the better it gets<span class="dot">.</span></h2>
+      <p>Pick &amp; pack with standard packaging included. Storage, receiving and value-add services on the full rate card.</p>
+    </div>
+    <div class="tier-grid">
+      <div class="tier best"><span class="tt">SCALE &middot; 5,000+ ORDERS/MO</span><b>$1.65<em>/order</em></b><span class="td">Pick &amp; pack, packaging included</span><small>+ $0.40 per extra unit &middot; dedicated account manager &middot; priority dock windows &middot; custom storage program</small></div>
+      <div class="tier"><span class="tt">GROWTH &middot; 1,000&ndash;5,000 ORDERS/MO</span><b>$1.80<em>/order</em></b><span class="td">Pick &amp; pack, packaging included</span><small>+ $0.40 per extra unit &middot; dedicated account manager &middot; monthly performance reviews</small></div>
+      <div class="tier"><span class="tt">LAUNCH &middot; UNDER 1,000 ORDERS/MO</span><b>$1.95<em>/order</em></b><span class="td">Pick &amp; pack, packaging included</span><small>No order minimums &mdash; start with one shelf and scale up</small></div>
+    </div>
+    <p class="finenote" style="margin-top:20px">Every account: $0 setup &middot; month-to-month &middot; carrier rates billed at cost &middot; Shopify, WooCommerce, Amazon &amp; TikTok Shop integrations included.</p>
+  </div>
+</section>
+
+<section style="padding:90px 0" id="compare">
+  <div class="wrap">
+    <div class="sec-head" style="margin-bottom:10px">
+      <span class="eyebrow">What that means monthly</span>
+      <h2>Real months, real math<span class="dot">.</span></h2>
+    </div>
+    <div class="scen">
+      <div class="scard2"><span class="t">STARTER · 350 ORDERS/MO</span><h3>~$924 / month</h3>
+        <div class="big">$2.64<small> / order in services</small></div>
+        <p>vs. roughly $1,050–$1,280/mo at the major national 3PLs on reported rates. Assumes 1.5 items/order, 4 pallets stored, ex-postage.</p></div>
+      <div class="scard2 mid"><span class="t">GROWTH · 1,500 ORDERS/MO</span><h3>~$3,660 / month</h3>
+        <div class="big">$2.44<small> / order in services</small></div>
+        <p>vs. roughly $4,350–$5,330/mo at the majors. Assumes 1.6 items/order, 12 pallets stored, ex-postage.</p></div>
+      <div class="scard2"><span class="t">SCALE · 5,000 ORDERS/MO</span><h3>~$11,650 / month</h3>
+        <div class="big">$2.33<small> / order in services</small></div>
+        <p>vs. roughly $14,700–$18,100/mo at the majors. Assumes 1.7 items/order, 35 pallets stored, ex-postage.</p></div>
+    </div>
+    <p class="finenote">Competitor ranges reflect pricing published by each company or reported by independent industry sources as of September 2026; rates vary by account.</p>
+  </div>
+</section>
+
+<section style="padding:90px 0;border-top:1px solid var(--line);background:radial-gradient(720px 420px at 0% 100%, var(--orange-tint) 0%, transparent 58%), var(--bg-soft)" id="ratecard">
+  <div class="wrap" style="max-width:880px">
+    <div class="sec-head" style="text-align:center;margin:0 auto 30px;max-width:640px">
+      <span class="eyebrow" style="justify-content:center;display:inline-flex">Every line item</span>
+      <h2>Get the full rate card<span class="dot">.</span></h2>
+      <p>Receiving, storage, returns, FBA prep, B2B, kitting &mdash; every number, straight to your inbox.</p>
+    </div>
+    <form id="rcForm" class="rc-form" onsubmit="return rcSubmit(event)">
+      <div class="rc-row">
+        <input type="text" id="rc-name" placeholder="Full name" required>
+        <input type="email" id="rc-email" placeholder="Work email" required>
+      </div>
+      <div class="rc-row">
+        <input type="text" id="rc-brand" placeholder="Brand / company" required>
+        <select id="rc-vol" required>
+          <option value="">Monthly order volume&hellip;</option>
+          <option>Under 500</option>
+          <option>500 &ndash; 1,000</option>
+          <option>1,000 &ndash; 5,000</option>
+          <option>5,000+</option>
+        </select>
+      </div>
+      <button class="btn btn-orange" type="submit" id="rcBtn" style="width:100%;justify-content:center">Email me the full rate card</button>
+      <p class="finenote" style="text-align:center;margin-top:12px">No spam &mdash; the rate card and one follow-up from your account manager.</p>
+    </form>
+    <div id="rcDone" style="display:none;text-align:center;background:#fff;border:1.5px solid var(--orange);border-radius:18px;padding:44px 30px">
+      <h3 style="font-family:'Archivo',sans-serif;font-size:24px;margin-bottom:8px">On its way<span class="dot">.</span></h3>
+      <p style="color:var(--muted)">Your full rate card is headed to your inbox shortly. Want your exact quote now? <a href="book.html" style="color:var(--orange-soft);font-weight:600;text-decoration:underline">Book a call</a>.</p>
+    </div>
+  </div>
+</section>
+
+<div class="cta">
+  <div class="cta-card">
+    <span class="eyebrow" style="justify-content:center;display:inline-flex">Same-day quote</span>
+    <h2>Your exact number, from these exact rates<span class="dot">.</span></h2>
+    <p>Five minutes of intake and we&rsquo;ll price your catalog line by line &mdash; your exact number, same day.</p>
+    <a class="btn btn-orange" href="start.html">Apply for an account</a>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-legal">
+      <span class="foot-logo"><img src="assets/brand/01-horizontal.svg" alt="shipbay."></span>
+      <span>&copy; 2026 shipbay. All rights reserved. &middot; <a href="privacy.html" style="text-decoration:underline">Privacy</a> &middot; <a href="terms.html" style="text-decoration:underline">Terms</a> &middot; 115 Stryker Ln, Hillsborough Township, NJ</span>
+    </div>
+  </div>
+</footer>
+
+<script src="js/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+async function rcSubmit(e){
+  e.preventDefault();
+  const btn = document.getElementById('rcBtn');
+  btn.disabled = true; btn.textContent = 'Sending\u2026';
+  const lead = {
+    name: document.getElementById('rc-name').value.trim(),
+    email: document.getElementById('rc-email').value.trim(),
+    brand: document.getElementById('rc-brand').value.trim(),
+    volume: document.getElementById('rc-vol').value
+  };
+  try {
+    const C = window.SHIPBAY_CONFIG || {};
+    if (C.SUPABASE_URL && C.SUPABASE_ANON_KEY && window.supabase) {
+      const sb = window.supabase.createClient(C.SUPABASE_URL, C.SUPABASE_ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+      const { error } = await sb.from('leads').insert({
+        name: lead.name, email: lead.email, brand: lead.brand, phone: '',
+        volume: lead.volume, notes: 'Requested the full rate card',
+        source: 'Rate card request', stage: 'new',
+        activity: [{ t: 'Requested the full rate card from pricing page', when: new Date().toISOString() }]
+      });
+      if (error) console.warn('Supabase insert failed:', error.message);
+    }
+  } catch (err) { console.warn('Capture skipped:', err); }
+  const fd = new URLSearchParams();
+  fd.append('form-name','consultation');
+  Object.entries({name:lead.name,email:lead.email,brand:lead.brand,volume:lead.volume,notes:'Rate card request'}).forEach(([k,v])=>fd.append(k,v||''));
+  fetch('/', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:fd.toString()}).catch(()=>{});
+  document.getElementById('rcForm').style.display = 'none';
+  document.getElementById('rcDone').style.display = 'block';
+  return false;
+}
+</script>
+</body>
+</html>
