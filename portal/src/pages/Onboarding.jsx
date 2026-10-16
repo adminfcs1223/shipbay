@@ -1,8 +1,32 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib';
 
-const PHASES = [['paperwork', 'Paperwork'], ['systems', 'Systems'], ['inventory', 'Inventory'], ['go_live', 'Go-live']];
+const PHASES = [
+  { key: 'paperwork', label: 'Paperwork', icon: 'paperwork' },
+  { key: 'systems', label: 'Systems', icon: 'systems' },
+  { key: 'inventory', label: 'Inventory', icon: 'inventory' },
+  { key: 'go_live', label: 'Go-live / Test', icon: 'golive' },
+];
+const GO_LIVE_STATUS = [
+  ['on_time', 'On time', 'ok'],
+  ['at_risk', 'At risk', 'warn'],
+  ['delayed', 'Delayed', 'bad'],
+  ['on_hold', 'On hold', 'muted'],
+  ['complete', 'Complete', 'navy'],
+];
 const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null);
+
+/* Phase icons — shipbay theme: navy tile, orange accent, 2px strokes */
+const PhaseIcon = ({ kind }) => {
+  const common = { fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', viewBox: '0 0 24 24' };
+  switch (kind) {
+    case 'paperwork': return <svg {...common}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h6" className="accent" /></svg>;
+    case 'systems': return <svg {...common}><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /><path d="M7 10h3l2-3 2 6 2-3h1" className="accent" /></svg>;
+    case 'inventory': return <svg {...common}><path d="M21 8l-9-5-9 5v8l9 5 9-5z" /><path d="M3 8l9 5 9-5" /><path d="M12 13v8" className="accent" /></svg>;
+    case 'golive': return <svg {...common}><path d="M12 2c3 3 4 6 4 9l-4 4-4-4c0-3 1-6 4-9z" /><path d="M8 11l-3 3 2 3M16 11l3 3-2 3" /><path d="M10 19l2 3 2-3" className="accent" /><circle cx="12" cy="9" r="1.5" className="accent" /></svg>;
+    default: return null;
+  }
+};
 
 export default function Onboarding({ me }) {
   const [accounts, setAccounts] = useState(null);
@@ -22,7 +46,7 @@ export default function Onboarding({ me }) {
   return (
     <>
       <div className="pagehead">
-        <div><h1>Onboarding<span className="dot">.</span></h1><div className="sub">Every account between “yes” and first shipped order.</div></div>
+        <div><h1>Onboarding<span className="dot">.</span></h1></div>
         <button className="btn-sm primary" onClick={() => setAdding(true)}>+ Start onboarding</button>
       </div>
 
@@ -35,7 +59,7 @@ export default function Onboarding({ me }) {
                 <li key={a.org_id}>
                   <button className={`acct ${a.org_id === selected ? 'active' : ''}`} onClick={() => setSelected(a.org_id)}>
                     <div className="nm">{a.name}{a.founding_account && <span className="tag founding">founding</span>}{a.status === 'active' && <span className="tag live">live</span>}</div>
-                    <div className="meta">{a.contact_name || a.contact_email || '—'} · {a.done}/{a.total} done{a.go_live_date ? ` · go-live ${fmt(a.go_live_date)}` : ''}</div>
+                    <div className="meta">{a.contact_name || a.contact_email || '—'} · {a.done}/{a.total} done{a.go_live_date ? ` · est. ${fmt(a.go_live_date)}` : ''}</div>
                     <div className="bar"><i style={{ width: `${a.total ? (100 * a.done) / a.total : 0}%` }} /></div>
                   </button>
                 </li>
@@ -55,6 +79,7 @@ export default function Onboarding({ me }) {
 function AccountDetail({ account, me, onChange }) {
   const [org, setOrg] = useState(null);
   const [tasks, setTasks] = useState(null);
+  const [openPhase, setOpenPhase] = useState(null);
   const [editing, setEditing] = useState(null);
 
   const load = async () => {
@@ -66,64 +91,83 @@ function AccountDetail({ account, me, onChange }) {
   };
   useEffect(() => { load(); }, [account.org_id]);
 
+  const patchOrg = async (patch) => { await supabase.from('orgs').update(patch).eq('id', org.id); load(); onChange(); };
   const toggle = async (t) => {
     const done = !t.done;
     await supabase.from('onboarding_tasks').update({ done, done_at: done ? new Date().toISOString() : null, done_by: done ? me.id : null }).eq('id', t.id);
     load(); onChange();
   };
-  const saveNote = async (t, note) => {
-    await supabase.from('onboarding_tasks').update({ note: note.trim() || null }).eq('id', t.id);
-    setEditing(null); load();
-  };
-  const setGoLive = async (date) => {
-    await supabase.from('orgs').update({ go_live_date: date || null }).eq('id', org.id); load(); onChange();
-  };
+  const saveNote = async (t, note) => { await supabase.from('onboarding_tasks').update({ note: note.trim() || null }).eq('id', t.id); setEditing(null); load(); };
   const markLive = async () => {
     if (!confirm(`Mark ${org.name} as live? This moves them out of onboarding.`)) return;
-    await supabase.from('orgs').update({ status: 'active' }).eq('id', org.id); load(); onChange();
+    await patchOrg({ status: 'active', go_live_status: 'complete' });
   };
 
   if (!org || !tasks) return <div className="card"><div className="empty">Loading…</div></div>;
   const done = tasks.filter((t) => t.done).length;
+  const pct = tasks.length ? Math.round((100 * done) / tasks.length) : 0;
+  const next = tasks.find((t) => !t.done);
+  const status = GO_LIVE_STATUS.find((s) => s[0] === org.go_live_status) || GO_LIVE_STATUS[0];
 
   return (
     <div className="card detail">
-      <div className="cardhead">
-        <div><h2>{org.name}</h2><div className="sub" style={{ color: 'var(--muted)', fontSize: 13 }}>{done} of {tasks.length} steps complete</div></div>
-        <div className="spacer" />
+      <div className="cardhead headline">
+        <h2>{org.name}</h2>
+        <div className="progress">
+          <div className="bar big"><i style={{ width: `${pct}%` }} /></div>
+          <div className="next">{next ? <><span className="pct">{pct}%</span> · next: <b>{next.label}</b></> : <><span className="pct">100%</span> · <b>all steps complete</b></>}</div>
+        </div>
         {org.status === 'onboarding' && done === tasks.length && <button className="btn-sm primary" onClick={markLive}>Mark live</button>}
       </div>
+
       <div className="facts">
-        <div><small>Contact</small><span>{org.contact_name || '—'}</span><div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{org.contact_email}{org.contact_phone ? ` · ${org.contact_phone}` : ''}</div></div>
-        <div><small>Status</small><span>{org.status === 'active' ? 'Live' : 'Onboarding'}{org.founding_account ? ' · Founding account' : ''}</span></div>
-        <div><small>Go-live date</small><input type="date" value={org.go_live_date || ''} onChange={(e) => setGoLive(e.target.value)} style={{ font: '14px var(--font-body)', border: '1.5px solid var(--line)', borderRadius: 8, padding: '5px 8px' }} /></div>
-        <div><small>Shopify</small><span>{org.shopify_domain || 'Not connected'}</span></div>
+        <div><small>Contact</small><span>{org.contact_name || '—'}</span><div className="sub2">{org.contact_email}{org.contact_phone ? ` · ${org.contact_phone}` : ''}</div></div>
+        <div><small>Status</small><span>{org.status === 'active' ? <span className="tag live">Live</span> : 'Onboarding'}{org.founding_account && <> <span className="tag founding solid">Founding account</span></>}</span></div>
+        <div>
+          <small>Est. go-live date</small>
+          <input type="date" className="inlinedate" value={org.go_live_date || ''} onChange={(e) => patchOrg({ go_live_date: e.target.value || null })} />
+          <select className={`statusselect ${status[2]}`} value={org.go_live_status} onChange={(e) => patchOrg({ go_live_status: e.target.value })}>
+            {GO_LIVE_STATUS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+        <div><small>Sales rep</small><span>{org.sales_rep}</span></div>
       </div>
-      {org.notes && <div style={{ padding: '12px 18px', fontSize: 13, color: 'var(--muted)', borderBottom: '1px solid var(--line)' }}>{org.notes}</div>}
-      <div className="phase">
-        {PHASES.map(([key, label]) => {
-          const list = tasks.filter((t) => t.phase === key); if (!list.length) return null;
+
+      <div className="phases">
+        {PHASES.map((p) => {
+          const list = tasks.filter((t) => t.phase === p.key);
+          const d = list.filter((t) => t.done).length;
+          const ppct = list.length ? (100 * d) / list.length : 0;
+          const complete = list.length > 0 && d === list.length;
           return (
-            <div key={key}>
-              <h4>{label} · {list.filter((t) => t.done).length}/{list.length}</h4>
-              {list.map((t) => (
-                <div key={t.id} className={`task ${t.done ? 'done' : ''}`}>
-                  <input type="checkbox" checked={t.done} onChange={() => toggle(t)} />
-                  <div>
-                    <div className="lbl">{t.label}</div>
-                    {editing === t.id ? (
-                      <input className="noteedit" autoFocus defaultValue={t.note || ''} placeholder="Add a note — who, what, when" onBlur={(e) => saveNote(t, e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveNote(t, e.target.value); if (e.key === 'Escape') setEditing(null); }} />
-                    ) : (
-                      <div className="note">{t.note || <button className="edit" onClick={() => setEditing(t.id)}>+ note</button>}{t.note && <> · <button className="edit" onClick={() => setEditing(t.id)}>edit</button></>}</div>
-                    )}
-                  </div>
-                  <div className="when">{t.done && t.done_at ? fmt(t.done_at) : ''}</div>
-                </div>
-              ))}
-            </div>
+            <button key={p.key} className={`phasetile ${openPhase === p.key ? 'open' : ''} ${complete ? 'complete' : ''}`} onClick={() => setOpenPhase(openPhase === p.key ? null : p.key)}>
+              <div className="tile"><PhaseIcon kind={p.icon} /></div>
+              <div className="plabel">{p.label}</div>
+              <div className="pcount">{d}/{list.length}</div>
+              <div className="bar"><i style={{ width: `${ppct}%` }} /></div>
+            </button>
           );
         })}
       </div>
+
+      {openPhase && (
+        <div className="phase open">
+          {tasks.filter((t) => t.phase === openPhase).map((t) => (
+            <div key={t.id} className={`task ${t.done ? 'done' : ''}`}>
+              <input type="checkbox" checked={t.done} onChange={() => toggle(t)} />
+              <div>
+                <div className="lbl">{t.label}</div>
+                {editing === t.id ? (
+                  <input className="noteedit" autoFocus defaultValue={t.note || ''} placeholder="Add a note — who, what, when" onBlur={(e) => saveNote(t, e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveNote(t, e.target.value); if (e.key === 'Escape') setEditing(null); }} />
+                ) : (
+                  <div className="note">{t.note || <button className="edit" onClick={() => setEditing(t.id)}>+ note</button>}{t.note && <> · <button className="edit" onClick={() => setEditing(t.id)}>edit</button></>}</div>
+                )}
+              </div>
+              <div className="when">{t.done && t.done_at ? fmt(t.done_at) : ''}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
