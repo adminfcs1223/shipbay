@@ -376,3 +376,45 @@ table.preview td { padding: 5px 8px; border-bottom: 1px solid #F1F2F4; white-spa
 .task.locked .lbl, .task.locked .note { color: var(--muted-2); }
 .task.locked .circle { border-color: #E3E6EA; background: #F6F7F9; }
 .task .note .muted { color: var(--muted-2); }
+
+/* client settings */
+.settings { padding: 0 0 8px; }
+.settings .cardhead.sticky { position: sticky; top: 0; background: #fff; z-index: 2; border-radius: 14px 14px 0 0; }
+.settings .inlinemsg { font-size: 13px; font-weight: 600; }
+.settings .inlinemsg.ok { color: #177A56; }
+.settings .inlinemsg.err { color: #B03A33; }
+.settings section { padding: 16px 18px 4px; border-bottom: 1px solid var(--line); }
+.settings section:last-child { border-bottom: 0; }
+.settings h4 { font-family: var(--font-display); font-size: 13px; font-weight: 700; margin-bottom: 12px; }
+.settings .field { margin-bottom: 14px; }
+.settings .field input, .settings .field select, .settings .field textarea { width: 100%; padding: 9px 11px; border: 1.5px solid var(--line); border-radius: 9px; font: 14px var(--font-body); color: var(--ink); background: #fff; }
+.settings .field textarea { resize: vertical; }
+.settings .field input:focus, .settings .field select:focus, .settings .field textarea:focus { outline: none; border-color: var(--orange); }
+.settings .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.settings .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 14px; }
+.settings .check { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; margin-bottom: 14px; }
+.settings .check input { accent-color: var(--orange); width: 16px; height: 16px; }
+.settings .checks { display: flex; gap: 22px; }
+.settings .addr .grouplabel { margin-bottom: 8px; }
+.settings .addrs { grid-template-columns: 1fr; gap: 8px 0; }
+@media (max-width: 900px) { .settings .grid2, .settings .grid3 { grid-template-columns: 1fr; } }
+
+/* sku table */
+.orgpick { padding: 9px 12px; border: 1.5px solid var(--line); border-radius: 9px; font: 600 14px var(--font-body); background: #fff; min-width: 240px; }
+.skucard .cardhead .search { margin-left: auto; padding: 7px 11px; border: 1.5px solid var(--line); border-radius: 8px; font: 13px var(--font-body); width: 240px; }
+.skucard .cardhead .search:focus { outline: none; border-color: var(--orange); }
+.skucard .cardhead .check { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+.skucard .cardhead .check input { accent-color: var(--orange); }
+.skucard .cardhead .spacer { display: none; }
+.tablewrap { overflow-x: auto; }
+table.skus { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.skus th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted-2); padding: 10px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; font-weight: 600; }
+table.skus td { padding: 9px 10px; border-bottom: 1px solid #F1F2F4; vertical-align: middle; }
+table.skus td.r { text-align: right; white-space: nowrap; }
+table.skus td.empty { text-align: center; padding: 36px; color: var(--muted-2); }
+table.skus tr.inactive td { color: var(--muted-2); text-decoration: line-through; }
+table.skus tr.inactive td.r { text-decoration: none; }
+table.skus tr.editing td { background: var(--orange-tint); }
+table.skus tr.editing input, table.skus tr.editing select { width: 100%; padding: 6px 7px; border: 1.5px solid var(--line); border-radius: 7px; font: 13px var(--font-body); background: #fff; }
+table.skus tr.editing input:focus, table.skus tr.editing select:focus { outline: none; border-color: var(--orange); }
+table.skus .edit { background: none; border: 0; color: var(--orange-soft); font: 600 12.5px var(--font-body); cursor: pointer; padding: 0; }

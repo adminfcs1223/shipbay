@@ -5,6 +5,9 @@ import Onboarding from './pages/Onboarding';
 import Compliance from './pages/Compliance';
 import ClientHome from './pages/ClientHome';
 import ClientDocuments from './pages/ClientDocuments';
+import ClientSettings from './pages/ClientSettings';
+import Skus from './pages/Skus';
+import ClientProducts from './pages/ClientProducts';
 
 const STAFF = ['shipbay_admin', 'shipbay_staff'];
 
@@ -140,14 +143,19 @@ const Ico = {
   onboarding: svg(<><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></>),
   home: svg(<><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></>),
   documents: svg(<><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></>),
+  skus: svg(<><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></>),
+  settings: svg(<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></>),
   compliance: svg(<><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></>),
 };
 const STAFF_NAV = [
   { key: 'onboarding', label: 'Onboarding', icon: Ico.onboarding, page: Onboarding },
   { key: 'compliance', label: 'Compliance', icon: Ico.compliance, page: Compliance },
+  { key: 'skus', label: 'SKUs', icon: Ico.skus, page: Skus },
+  { key: 'settings', label: 'Client settings', icon: Ico.settings, page: ClientSettings },
 ];
 const CLIENT_NAV = [
   { key: 'home', label: 'Overview', icon: Ico.home, page: ClientHome },
+  { key: 'products', label: 'Products', icon: Ico.skus, page: ClientProducts },
   { key: 'documents', label: 'Documents', icon: Ico.documents, page: ClientDocuments },
 ];
 
