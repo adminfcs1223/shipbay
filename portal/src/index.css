@@ -457,3 +457,26 @@ table.skus .edit { background: none; border: 0; color: var(--orange-soft); font:
 .tourfoot .dots button { width: 8px; height: 8px; border-radius: 50%; border: 0; background: #D8DCE2; padding: 0; cursor: pointer; }
 .tourfoot .dots button.on { background: var(--orange); width: 20px; border-radius: 99px; }
 @media (max-width: 600px) { .tour-art.tiles { grid-template-columns: repeat(2, 1fr); } .tour-art.nav { grid-template-columns: 1fr; } }
+
+/* marketplaces setup */
+.redirectcard { display: flex; align-items: center; gap: 10px; padding: 12px 16px; margin-bottom: 14px; }
+.redirectcard > div { flex: 1; min-width: 0; }
+.redirectcard small { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted-2); margin-bottom: 3px; font-weight: 600; }
+.redirectcard code { font-size: 13px; word-break: break-all; }
+.markets { display: grid; gap: 14px; margin-bottom: 14px; }
+.market .cardhead h3 { margin-right: 4px; }
+.market.ok { border-color: rgba(30,158,111,.45); }
+.market .body { padding: 14px 18px 16px; display: grid; grid-template-columns: 1fr 340px; gap: 18px; }
+.market ol { margin: 0; padding-left: 20px; font-size: 13.5px; line-height: 1.55; display: grid; gap: 6px; }
+.market .secrets { background: var(--bg-soft); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; align-self: start; }
+.market .secret { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 12.5px; }
+.market .secret:first-of-type { border-top: 0; }
+.market .secret code { font-size: 12px; font-weight: 600; }
+.market .secret span { grid-column: 1; color: var(--muted); }
+.market .secret i { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-style: normal; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.market .secret.missing i { color: var(--orange-soft); }
+.market .secret.set i { color: #177A56; }
+.market .secret.opt i { color: var(--muted-2); }
+.market .body .note { grid-column: 1 / -1; font-size: 12.5px; color: var(--muted); }
+@media (max-width: 900px) { .market .body { grid-template-columns: 1fr; } }
+.hint { font-size: 13px; color: var(--muted); margin: -6px 2px 14px; }
