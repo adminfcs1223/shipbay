@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase, forgetLocalSession } from './lib';
 import { isAuthHost, isAppHost, splitMode, authUrl, handoffToApp, takeHandoff } from './hosts';
 import Onboarding from './pages/Onboarding';
+import Compliance from './pages/Compliance';
 import ClientHome from './pages/ClientHome';
 import ClientDocuments from './pages/ClientDocuments';
 
@@ -139,9 +140,11 @@ const Ico = {
   onboarding: svg(<><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></>),
   home: svg(<><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></>),
   documents: svg(<><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></>),
+  compliance: svg(<><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></>),
 };
 const STAFF_NAV = [
   { key: 'onboarding', label: 'Onboarding', icon: Ico.onboarding, page: Onboarding },
+  { key: 'compliance', label: 'Compliance', icon: Ico.compliance, page: Compliance },
 ];
 const CLIENT_NAV = [
   { key: 'home', label: 'Overview', icon: Ico.home, page: ClientHome },
