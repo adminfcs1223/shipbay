@@ -76,6 +76,14 @@ const MANUAL = new Set(['stamps', 'pirate_ship']);
 
 // ---------- OAuth providers ----------
 type OAuth = { needs: string[]; authorize: (state: string, p: C, extra: C) => string; exchange: (q: URLSearchParams, meta: C) => Promise<V> };
+async function shopifyHmacOk(q: URLSearchParams): Promise<boolean> {
+  const given = q.get('hmac'); if (!given) return false;
+  const msg = [...q.entries()].filter(([k]) => k !== 'hmac' && k !== 'signature').sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join('&');
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env('SHOPIFY_CLIENT_SECRET')), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(msg)));
+  const hex = [...sig].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return hex.length === given.length && hex.split('').every((c, i) => c === given[i].toLowerCase());
+}
 async function pkce() {
   const v = crypto.randomUUID() + crypto.randomUUID();
   const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v));
@@ -88,6 +96,8 @@ const OAUTH: Record<string, OAuth> = {
     authorize: (state, p) => `https://${host(p.shop)}/admin/oauth/authorize?${new URLSearchParams({ client_id: env('SHOPIFY_CLIENT_ID'), scope: 'read_orders,write_orders,read_products,read_inventory,write_inventory,read_fulfillments,write_fulfillments,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_locations,read_customers', redirect_uri: REDIRECT, state })}`,
     exchange: async (q, meta) => {
       const shop = host(q.get('shop') ?? meta.shop);
+      if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop)) return { ok: false, error: 'Unexpected shop domain on callback.' };
+      if (!(await shopifyHmacOk(q))) return { ok: false, error: 'Shopify callback signature did not verify.' };
       const r = await call(`https://${shop}/admin/oauth/access_token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: env('SHOPIFY_CLIENT_ID'), client_secret: env('SHOPIFY_CLIENT_SECRET'), code: q.get('code') }) });
       if (!r.ok || !r.data?.access_token) return fail(r, 'Shopify');
       const v = await VERIFY.shopify({ shop, access_token: r.data.access_token });
@@ -96,7 +106,8 @@ const OAUTH: Record<string, OAuth> = {
   },
   amazon: {
     needs: ['AMAZON_SP_APP_ID', 'AMAZON_LWA_CLIENT_ID', 'AMAZON_LWA_CLIENT_SECRET'],
-    authorize: (state) => `https://sellercentral.amazon.com/apps/authorize/consent?${new URLSearchParams({ application_id: env('AMAZON_SP_APP_ID'), state, redirect_uri: REDIRECT })}`,
+    // AMAZON_APP_PUBLISHED=1 once the app is listed; until then Amazon requires version=beta for draft apps
+    authorize: (state) => `https://sellercentral.amazon.com/apps/authorize/consent?${new URLSearchParams({ application_id: env('AMAZON_SP_APP_ID'), state, redirect_uri: REDIRECT, ...(env('AMAZON_APP_PUBLISHED') ? {} : { version: 'beta' }) })}`,
     exchange: async (q) => {
       const r = await call('https://api.amazon.com/auth/o2/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'authorization_code', code: q.get('spapi_oauth_code') ?? '', client_id: env('AMAZON_LWA_CLIENT_ID'), client_secret: env('AMAZON_LWA_CLIENT_SECRET') }) });
       if (!r.ok || !r.data?.refresh_token) return fail(r, 'Amazon');
@@ -123,7 +134,7 @@ const OAUTH: Record<string, OAuth> = {
   },
   tiktok_shop: {
     needs: ['TIKTOK_APP_KEY', 'TIKTOK_APP_SECRET', 'TIKTOK_SERVICE_ID'],
-    authorize: (state) => `https://services.tiktokshop.com/open/authorize?${new URLSearchParams({ service_id: env('TIKTOK_SERVICE_ID'), state })}`,
+    authorize: (state) => `https://services.${(env('TIKTOK_REGION') || 'us') === 'us' ? 'us.' : ''}tiktokshop.com/open/authorize?${new URLSearchParams({ service_id: env('TIKTOK_SERVICE_ID'), state })}`,
     exchange: async (q) => {
       const r = await call(`https://auth.tiktok-shops.com/api/v2/token/get?${new URLSearchParams({ app_key: env('TIKTOK_APP_KEY'), app_secret: env('TIKTOK_APP_SECRET'), auth_code: q.get('code') ?? '', grant_type: 'authorized_code' })}`);
       const d = r.data?.data; if (!r.ok || !d?.access_token) return fail(r, 'TikTok Shop');
@@ -179,6 +190,12 @@ Deno.serve(async (req) => {
   const allowed = (org_id: string) => !!isStaff || org_id === myOrg;
   let body: any; try { body = await req.json(); } catch { return json({ error: 'bad request' }, 400); }
   const { action } = body;
+
+  if (action === 'status') {
+    if (!isStaff) return json({ error: 'not authorized' }, 403);
+    const out = Object.fromEntries(Object.entries(OAUTH).map(([p, o]) => [p, { ready: o.needs.every((k) => !!env(k)), missing: o.needs.filter((k) => !env(k)), needs: o.needs }]));
+    return json({ redirect_uri: REDIRECT, providers: out, amazon_published: !!env('AMAZON_APP_PUBLISHED'), tiktok_region: env('TIKTOK_REGION') || 'us' });
+  }
 
   if (action === 'connect') {
     const { org_id, category, provider } = body; let creds: C = body.credentials ?? {};

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase, forgetLocalSession } from './lib';
+import { supabase, forgetLocalSession, RECOVERY_LANDING } from './lib';
 import { isAuthHost, isAppHost, splitMode, authUrl, handoffToApp, takeHandoff } from './hosts';
 import Onboarding from './pages/Onboarding';
 import Compliance from './pages/Compliance';
@@ -16,12 +16,13 @@ export default function App() {
   const [me, setMe] = useState(null);
 
   const [handoffFailed, setHandoffFailed] = useState(false);
+  const [recovery, setRecovery] = useState(RECOVERY_LANDING);
 
   useEffect(() => {
     let booted = false;
     // Ignore auth events (incl. the INITIAL_SESSION=null that fires immediately) until the bootstrap below has settled;
     // otherwise dashboard. bounces to auth. before the handed-off session is stored → redirect loop.
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => { if (booted) setSession(s); });
+    const { data: sub } = supabase.auth.onAuthStateChange((e, s) => { if (e === 'PASSWORD_RECOVERY') setRecovery(true); if (booted) setSession(s); });
     (async () => {
       const t = isAppHost ? takeHandoff() : null;
       if (t) {
@@ -46,6 +47,8 @@ export default function App() {
   }, [session]);
 
   if (session === undefined) return null;
+  // came in from a password-reset email: set the new password first, on whichever host the link opened
+  if (recovery && session) return <SetPassword session={session} onDone={() => setRecovery(false)} />;
   if (isAuthHost) {
     // auth. never shows the app: a stored session is handed to dashboard. once the server confirms it is still valid
     if (session) return <AuthHandoff session={session} onInvalid={() => setSession(null)} />;
@@ -73,6 +76,52 @@ function AuthHandoff({ session, onInvalid }) {
     return () => { cancelled = true; };
   }, [session, onInvalid]);
   return null;
+}
+
+/* ---------- Password reset landing ---------- */
+function SetPassword({ session, onDone }) {
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault(); setMsg(null);
+    if (pw.length < 10) return setMsg({ kind: 'err', text: 'Use at least 10 characters.' });
+    if (pw !== pw2) return setMsg({ kind: 'err', text: 'Those two don’t match.' });
+    setBusy(true);
+    const { error } = await supabase.auth.updateUser({ password: pw });
+    if (error) { setBusy(false); return setMsg({ kind: 'err', text: error.message }); }
+    setMsg({ kind: 'ok', text: 'Password updated — taking you in…' });
+    const { data } = await supabase.auth.getSession();
+    const s = data.session || session;
+    if (isAuthHost) { forgetLocalSession(); handoffToApp(s); return; }
+    onDone();
+  };
+  return (
+    <div className="split">
+      <aside className="brandside">
+        <div>
+          <a className="logo" href="https://www.shipbay3pl.com"><img src="/brand/06-horizontal-reverse.svg" alt="shipbay." /></a>
+          <div className="tagline">shipbay.dashboard — client portal</div>
+        </div>
+        <h1>Choose a new password<em>.</em></h1>
+        <p className="sub">You’re signed in as <b style={{ color: '#fff' }}>{session.user?.email}</b>. Pick a password you’ll remember and you’ll go straight to your dashboard.</p>
+        <div className="foot">© 2026 shipbay. · 115 Stryker Ln, Unit 10, Hillsborough Township, NJ</div>
+      </aside>
+      <section className="formside">
+        <div className="top">&nbsp;</div>
+        <form className="formbox" onSubmit={submit}>
+          <h2>New password<span className="dot">.</span></h2>
+          <p className="lead">At least 10 characters. Use a mix you don’t use anywhere else.</p>
+          {msg && <div className={`msg ${msg.kind}`}>{msg.text}</div>}
+          <div className="field"><label htmlFor="npw">New password</label><input id="npw" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} required autoFocus /></div>
+          <div className="field"><label htmlFor="npw2">Confirm new password</label><input id="npw2" type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} required /></div>
+          <button className="btn" disabled={busy}>{busy ? 'Saving…' : 'Save password & continue'}</button>
+        </form>
+        <div className="legal">Didn’t request this? <a href="mailto:derekh@shipbay3pl.com">Let us know</a>.</div>
+      </section>
+    </div>
+  );
 }
 
 /* ---------- Sign-in (ported from site/portal.html) ---------- */
