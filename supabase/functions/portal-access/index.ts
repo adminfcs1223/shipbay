@@ -96,8 +96,9 @@ Deno.serve(async (req) => {
     const email = String(body.email ?? '').trim().toLowerCase();
     const password = String(body.password ?? '');
     if (!email || !password) return json({ error: 'email and password are required' }, 400);
-    const apiKey = Deno.env.get('RESEND_API_KEY');
-    if (!apiKey) return json({ error: 'RESEND_API_KEY is not set on this project — add it under Edge Functions → Secrets, then try again.' }, 500);
+    const { data: sec } = await admin.from('platform_secrets').select('value').eq('key', 'RESEND_API_KEY').maybeSingle();
+    const apiKey = sec?.value || Deno.env.get('RESEND_API_KEY');
+    if (!apiKey) return json({ error: 'No Resend API key yet — paste it under Marketplaces → Email sending, then try again.' }, 500);
     const first = (org.contact_name ?? '').trim().split(/\s+/)[0] || 'there';
     const msg = welcome(first, org.name, email, password);
     const from = Deno.env.get('FOUNDER_FROM') ?? 'Derek Harrison — shipbay <derekh@shipbay3pl.com>';

@@ -8,8 +8,8 @@ const fn = async (body) => { const { data, error } = await supabase.functions.in
 const MARKETS = [
   { id: 'shopify', name: 'Shopify', portal: 'https://partners.shopify.com', portalLabel: 'Shopify Partners',
     secrets: [['SHOPIFY_CLIENT_ID', 'Client ID'], ['SHOPIFY_CLIENT_SECRET', 'Client secret']],
-    steps: ['Create a free Partner account at partners.shopify.com as ShipBay.', 'Apps → Create app → “Create app manually”. Name it ShipBay.', 'In the app’s Configuration: App URL = https://dashboard.shipbay3pl.com, and add the redirect URL below under “Allowed redirection URL(s)”.', 'Distribution: choose “Custom distribution” (private to the stores you name) — no app-store review needed.', 'Copy the Client ID and Client secret into the secrets below.'],
-    note: 'Until then, Shopify still works today via “Paste API token” (a custom-app Admin API token from the client’s store).' },
+    steps: ['Simplest path (recommended): the client creates a custom app in their own admin — Settings → Apps and sales channels → Develop apps → Create app → scopes: read_orders, write_orders, read_products, read_inventory, write_inventory, write_fulfillments, read_locations → Install → copy the Admin API access token. Then use “Paste API token” on Connect. No Partner app needed.', 'Partner-app path (sign-in button): partners.shopify.com → Apps → Create app manually → App URL https://dashboard.shipbay3pl.com, add the callback URL under Allowed redirection URLs.', 'Distribution: “Custom distribution” binds the app to ONE store (enter that client’s brand.myshopify.com). Public distribution works for any store but requires Shopify app review.', 'Paste the Client ID and Client secret below — they apply to the one store you named.'],
+    note: 'Because a custom-distribution app is single-store, treat the Partner path as per-client; the token path scales with no setup.' },
   { id: 'amazon', name: 'Amazon Seller Central', portal: 'https://sellercentral.amazon.com/sellingpartner/developerconsole', portalLabel: 'Developer Console',
     secrets: [['AMAZON_SP_APP_ID', 'App ID (amzn1.sp.solution.…)'], ['AMAZON_LWA_CLIENT_ID', 'LWA client ID'], ['AMAZON_LWA_CLIENT_SECRET', 'LWA client secret'], ['AMAZON_APP_PUBLISHED', 'Set to 1 only after Amazon approves the listing (optional)']],
     steps: ['Register ShipBay as a developer: Seller Central → Apps & Services → Develop Apps (needs a Professional seller or Solution Provider account). Amazon reviews the developer profile — usually a few days.', 'Add new app client: name ShipBay, API type SP-API, roles: Inventory & Order Tracking, Direct-to-Consumer Shipping, Product Listing (read).', 'OAuth Login URI = https://dashboard.shipbay3pl.com · OAuth Redirect URI = the redirect URL below.', 'Copy the App ID, LWA client ID and secret into the secrets below. Leave AMAZON_APP_PUBLISHED unset while the app is in draft — clients can still authorize a draft app.'],
@@ -31,8 +31,28 @@ const MARKETS = [
 export default function Marketplaces() {
   const [st, setSt] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [vals, setVals] = useState({});
+  const [busy, setBusy] = useState(null);
+  const [msg, setMsg] = useState(null);
   const load = async () => setSt(await fn({ action: 'status' }));
   useEffect(() => { load(); }, []);
+  const save = async (id, keys) => {
+    const secrets = Object.fromEntries(keys.filter((k) => vals[k] != null && vals[k] !== '').map((k) => [k, vals[k]]));
+    if (!Object.keys(secrets).length) return setMsg({ kind: 'err', text: 'Paste at least one value first.' });
+    setBusy(id); setMsg(null);
+    const r = await fn({ action: 'set_secrets', secrets });
+    setBusy(null);
+    if (r.error) return setMsg({ kind: 'err', text: r.error });
+    setVals((v) => { const n = { ...v }; for (const k of Object.keys(secrets)) delete n[k]; return n; });
+    setMsg({ kind: 'ok', text: `Saved ${r.saved.join(', ')}.` });
+    load();
+  };
+  const clear = async (k) => {
+    if (!confirm(`Remove ${k}?`)) return;
+    const r = await fn({ action: 'set_secrets', secrets: { [k]: '' } });
+    if (r.error) return setMsg({ kind: 'err', text: r.error });
+    load();
+  };
   const redirect = st?.redirect_uri || 'https://poxlczzkpztmoiixyrth.supabase.co/functions/v1/integrations/callback';
   const copy = async () => { try { await navigator.clipboard.writeText(redirect); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* no clipboard */ } };
   const ready = MARKETS.filter((m) => st?.providers?.[m.id]?.ready).length;
@@ -49,7 +69,8 @@ export default function Marketplaces() {
         <button className="btn-sm" onClick={copy}>{copied ? 'Copied ✓' : 'Copy'}</button>
         <button className="btn-sm" onClick={load}>Refresh status</button>
       </div>
-      <div className="hint">Secrets go in Supabase → project <b>shipbay</b> → Edge Functions → Secrets. They take effect immediately; hit Refresh status to confirm.</div>
+      <div className="hint">Paste each marketplace’s keys into its card and hit Save — they’re stored server-side and never shown again (only the last 4 characters). Takes effect immediately.</div>
+      {msg && <div className={`msg ${msg.kind} flash`}>{msg.text}<button onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
 
       <div className="markets">
         {MARKETS.map((m) => {
@@ -66,18 +87,49 @@ export default function Marketplaces() {
               <div className="body">
                 <ol>{m.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
                 <div className="secrets">
-                  <div className="grouplabel">Secrets</div>
+                  <div className="grouplabel">Keys</div>
                   {m.secrets.map(([k, l]) => {
-                    const missing = p?.missing?.includes(k);
+                    const info = st?.keys?.[k];
                     const optional = !p?.needs?.includes(k);
-                    return <div key={k} className={`secret ${missing ? 'missing' : optional ? 'opt' : 'set'}`}><code>{k}</code><span>{l}</span><i>{optional ? 'optional' : missing ? 'missing' : 'set ✓'}</i></div>;
+                    return (
+                      <div key={k} className={`secret ${info?.set ? 'set' : optional ? 'opt' : 'missing'}`}>
+                        <span className="lbl">{l}{optional && <em> · optional</em>}</span>
+                        <div className="in">
+                          <input type={/SECRET|KEY$/.test(k) && k !== 'TIKTOK_APP_KEY' ? 'password' : 'text'} autoComplete="off" placeholder={info?.set ? `set${info.tail ? ` · ends in ${info.tail}` : ''} — paste to replace` : 'paste here'} value={vals[k] ?? ''} onChange={(e) => setVals((v) => ({ ...v, [k]: e.target.value }))} />
+                          {info?.set && <button className="edit" title="Remove" onClick={() => clear(k)}>×</button>}
+                        </div>
+                        <i>{info?.set ? 'set ✓' : optional ? '' : 'missing'}</i>
+                      </div>
+                    );
                   })}
+                  <button className="btn-sm primary" disabled={busy === m.id} onClick={() => save(m.id, m.secrets.map(([k]) => k))}>{busy === m.id ? 'Saving…' : 'Save keys'}</button>
                 </div>
                 {m.note && <div className="note">{m.note}</div>}
               </div>
             </div>
           );
         })}
+      </div>
+
+      <div className={`card market ${st?.keys?.RESEND_API_KEY?.set ? 'ok' : ''}`} style={{ marginBottom: 14 }}>
+        <div className="cardhead">
+          <h3>Email sending (Resend)</h3>
+          <span className={`pill ${st?.keys?.RESEND_API_KEY?.set ? 'connected' : 'pending'}`}>{st?.keys?.RESEND_API_KEY?.set ? 'Ready' : 'Key needed'}</span>
+          <div className="spacer" />
+          <a className="btn-sm" href="https://resend.com/api-keys" target="_blank" rel="noopener">Resend API keys ↗</a>
+        </div>
+        <div className="body">
+          <ol><li>Sends the “Good news — your portal is ready” welcome email (and later client notifications) from derekh@shipbay3pl.com.</li><li>Resend → API Keys → Create (sending access, domain shipbay3pl.com) → paste here.</li></ol>
+          <div className="secrets">
+            <div className="grouplabel">Keys</div>
+            <div className={`secret ${st?.keys?.RESEND_API_KEY?.set ? 'set' : 'missing'}`}>
+              <span className="lbl">Resend API key</span>
+              <div className="in"><input type="password" autoComplete="off" placeholder={st?.keys?.RESEND_API_KEY?.set ? `set · ends in ${st.keys.RESEND_API_KEY.tail} — paste to replace` : 're_…'} value={vals.RESEND_API_KEY ?? ''} onChange={(e) => setVals((v) => ({ ...v, RESEND_API_KEY: e.target.value }))} /></div>
+              <i>{st?.keys?.RESEND_API_KEY?.set ? 'set ✓' : 'missing'}</i>
+            </div>
+            <button className="btn-sm primary" disabled={busy === 'resend'} onClick={() => save('resend', ['RESEND_API_KEY'])}>{busy === 'resend' ? 'Saving…' : 'Save key'}</button>
+          </div>
+        </div>
       </div>
 
       <div className="card" style={{ padding: '14px 18px' }}>

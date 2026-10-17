@@ -15,7 +15,14 @@ const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers
 const json = (b: unknown, status = 200) => Response.json(b, { status, headers: cors });
 const DASH = 'https://dashboard.shipbay3pl.com/';
 const REDIRECT = `${SB_URL}/functions/v1/integrations/callback`;
-const env = (k: string) => Deno.env.get(k) ?? '';
+// Credentials come from platform_secrets (entered on the staff Marketplaces screen), falling back to env secrets.
+let SEC: Record<string, string> = {};
+const env = (k: string) => SEC[k] || Deno.env.get(k) || '';
+const SETTABLE = new Set(['SHOPIFY_CLIENT_ID', 'SHOPIFY_CLIENT_SECRET', 'AMAZON_SP_APP_ID', 'AMAZON_LWA_CLIENT_ID', 'AMAZON_LWA_CLIENT_SECRET', 'AMAZON_APP_PUBLISHED', 'EBAY_CLIENT_ID', 'EBAY_CLIENT_SECRET', 'EBAY_RUNAME', 'ETSY_CLIENT_ID', 'TIKTOK_APP_KEY', 'TIKTOK_APP_SECRET', 'TIKTOK_SERVICE_ID', 'TIKTOK_REGION', 'RESEND_API_KEY']);
+async function loadSecrets() {
+  const { data } = await admin.from('platform_secrets').select('key, value');
+  SEC = Object.fromEntries((data ?? []).map((r: any) => [r.key, r.value]));
+}
 const b64 = (s: string) => btoa(s);
 const basic = (u: string, p: string) => `Basic ${b64(`${u}:${p}`)}`;
 const host = (u: string) => String(u || '').trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
@@ -161,6 +168,7 @@ async function save(org_id: string, category: string, provider: string, auth_typ
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   const u = new URL(req.url);
+  await loadSecrets();
 
   // ---- OAuth return leg (no user session: the provider redirects here) ----
   if (req.method === 'GET' && u.pathname.endsWith('/callback')) {
@@ -194,7 +202,22 @@ Deno.serve(async (req) => {
   if (action === 'status') {
     if (!isStaff) return json({ error: 'not authorized' }, 403);
     const out = Object.fromEntries(Object.entries(OAUTH).map(([p, o]) => [p, { ready: o.needs.every((k) => !!env(k)), missing: o.needs.filter((k) => !env(k)), needs: o.needs }]));
-    return json({ redirect_uri: REDIRECT, providers: out, amazon_published: !!env('AMAZON_APP_PUBLISHED'), tiktok_region: env('TIKTOK_REGION') || 'us' });
+    // which settable keys exist, with a harmless tail so staff can tell keys apart; never the value
+    const keys = Object.fromEntries([...SETTABLE].map((k) => { const v = env(k); return [k, v ? { set: true, tail: v.length > 8 ? v.slice(-4) : '' } : { set: false }]; }));
+    return json({ redirect_uri: REDIRECT, providers: out, keys, amazon_published: !!env('AMAZON_APP_PUBLISHED'), tiktok_region: env('TIKTOK_REGION') || 'us' });
+  }
+
+  if (action === 'set_secrets') {
+    if (!isStaff) return json({ error: 'not authorized' }, 403);
+    const entries = Object.entries(body.secrets ?? {}).filter(([k]) => SETTABLE.has(k));
+    if (!entries.length) return json({ error: 'nothing to save' }, 400);
+    for (const [k, raw] of entries) {
+      const v = String(raw ?? '').trim();
+      if (v) await admin.from('platform_secrets').upsert({ key: k, value: v, updated_by: staff.id, updated_at: new Date().toISOString() });
+      else await admin.from('platform_secrets').delete().eq('key', k);
+    }
+    await loadSecrets();
+    return json({ ok: true, saved: entries.map(([k]) => k) });
   }
 
   if (action === 'connect') {
