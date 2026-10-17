@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib';
 import { providerName } from '../providers';
 import { PHASES, PhaseIcon, fmt, acceptFor, DOC_KIND, BILLING, SIGN_KEYS, UploadButton, ConnectModal } from './Onboarding';
+import Tutorial, { tourSeen } from '../Tutorial';
 
 const GO_LIVE = { on_time: ['On track', 'ok'], at_risk: ['Needs attention', 'warn'], delayed: ['Delayed', 'bad'], on_hold: ['On hold', 'muted'], complete: ['Live', 'navy'] };
 const longDate = (d) => (d ? new Date(d + (d.length === 10 ? 'T12:00:00' : '')).toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' }) : null);
@@ -47,6 +48,8 @@ export default function ClientHome({ me }) {
   const [connectOpen, setConnectOpen] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [msg, setMsg] = useState(null);
+  const [tour, setTour] = useState(false);
+  useEffect(() => { if (me?.id && !tourSeen(me.id)) setTour(true); }, [me?.id]);
 
   const load = async () => {
     if (!me?.org_id) return;
@@ -123,8 +126,6 @@ export default function ClientHome({ me }) {
     if (t.kind === 'schedule' && t.scheduled_for) return 'done';
     return 'open';
   };
-  // things the client can act on right now
-  const needs = tasks.filter((t) => !t.optional && stateOf(t) === 'open' && (t.kind === 'document' || t.kind === 'catalog' || t.kind === 'integration'));
 
   const uploadBtn = (t, primary) => {
     const sign = SIGN_KEYS.includes(t.key);
@@ -141,6 +142,7 @@ export default function ClientHome({ me }) {
           <h1>{live ? `Welcome back, ${first}` : `Welcome, ${first}`}<span className="dot">.</span></h1>
         </div>
         <div className="glance">
+          <button className="tourbtn" onClick={() => setTour(true)}>? Quick tour</button>
           <div><small>Status</small><b>{live ? 'Live' : 'Onboarding'}</b></div>
           {org.go_live_date && <div><small>Est. go-live</small><b>{longDate(org.go_live_date)}</b></div>}
           <div><small>Timeline</small><span className={`statuspill ${gl[1]}`}>{gl[0]}</span></div>
@@ -225,22 +227,6 @@ export default function ClientHome({ me }) {
             )}
           </div>
 
-          {!live && needs.length > 0 && (
-            <div className="card">
-              <div className="cardhead"><h3>What we need from you</h3><div className="spacer" /><span className="tag">{needs.length} item{needs.length > 1 ? 's' : ''}</span></div>
-              <ul className="needlist">
-                {needs.map((t) => (
-                  <li key={t.id}>
-                    <div><b>{t.label}</b><div className="small">{HELP[t.key]}</div></div>
-                    <div className="act">
-                      {SIGN_KEYS.includes(t.key) && <button className="btn-xs" onClick={() => viewDoc(tplOf(t))}>Download &amp; sign</button>}
-                      {t.kind === 'integration' ? <button className="btn-xs primary" onClick={() => setConnectOpen(t.key)}>Connect</button> : uploadBtn(t, true)}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
 
         <aside className="side">
@@ -274,6 +260,7 @@ export default function ClientHome({ me }) {
           </div>
         </aside>
       </div>
+      {tour && <Tutorial me={me} org={org} onClose={() => setTour(false)} />}
       {connectOpen && <ConnectModal org={org} taskKey={connectOpen} onClose={() => setConnectOpen(null)} onDone={(f) => { setConnectOpen(null); if (f) setMsg(f); load(); }} />}
     </>
   );
