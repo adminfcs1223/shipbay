@@ -1,4 +1,4 @@
-// integrations — connects a client's shipping-label service or commerce channel. ShipBay staff only (OAuth callback excepted).
+// integrations — connects a client's shipping-label service or commerce channel. Staff for any account, clients for their own org (OAuth callback excepted).
 //   POST { action:'connect',     org_id, category, provider, credentials:{…}, label? } → verifies live, stores secrets server-side
 //   POST { action:'oauth_start', org_id, category, provider, params:{shop?} }        → { url } for the client/staff to approve on the provider
 //   POST { action:'test',        integration_id }                                      → re-verifies stored credentials
@@ -170,15 +170,20 @@ Deno.serve(async (req) => {
   // ---- staff actions ----
   const auth = req.headers.get('Authorization') ?? '';
   const userClient = createClient(SB_URL, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: auth } }, auth: { persistSession: false } });
-  const { data: isStaff } = await userClient.rpc('is_shipbay');
-  if (!isStaff) return json({ error: 'not authorized' }, 403);
+  // staff may act on any account; a client may act only on their own org
   const { data: { user: staff } } = await userClient.auth.getUser();
+  if (!staff) return json({ error: 'not authorized' }, 403);
+  const { data: isStaff } = await userClient.rpc('is_shipbay');
+  let myOrg: string | null = null;
+  if (!isStaff) { const { data: prof } = await userClient.from('profiles').select('org_id').eq('id', staff.id).maybeSingle(); myOrg = prof?.org_id ?? null; if (!myOrg) return json({ error: 'not authorized' }, 403); }
+  const allowed = (org_id: string) => !!isStaff || org_id === myOrg;
   let body: any; try { body = await req.json(); } catch { return json({ error: 'bad request' }, 400); }
   const { action } = body;
 
   if (action === 'connect') {
     const { org_id, category, provider } = body; let creds: C = body.credentials ?? {};
     if (!org_id || !['shipping', 'commerce'].includes(category) || !provider) return json({ error: 'missing fields' }, 400);
+    if (!allowed(org_id)) return json({ error: 'not authorized' }, 403);
     let v: V; let auth_type = 'api_key';
     if (MANUAL.has(provider)) { v = { ok: true, label: creds.account, meta: { account: creds.account, note: 'No public API — recorded manually' } }; auth_type = 'manual'; creds = {} as C; }
     else if (VERIFY[provider]) v = await VERIFY[provider](creds);
@@ -191,6 +196,7 @@ Deno.serve(async (req) => {
   if (action === 'oauth_start') {
     const { org_id, category, provider } = body; const params: C = body.params ?? {};
     const o = OAUTH[provider]; if (!o) return json({ error: 'not an OAuth provider' }, 400);
+    if (!org_id || !allowed(org_id)) return json({ error: 'not authorized' }, 403);
     const missing = o.needs.filter((k) => !env(k));
     if (missing.length) return json({ error: `ShipBay's ${provider} developer app isn't registered yet. Add ${missing.join(', ')} under Edge Functions → Secrets (redirect URL: ${REDIRECT}).`, needs: missing, redirect_uri: REDIRECT }, 412);
     if (provider === 'shopify' && !/\.myshopify\.com$/.test(host(params.shop))) return json({ error: 'Enter the store domain (brand.myshopify.com).' }, 400);
@@ -205,6 +211,7 @@ Deno.serve(async (req) => {
   if (action === 'test' || action === 'disconnect') {
     const { data: integ } = await admin.from('integrations').select('*').eq('id', body.integration_id).single();
     if (!integ) return json({ error: 'not found' }, 404);
+    if (!allowed(integ.org_id)) return json({ error: 'not authorized' }, 403);
     if (action === 'disconnect') {
       await admin.from('integration_secrets').update({ secrets: {}, updated_at: new Date().toISOString() }).eq('integration_id', integ.id);
       await admin.from('integrations').update({ status: 'disconnected', verified: false, connected_at: null }).eq('id', integ.id);

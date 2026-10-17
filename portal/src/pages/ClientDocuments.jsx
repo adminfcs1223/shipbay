@@ -31,14 +31,14 @@ export default function ClientDocuments({ me }) {
     <>
       <div className="pagehead"><div><h1>Documents<span className="dot">.</span></h1><p className="sub">Everything on file for your account. Upload new items from the Overview checklist.</p></div></div>
       {err && <div className="msg err">{err}</div>}
-      <div className="card">
+      <div className="card doccard">
         {docs === null ? <div className="empty">Loading…</div> : docs.length === 0 ? <div className="empty">Nothing on file yet — your paperwork will show up here as it comes in.</div> : grouped.map(([title, list]) => (
           <div key={title} className="docgroup">
             <div className="grouplabel">{title}</div>
             <table className="doctable">
               <tbody>
                 {list.map((d) => {
-                  const st = STATUS[d.status] || ['On file', 'approved'];
+                  const st = d.for_signature ? ['Awaiting your signature', 'pending'] : STATUS[d.status] || ['On file', 'approved'];
                   return (
                     <tr key={d.id}>
                       <td><b>{d.title.replace(/ — .*$/, '')}</b><div className="small">{fmt(d.created_at)}{d.size_bytes ? ` · ${size(d.size_bytes)}` : ''}</div></td>

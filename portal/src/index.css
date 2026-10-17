@@ -7,7 +7,7 @@
   --navy: #101C2B; --navy-2: #1B212B; --navy-line: #242C38;
   --font-display: 'Archivo', sans-serif;
   --font-body: 'Inter', system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', monospace;
+  --font-mono: var(--font-body); /* retired: Derek wants one body typeface everywhere */
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body, #root { min-height: 100vh; }
@@ -362,3 +362,17 @@ table.preview td { padding: 5px 8px; border-bottom: 1px solid #F1F2F4; white-spa
 .btn-sm.reject { border-color: #E8B4B0; color: #B03A33; }
 .btn-sm.reject:hover { background: #FDECEA; border-color: #B03A33; }
 @media (max-width: 1000px) { .compliance { grid-template-columns: 1fr; } .review .preview { height: 50vh; } }
+
+/* alignment + spacing fixes */
+.clienthome .side .card .cardhead { padding: 0 0 10px; margin-bottom: 12px; }
+.team .person + .person { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.team .person { align-items: flex-start; margin-bottom: 0; }
+.team .avatar.ops { background: var(--orange); }
+.team .contact { font-size: 12.5px; margin-top: 4px; display: grid; gap: 2px; }
+.team .contact a { color: var(--orange-soft); text-decoration: none; font-weight: 600; }
+.needlist { padding: 4px 18px 6px; }
+.needlist li .act { display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
+.card.doccard { padding: 16px 18px 18px; }
+.task.locked .lbl, .task.locked .note { color: var(--muted-2); }
+.task.locked .circle { border-color: #E3E6EA; background: #F6F7F9; }
+.task .note .muted { color: var(--muted-2); }

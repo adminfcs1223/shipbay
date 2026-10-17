@@ -38,8 +38,9 @@ export default function Compliance({ me }) {
   const orgName = (id) => orgs.find((o) => o.id === id)?.name || '—';
   const who = (id) => people[id] ? (people[id].full_name || people[id].email) + (['shipbay_admin', 'shipbay_staff'].includes(people[id].role) ? ' (shipbay)' : '') : '—';
 
-  const list = useMemo(() => (docs || []).filter((d) => (tab === 'all' || d.status === tab) && (!orgFilter || d.org_id === orgFilter)), [docs, tab, orgFilter]);
-  const counts = useMemo(() => ({ pending: (docs || []).filter((d) => d.status === 'pending').length }), [docs]);
+  // unsigned templates shipbay sent out for signature are not reviews
+  const list = useMemo(() => (docs || []).filter((d) => !d.for_signature && (tab === 'all' || d.status === tab) && (!orgFilter || d.org_id === orgFilter)), [docs, tab, orgFilter]);
+  const counts = useMemo(() => ({ pending: (docs || []).filter((d) => d.status === 'pending' && !d.for_signature).length }), [docs]);
   const current = list.find((d) => d.id === sel) || null;
 
   // auto-select first item in the list; refresh the preview when selection changes
@@ -69,7 +70,7 @@ export default function Compliance({ me }) {
   // per-account compliance summary (required paperwork approved / total)
   const PAPERWORK = ['intake_form', 'w9', 'formation_cert', 'rate_card', 'agreement', 'sla'];
   const summary = orgs.filter((o) => ['onboarding', 'active'].includes(o.status)).map((o) => {
-    const mine = (docs || []).filter((d) => d.org_id === o.id);
+    const mine = (docs || []).filter((d) => d.org_id === o.id && !d.for_signature);
     const ok = PAPERWORK.filter((k) => mine.some((d) => d.task_key === k && d.status === 'approved')).length;
     const waiting = mine.filter((d) => d.status === 'pending').length;
     const expiring = mine.filter((d) => d.status === 'approved' && d.expires_at && (new Date(d.expires_at) - Date.now()) < 30 * 864e5).length;

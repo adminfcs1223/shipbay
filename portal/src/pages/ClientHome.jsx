@@ -2,24 +2,29 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib';
 import { providerName } from '../providers';
-import { PHASES, PhaseIcon, fmt, acceptFor, DOC_KIND, BILLING, UploadButton } from './Onboarding';
+import { PHASES, PhaseIcon, fmt, acceptFor, DOC_KIND, BILLING, SIGN_KEYS, UploadButton, ConnectModal } from './Onboarding';
 
 const GO_LIVE = { on_time: ['On track', 'ok'], at_risk: ['Needs attention', 'warn'], delayed: ['Delayed', 'bad'], on_hold: ['On hold', 'muted'], complete: ['Live', 'navy'] };
 const longDate = (d) => (d ? new Date(d + (d.length === 10 ? 'T12:00:00' : '')).toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' }) : null);
+const fn = async (name, body) => {
+  const { data, error } = await supabase.functions.invoke(name, { body });
+  if (error) { let msg = error.message; try { const j = await error.context?.json?.(); if (j?.error) msg = j.error; } catch { /* keep */ } return { error: msg }; }
+  return data || {};
+};
 
 // What each step means from the client's side
 const HELP = {
-  intake_form: 'Your account details, ship-from address and order volume. Your onboarding manager sends this.',
+  intake_form: 'Your account details, ship-from address and order volume.',
   w9: 'Needed for billing setup.',
   formation_cert: 'Articles of organization / incorporation, or equivalent.',
-  rate_card: 'The pricing you agreed to, signed.',
-  agreement: 'Your shipbay account agreement.',
-  sla: 'Our service-level commitment to you.',
+  rate_card: 'The pricing you agreed to. Download, sign, and upload the signed copy.',
+  agreement: 'Your shipbay account agreement. Download, sign, and upload the signed copy.',
+  sla: 'Our service-level commitment to you. Download, sign, and upload the signed copy.',
   billing_method: 'How your monthly statement is paid.',
   additional_docs: 'Anything else useful — insurance or resale certificates, brand guidelines, prior 3PL reports.',
   portal_login: 'You’re looking at it.',
-  label_access: 'Your shipping-label account (ShipStation, Shippo, UPS, FedEx, USPS…) so labels print under your rates.',
-  shopify_connected: 'Your store or marketplace, so orders flow to the warehouse automatically.',
+  label_access: 'Connect your shipping-label account (ShipStation, Shippo, UPS, FedEx, USPS…) so labels print under your rates.',
+  shopify_connected: 'Connect your store or marketplace so orders flow to the warehouse automatically.',
   sku_catalog: 'Your product list — one row per SKU. A Shopify or WooCommerce export is perfect.',
   packaging_spec: 'How you want orders packed: materials, inserts, branding.',
   returns_rules: 'What we do with returns and exchanges when they arrive.',
@@ -30,6 +35,7 @@ const HELP = {
   go_live_date: 'The day the warehouse starts shipping for you.',
   go_live: 'Your first live orders out the door.',
 };
+const initials = (n) => (n || 'S').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
 
 export default function ClientHome({ me }) {
   const [org, setOrg] = useState(null);
@@ -38,6 +44,8 @@ export default function ClientHome({ me }) {
   const [conns, setConns] = useState([]);
   const [skuCount, setSkuCount] = useState(0);
   const [openPhase, setOpenPhase] = useState(null);
+  const [connectOpen, setConnectOpen] = useState(null);
+  const [busyId, setBusyId] = useState(null);
   const [msg, setMsg] = useState(null);
 
   const load = async () => {
@@ -46,12 +54,22 @@ export default function ClientHome({ me }) {
       supabase.from('orgs').select('*').eq('id', me.org_id).single(),
       supabase.from('onboarding_tasks').select('*').eq('org_id', me.org_id).order('sort'),
       supabase.from('documents').select('*').eq('org_id', me.org_id).not('task_key', 'is', null).order('created_at', { ascending: false }),
-      supabase.from('integrations').select('id, category, provider, label, status').eq('org_id', me.org_id).eq('status', 'connected'),
+      supabase.from('integrations').select('id, category, provider, label, status, error, auth_type').eq('org_id', me.org_id).neq('status', 'disconnected').order('created_at'),
       supabase.from('skus').select('id', { count: 'exact', head: true }).eq('org_id', me.org_id).eq('active', true),
     ]);
     setOrg(o); setTasks(t || []); setDocs(d || []); setConns(c || []); setSkuCount(n || 0);
   };
   useEffect(() => { load(); }, [me?.org_id]);
+
+  // back from a provider's sign-in: #conn=<provider>|ok|<message>
+  useEffect(() => {
+    const m = /conn=([^&]+)/.exec(window.location.hash);
+    if (!m) return;
+    const [provider, ok, text] = decodeURIComponent(m[1]).split('|');
+    setMsg({ kind: ok === 'ok' ? 'ok' : 'err', text: ok === 'ok' ? `${providerName(provider)} connected.` : `${providerName(provider)}: ${text}` });
+    setOpenPhase('systems');
+    history.replaceState(null, '', window.location.pathname);
+  }, []);
 
   const upload = async (t, file) => {
     if (!file) return; setMsg(null);
@@ -62,13 +80,21 @@ export default function ClientHome({ me }) {
     if (upErr) return setMsg({ kind: 'err', text: upErr.message });
     const { error } = await supabase.from('documents').insert({ org_id: org.id, kind: DOC_KIND[t.key] || 'other', title: `${t.label} — ${org.name}`, storage_path: path, mime: file.type || null, size_bytes: file.size, task_key: t.key, status: 'pending', uploaded_by: me.id, visible_to_client: true });
     if (error) return setMsg({ kind: 'err', text: error.message });
-    setMsg({ kind: 'ok', text: `${t.label} received — your onboarding manager will review it.` });
+    setMsg({ kind: 'ok', text: `${t.label} received — shipbay will review it.` });
     load();
   };
   const viewDoc = async (d) => {
     const { data, error } = await supabase.storage.from('client-docs').createSignedUrl(d.storage_path, 600);
     if (error) return setMsg({ kind: 'err', text: error.message });
     window.open(data.signedUrl, '_blank', 'noopener');
+  };
+  const disconnect = async (c) => {
+    if (!confirm(`Disconnect ${providerName(c.provider)}?`)) return;
+    setBusyId(c.id);
+    const r = await fn('integrations', { action: 'disconnect', integration_id: c.id });
+    setBusyId(null);
+    if (r.error) setMsg({ kind: 'err', text: r.error });
+    load();
   };
 
   if (!me) return null;
@@ -80,20 +106,31 @@ export default function ClientHome({ me }) {
   const live = org.status === 'active';
   const first = (me.full_name || '').split(/\s+/)[0] || 'there';
   const gl = GO_LIVE[org.go_live_status] || GO_LIVE.on_time;
-  // things the client can act on right now
-  const needs = tasks.filter((t) => !t.done && (t.kind === 'document' || t.kind === 'catalog') && !docs.some((d) => d.task_key === t.key && d.status !== 'rejected') && !t.optional);
+  const catOf = (t) => (t.key === 'label_access' ? 'shipping' : 'commerce');
+  const tplOf = (t) => (SIGN_KEYS.includes(t.key) ? docs.find((d) => d.task_key === t.key && d.for_signature) : null);
+  const signedOf = (t) => docs.filter((d) => d.task_key === t.key && !d.for_signature);
 
   const stateOf = (t) => {
-    const mine = docs.filter((d) => d.task_key === t.key);
-    const latest = mine[0];
+    const latest = signedOf(t)[0];
     if (t.done) return 'done';
+    if (t.kind === 'document' && SIGN_KEYS.includes(t.key) && !tplOf(t)) return 'locked';
     if ((t.kind === 'document' || t.kind === 'catalog') && latest && latest.status !== 'rejected') return 'pending';
     if (t.kind === 'billing' && org.billing_method) return 'done';
     if (t.kind === 'portal') return 'done';
-    if (t.kind === 'integration' && conns.some((c) => c.category === (t.key === 'label_access' ? 'shipping' : 'commerce'))) return 'done';
+    if (t.kind === 'integration' && conns.some((c) => c.category === catOf(t) && c.status === 'connected')) return 'done';
+    if (t.kind === 'integration' && conns.some((c) => c.category === catOf(t))) return 'pending';
     if (t.kind === 'catalog' && skuCount) return 'done';
     if (t.kind === 'schedule' && t.scheduled_for) return 'done';
     return 'open';
+  };
+  // things the client can act on right now
+  const needs = tasks.filter((t) => !t.optional && stateOf(t) === 'open' && (t.kind === 'document' || t.kind === 'catalog' || t.kind === 'integration'));
+
+  const uploadBtn = (t, primary) => {
+    const sign = SIGN_KEYS.includes(t.key);
+    const latest = signedOf(t)[0];
+    return <UploadButton accept={t.kind === 'catalog' ? '.csv,.xlsx' : acceptFor(t).ext} onFile={(f) => upload(t, f)} primary={primary}
+      label={sign ? (latest ? 'Upload signed copy again' : 'Upload signed copy') : latest ? 'Upload again' : t.kind === 'catalog' ? 'Upload product list' : `Upload ${acceptFor(t).label}`} />;
   };
 
   return (
@@ -143,27 +180,41 @@ export default function ClientHome({ me }) {
               <div className="phase open">
                 {tasks.filter((t) => t.phase === openPhase).map((t) => {
                   const state = stateOf(t);
-                  const mine = docs.filter((d) => d.task_key === t.key);
-                  const latest = mine[0];
-                  const canUpload = (t.kind === 'document' || t.kind === 'catalog') && state !== 'done';
-                  const list = t.kind === 'integration' ? conns.filter((c) => c.category === (t.key === 'label_access' ? 'shipping' : 'commerce')) : [];
+                  const sign = SIGN_KEYS.includes(t.key);
+                  const tpl = tplOf(t);
+                  const latest = signedOf(t)[0];
+                  const canUpload = (t.kind === 'document' || t.kind === 'catalog') && state !== 'done' && state !== 'locked';
+                  const list = t.kind === 'integration' ? conns.filter((c) => c.category === catOf(t)) : [];
                   return (
                     <div key={t.id} className={`task ${state}`}>
-                      <span className={`circle ${state}`}>{state === 'done' ? '✓' : state === 'pending' ? '–' : ''}</span>
+                      <span className={`circle ${state === 'locked' ? 'open' : state}`}>{state === 'done' ? '✓' : state === 'pending' ? '–' : ''}</span>
                       <div>
                         <div className="lbl">{t.label}{t.optional && <span className="opt">optional</span>}
-                          {canUpload && <UploadButton accept={t.kind === 'catalog' ? '.csv,.xlsx' : acceptFor(t).ext} onFile={(f) => upload(t, f)} label={latest ? 'Upload again' : t.kind === 'catalog' ? 'Upload product list' : `Upload ${acceptFor(t).label}`} primary={state === 'open' && !t.optional} />}
+                          {sign && tpl && state !== 'done' && <button className="btn-xs" onClick={() => viewDoc(tpl)}>Download &amp; sign</button>}
+                          {canUpload && uploadBtn(t, state === 'open' && !t.optional)}
+                          {t.kind === 'integration' && <button className="btn-xs primary" onClick={() => setConnectOpen(t.key)}>{list.length ? 'Connect another' : 'Connect'}</button>}
                         </div>
                         <div className="note">
-                          {state === 'done' && t.kind === 'document' && 'Approved'}
+                          {state === 'locked' && <span className="muted">Not yet uploaded by admin — shipbay will send this for your signature.</span>}
+                          {state === 'done' && t.kind === 'document' && (sign ? 'Signed and approved' : 'Approved')}
                           {state === 'done' && t.kind === 'catalog' && <>{skuCount.toLocaleString()} SKUs on file</>}
                           {state === 'done' && t.kind === 'schedule' && <>Arriving {longDate(t.scheduled_for)}</>}
                           {state === 'done' && t.kind === 'billing' && <>{BILLING.find((b) => b[0] === org.billing_method)?.[1]}</>}
-                          {state === 'done' && t.kind === 'integration' && list.map((c) => <span key={c.id} className="chip">{providerName(c.provider)}{c.label ? ` · ${c.label}` : ''}</span>)}
                           {state === 'done' && ['manual', 'portal'].includes(t.kind) && (t.done_at ? `Completed ${fmt(t.done_at)}` : 'Complete')}
-                          {state === 'pending' && <>Received {fmt(latest.created_at)} — being reviewed by shipbay</>}
+                          {state === 'pending' && t.kind !== 'integration' && <>Received {fmt(latest.created_at)} — being reviewed by shipbay</>}
                           {state === 'open' && (latest?.status === 'rejected' ? <span className="warn">We need a corrected copy{latest.review_note ? ` — ${latest.review_note}` : ''}</span> : HELP[t.key])}
-                          {state === 'open' && t.kind === 'integration' && <> Your onboarding manager connects this with you.</>}
+                          {t.kind === 'integration' && list.length > 0 && (
+                            <ul className="connlist">
+                              {list.map((c) => (
+                                <li key={c.id}>
+                                  <span className={`pill ${c.status}`}>{c.status}</span>
+                                  <b>{providerName(c.provider)}</b>{c.label && <span className="muted"> · {c.label}</span>}
+                                  {c.status === 'error' && c.error && <span className="errtxt"> — {c.error}</span>}
+                                  <span className="acts"><button className="edit" disabled={busyId === c.id} onClick={() => disconnect(c)}>disconnect</button></span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
                         </div>
                       </div>
                       <div className="when">{latest && t.kind !== 'catalog' ? <button className="viewdoc" onClick={() => viewDoc(latest)}>View</button> : (t.done && t.done_at ? fmt(t.done_at) : '')}</div>
@@ -181,7 +232,10 @@ export default function ClientHome({ me }) {
                 {needs.map((t) => (
                   <li key={t.id}>
                     <div><b>{t.label}</b><div className="small">{HELP[t.key]}</div></div>
-                    <UploadButton accept={t.kind === 'catalog' ? '.csv,.xlsx' : acceptFor(t).ext} onFile={(f) => upload(t, f)} label={t.kind === 'catalog' ? 'Upload product list' : `Upload ${acceptFor(t).label}`} primary />
+                    <div className="act">
+                      {SIGN_KEYS.includes(t.key) && <button className="btn-xs" onClick={() => viewDoc(tplOf(t))}>Download &amp; sign</button>}
+                      {t.kind === 'integration' ? <button className="btn-xs primary" onClick={() => setConnectOpen(t.key)}>Connect</button> : uploadBtn(t, true)}
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -193,16 +247,20 @@ export default function ClientHome({ me }) {
           <div className="card team">
             <div className="cardhead"><h3>Your shipbay team</h3></div>
             <div className="person">
-              <div className="avatar">{(org.sales_rep || 'S').split(/\s+/).map((w) => w[0]).join('').slice(0, 2)}</div>
-              <div><b>{org.sales_rep || 'shipbay'}</b><div className="small">Onboarding manager</div></div>
+              <div className="avatar">{initials(org.sales_rep)}</div>
+              <div><b>{org.sales_rep}</b><div className="small">Sales &amp; onboarding</div>
+                <div className="contact"><a href={`tel:${(org.sales_rep_phone || '').replace(/\D/g, '')}`}>{org.sales_rep_phone}</a><a href={`mailto:${org.sales_rep_email}`}>{org.sales_rep_email}</a></div></div>
             </div>
-            <a className="btn-sm" href="mailto:derekh@shipbay3pl.com">Email</a>
-            <a className="btn-sm" href="tel:+16104785432">(610) 478-5432</a>
+            <div className="person">
+              <div className="avatar ops">{initials(org.ops_manager)}</div>
+              <div><b>{org.ops_manager}</b><div className="small">Account Operations Manager</div>
+                <div className="contact"><a href={`tel:${(org.ops_manager_phone || '').replace(/\D/g, '')}`}>{org.ops_manager_phone}</a><a href={`mailto:${org.ops_manager_email}`}>{org.ops_manager_email}</a></div></div>
+            </div>
           </div>
           <div className="card">
             <div className="cardhead"><h3>Send inventory to</h3></div>
             <address>
-              <b>shipbay — {org.name}</b><br />115 Stryker Ln<br />Hillsborough Township, NJ 08844
+              <b>shipbay — {org.name}</b><br />115 Stryker Ln, Unit 10<br />Hillsborough Township, NJ 08844
             </address>
             <div className="small">Label every carton with your SKU and quantity; send your packing list ahead of time so receiving is same-day.</div>
           </div>
@@ -216,6 +274,7 @@ export default function ClientHome({ me }) {
           </div>
         </aside>
       </div>
+      {connectOpen && <ConnectModal org={org} taskKey={connectOpen} onClose={() => setConnectOpen(null)} onDone={(f) => { setConnectOpen(null); if (f) setMsg(f); load(); }} />}
     </>
   );
 }

@@ -9,6 +9,8 @@ export const ACCEPT = {
   'pdf,doc,image': { mimes: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'image/png', 'image/jpeg', 'image/webp', 'image/heic'], ext: '.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp,.heic', label: 'file' },
 };
 export const acceptFor = (t) => ACCEPT[t.accept] || ACCEPT.pdf;
+// shipbay uploads these first; the client downloads, signs and uploads the signed copy
+export const SIGN_KEYS = ['rate_card', 'agreement', 'sla'];
 const fn = async (name, body) => {
   const { data, error } = await supabase.functions.invoke(name, { body });
   if (error) { // FunctionsHttpError carries the JSON body the function returned
@@ -155,14 +157,14 @@ function AccountDetail({ account, me, onChange }) {
     await supabase.from('onboarding_tasks').update({ done, done_at: done ? new Date().toISOString() : null, done_by: done ? me.id : null }).eq('id', t.id);
     load(); onChange();
   };
-  const upload = async (t, file) => {
+  const upload = async (t, file, forSignature = false) => {
     if (!file) return;
     const acc = acceptFor(t);
     if (!acc.mimes.includes(file.type) && !acc.ext.split(',').some((e) => file.name.toLowerCase().endsWith(e))) return alert(`Please upload a ${acc.label === 'PDF' ? 'PDF' : 'PDF, Word, Excel or image file'}.`);
     const path = `${org.id}/${t.key}/${crypto.randomUUID()}-${file.name.replace(/[^A-Za-z0-9._-]+/g, '_')}`;
     const { error: upErr } = await supabase.storage.from('client-docs').upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
     if (upErr) return alert(upErr.message);
-    const { error } = await supabase.from('documents').insert({ org_id: org.id, kind: DOC_KIND[t.key] || 'other', title: `${t.label} — ${org.name}`, storage_path: path, mime: file.type || null, size_bytes: file.size, task_key: t.key, status: 'pending', uploaded_by: me.id });
+    const { error } = await supabase.from('documents').insert({ org_id: org.id, kind: DOC_KIND[t.key] || 'other', title: `${t.label}${forSignature ? ' (for signature)' : ''} — ${org.name}`, storage_path: path, mime: file.type || null, size_bytes: file.size, task_key: t.key, status: forSignature ? 'approved' : 'pending', for_signature: forSignature, reviewed_by: forSignature ? me.id : null, reviewed_at: forSignature ? new Date().toISOString() : null, uploaded_by: me.id });
     if (error) return alert(error.message);
     load(); onChange();
   };
@@ -215,7 +217,10 @@ function AccountDetail({ account, me, onChange }) {
             {GO_LIVE_STATUS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
         </div>
-        <div><small>Sales rep</small><span>{org.sales_rep}</span></div>
+        <div>
+          <small>Sales rep</small><span>{org.sales_rep}</span><div className="sub2">{org.sales_rep_phone}<br />{org.sales_rep_email}</div>
+          <small style={{ marginTop: 12 }}>Account Operations Manager</small><span>{org.ops_manager}</span><div className="sub2">{org.ops_manager_phone}<br />{org.ops_manager_email}</div>
+        </div>
       </div>
 
       <div className="phases">
@@ -238,7 +243,9 @@ function AccountDetail({ account, me, onChange }) {
       {openPhase && (
         <div className="phase open">
           {tasks.filter((t) => t.phase === openPhase).map((t) => {
-            const mine = docs.filter((d) => d.task_key === t.key);
+            const sign = SIGN_KEYS.includes(t.key);
+            const tpl = sign ? docs.find((d) => d.task_key === t.key && d.for_signature) : null;
+            const mine = docs.filter((d) => d.task_key === t.key && !d.for_signature);
             const latest = mine[0];
             const multi = t.key === 'additional_docs';
             const cat = CATEGORY[t.key];
@@ -262,14 +269,18 @@ function AccountDetail({ account, me, onChange }) {
                   : <span className={`circle ${state}`} title={title}>{state === 'done' ? '✓' : state === 'pending' ? '–' : ''}</span>}
                 <div>
                   <div className="lbl">{t.label}{t.optional && <span className="opt">optional</span>}
-                    {t.kind === 'document' && <UploadButton accept={acceptFor(t).ext} onFile={(f) => upload(t, f)} label={multi ? 'Upload PDF' : latest ? `Replace ${acceptFor(t).label}` : `Upload ${acceptFor(t).label}`} />}
+                    {t.kind === 'document' && sign && <UploadButton accept=".pdf" onFile={(f) => upload(t, f, true)} label={tpl ? 'Replace unsigned PDF' : 'Upload for signature'} primary={!tpl} />}
+                    {t.kind === 'document' && sign && tpl && <button className="viewdoc" onClick={() => viewDoc(tpl)}>View unsigned</button>}
+                    {t.kind === 'document' && !sign && <UploadButton accept={acceptFor(t).ext} onFile={(f) => upload(t, f)} label={multi ? 'Upload PDF' : latest ? `Replace ${acceptFor(t).label}` : `Upload ${acceptFor(t).label}`} />}
+                    {t.kind === 'document' && sign && tpl && !latest && <UploadButton accept=".pdf" onFile={(f) => upload(t, f)} label="Upload signed copy" />}
                     {t.kind === 'catalog' && <button className={`btn-xs ${skuCount ? '' : 'primary'}`} onClick={() => setCatalogOpen(true)}>{skuCount ? 'Upload CSV again' : 'Upload CSV'}</button>}
                     {t.kind === 'schedule' && <input type="date" className="inlinedate sm" value={t.scheduled_for || ''} min={new Date().toISOString().slice(0, 10)} onChange={(e) => schedule(t, e.target.value)} />}
                     {t.kind === 'billing' && <button className="btn-xs" onClick={() => setBillingOpen(true)}>{org.billing_method ? 'Change billing method' : 'Add billing method'}</button>}
                     {t.kind === 'portal' && <button className={`btn-xs ${org.portal_user_id ? '' : 'primary'}`} onClick={() => setPortalOpen(true)}>{org.portal_user_id ? 'Reset & resend' : 'Create'}</button>}
                     {t.kind === 'integration' && <button className="btn-xs primary" onClick={() => setConnectOpen(t.key)}>Connect</button>}
                   </div>
-                  {t.kind === 'document' && !multi && latest && <div className="note">{latest.status === 'approved' ? 'Approved' : latest.status === 'rejected' ? 'Rejected — upload a corrected copy' : 'Uploaded, awaiting review'} · {fmt(latest.created_at)}{latest.review_note ? ` · ${latest.review_note}` : ''}</div>}
+                  {t.kind === 'document' && sign && !latest && <div className="note">{tpl ? <>Sent for signature {fmt(tpl.created_at)} — waiting on the client’s signed copy</> : <>Upload the unsigned PDF; the client signs it from their portal and sends it back.</>}</div>}
+                  {t.kind === 'document' && !multi && latest && <div className="note">{latest.status === 'approved' ? 'Approved' : latest.status === 'rejected' ? 'Rejected — upload a corrected copy' : sign ? 'Signed copy received, awaiting review' : 'Uploaded, awaiting review'} · {fmt(latest.created_at)}{latest.review_note ? ` · ${latest.review_note}` : ''}</div>}
                   {multi && (mine.length ? (
                     <ul className="doclist">
                       {mine.map((d) => <li key={d.id}><span className={`dot2 ${d.status}`} />{d.title.replace(` — ${org.name}`, '')} <small>· {d.status === 'approved' ? 'approved' : d.status === 'rejected' ? 'rejected' : 'awaiting review'} · {fmt(d.created_at)}</small><button className="viewdoc" onClick={() => viewDoc(d)}>View</button></li>)}
@@ -308,7 +319,7 @@ function AccountDetail({ account, me, onChange }) {
                   ))}
                 </div>
                 <div className="when">
-                  {(t.kind === 'document' && !multi && latest) || catalogDoc ? <button className="viewdoc" onClick={() => viewDoc(latest)}>{catalogDoc ? 'View CSV' : 'View document'}</button> : (t.done && t.done_at ? fmt(t.done_at) : '')}
+                  {(t.kind === 'document' && !multi && latest) || catalogDoc ? <button className="viewdoc" onClick={() => viewDoc(latest)}>{catalogDoc ? 'View CSV' : sign ? 'View signed' : 'View document'}</button> : (t.done && t.done_at ? fmt(t.done_at) : '')}
                 </div>
               </div>
             );
@@ -533,7 +544,7 @@ function PortalModal({ org, onClose }) {
 }
 
 /* ---------- Connect a shipping-label service or commerce channel ---------- */
-function ConnectModal({ org, taskKey, onClose, onDone }) {
+export function ConnectModal({ org, taskKey, onClose, onDone }) {
   const cat = CATEGORY[taskKey];
   const [prov, setProv] = useState(null);
   const [mode, setMode] = useState('oauth'); // for providers that offer both: oauth | api_key
