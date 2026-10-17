@@ -49,7 +49,7 @@ export const PhaseIcon = ({ kind }) => {
     case 'paperwork': return <svg {...common}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h6" className="accent" /></svg>;
     case 'systems': return <svg {...common}><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /><path d="M7 10h3l2-3 2 6 2-3h1" className="accent" /></svg>;
     case 'inventory': return <svg {...common}><path d="M21 8l-9-5-9 5v8l9 5 9-5z" /><path d="M3 8l9 5 9-5" /><path d="M12 13v8" className="accent" /></svg>;
-    case 'golive': return <svg {...common}><path d="M3 17l3-3h4l5-5a3 3 0 0 1 4-4l1 1a3 3 0 0 1-4 4l-5 5v4l-3 3" /><path d="M3 21l4-4" className="accent" /><path d="M14 3l7 7" className="accent" /></svg>;
+    case 'golive': return <svg {...common}><path d="M12 2.5c3 2 4.5 5.5 4.5 9.5v3h-9v-3c0-4 1.5-7.5 4.5-9.5z" /><path d="M7.5 12.5L4.5 15v3.5l3-1.5" /><path d="M16.5 12.5l3 2.5v3.5l-3-1.5" /><circle cx="12" cy="9.5" r="1.6" className="accent" /><path d="M10 18.5c0 1.5.7 2.5 2 3.5 1.3-1 2-2 2-3.5" className="accent" /></svg>;
     default: return null;
   }
 };
