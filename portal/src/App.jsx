@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase, forgetLocalSession, RECOVERY_LANDING } from './lib';
+import { supabase, forgetLocalSession, RECOVERY_LANDING, RESET_TOKEN } from './lib';
 import { isAuthHost, isAppHost, splitMode, authUrl, handoffToApp, takeHandoff } from './hosts';
 import Onboarding from './pages/Onboarding';
 import Compliance from './pages/Compliance';
@@ -17,7 +17,8 @@ export default function App() {
   const [me, setMe] = useState(null);
 
   const [handoffFailed, setHandoffFailed] = useState(false);
-  const [recovery, setRecovery] = useState(RECOVERY_LANDING);
+  const [recovery, setRecovery] = useState(RECOVERY_LANDING || !!RESET_TOKEN);
+  const [resetFailed, setResetFailed] = useState(false);
 
   useEffect(() => {
     let booted = false;
@@ -25,6 +26,10 @@ export default function App() {
     // otherwise dashboard. bounces to auth. before the handed-off session is stored → redirect loop.
     const { data: sub } = supabase.auth.onAuthStateChange((e, s) => { if (e === 'PASSWORD_RECOVERY') setRecovery(true); if (booted) setSession(s); });
     (async () => {
+      if (RESET_TOKEN) { // our reset link: turn the one-time token into a session, then the new-password screen shows
+        const { error } = await supabase.auth.verifyOtp({ token_hash: RESET_TOKEN, type: 'recovery' });
+        if (error) { setRecovery(false); setResetFailed(true); }
+      }
       const t = isAppHost ? takeHandoff() : null;
       if (t) {
         const { error } = await supabase.auth.setSession(t);
@@ -53,7 +58,7 @@ export default function App() {
   if (isAuthHost) {
     // auth. never shows the app: a stored session is handed to dashboard. once the server confirms it is still valid
     if (session) return <AuthHandoff session={session} onInvalid={() => setSession(null)} />;
-    return <SignIn />;
+    return <SignIn note={resetFailed ? 'That reset link has expired or was already used. Enter your email and tap “Forgot password?” for a fresh one.' : undefined} />;
   }
   if (!session) {
     if (isAppHost) {
@@ -142,8 +147,10 @@ function SignIn({ note }) {
   };
   const reset = async () => {
     if (!email.trim()) return setMsg({ kind: 'err', text: 'Enter your work email first, then tap “Forgot password?”' });
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: authUrl() });
-    setMsg(error ? { kind: 'err', text: error.message } : { kind: 'ok', text: 'Check your inbox — a reset link is on its way.' });
+    setBusy(true);
+    const { data, error } = await supabase.functions.invoke('password-reset', { body: { action: 'request', email: email.trim() } });
+    setBusy(false);
+    setMsg(error ? { kind: 'err', text: 'Couldn’t send the reset email just now — try again in a minute.' } : { kind: 'ok', text: data?.message || 'If that email has a shipbay login, a reset link is on its way.' });
   };
 
   return (
