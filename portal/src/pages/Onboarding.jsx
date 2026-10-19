@@ -557,7 +557,12 @@ export function ConnectModal({ org, taskKey, onClose, onDone }) {
   const ready = fields.every((f) => f.optional || (vals[f.key] || '').trim());
 
   const go = async () => {
-    setBusy(true); setErr(null);
+    setErr(null);
+    for (const f of fields) { // catch the classic mix-ups before a round trip
+      const v = (vals[f.key] || '').trim();
+      if (v && f.pattern && !f.pattern.test(v)) return setErr(f.patternHint || `${f.label} doesn’t look right.`);
+    }
+    setBusy(true);
     if (mode === 'oauth') {
       const r = await fn('integrations', { action: 'oauth_start', org_id: org.id, category: cat.key, provider: prov.id, params: vals });
       setBusy(false);
@@ -588,8 +593,11 @@ export function ConnectModal({ org, taskKey, onClose, onDone }) {
         )}
         {prov && <>
           <div className="provhead"><b>{prov.name}</b><span className="muted">{prov.help}</span></div>
-          {prov.auth === 'oauth' && prov.altAuth && (
-            <div className="seg"><button className={mode === 'oauth' ? 'on' : ''} onClick={() => setMode('oauth')}>Client signs in</button><button className={mode === 'api_key' ? 'on' : ''} onClick={() => setMode('api_key')}>Paste API token</button></div>
+          {prov.altAuth && (
+            <div className="seg"><button className={mode === 'api_key' ? 'on' : ''} onClick={() => setMode('api_key')}>Paste API token</button><button className={mode === 'oauth' ? 'on' : ''} onClick={() => setMode('oauth')}>Client signs in</button></div>
+          )}
+          {mode === 'api_key' && prov.scopes && (
+            <div className="scopes"><b>Admin API scopes to tick when creating the custom app:</b><div>{prov.scopes.map((sc) => <code key={sc}>{sc}</code>)}</div></div>
           )}
           {fields.map((f) => (
             <div className="field" key={f.key}><label>{f.label}{f.optional && <span className="muted"> (optional)</span>}</label>

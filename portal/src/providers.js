@@ -24,10 +24,15 @@ export const SHIPPING = [
 ];
 
 export const COMMERCE = [
-  { id: 'shopify', name: 'Shopify', auth: 'oauth', altAuth: 'api_key', needs: ['SHOPIFY_CLIENT_ID', 'SHOPIFY_CLIENT_SECRET'],
+  { id: 'shopify', name: 'Shopify', auth: 'api_key', altAuth: 'oauth', needs: ['SHOPIFY_CLIENT_ID', 'SHOPIFY_CLIENT_SECRET'],
     oauthFields: [f('shop', 'Store domain', { placeholder: 'brand.myshopify.com' })],
-    fields: [f('shop', 'Store domain', { placeholder: 'brand.myshopify.com' }), f('access_token', 'Admin API access token', { ...SECRET, placeholder: 'shpat_…' }), f('api_secret', 'API secret key', { ...SECRET, optional: true, placeholder: 'from the same custom app — lets us verify order webhooks' })],
-    help: 'Connect lets the client approve ShipBay in their Shopify admin. Or paste a custom-app Admin API token (Settings → Apps → Develop apps). Either way we subscribe the store to order events automatically.' },
+    fields: [
+      f('shop', 'Store domain', { placeholder: 'brand.myshopify.com' }),
+      f('access_token', 'Admin API access token (starts with shpat_)', { ...SECRET, placeholder: 'shpat_…', pattern: /^shpat_[0-9a-f]{32}$/i, patternHint: 'That isn’t an Admin API access token. It starts with shpat_ and comes from a custom app created inside the store’s own admin (Settings → Apps and sales channels → Develop apps) — not the Client ID or shpss_ secret from the Shopify Dev Dashboard.' }),
+      f('api_secret', 'API secret key (same custom app)', { ...SECRET, optional: true, placeholder: 'shpss_… — lets us verify order webhooks' }),
+    ],
+    help: 'In the client’s Shopify admin: Settings → Apps and sales channels → Develop apps → Create app → Configure Admin API scopes → Install app → copy the Admin API access token (shown once). Order webhooks are registered automatically.',
+    scopes: ['read_orders', 'write_orders', 'read_products', 'read_inventory', 'write_inventory', 'read_fulfillments', 'write_fulfillments', 'read_merchant_managed_fulfillment_orders', 'write_merchant_managed_fulfillment_orders', 'read_locations', 'read_customers'] },
   { id: 'woocommerce', name: 'WooCommerce', auth: 'api_key', fields: [f('store_url', 'Store URL', { placeholder: 'https://brand.com' }), f('consumer_key', 'Consumer key'), f('consumer_secret', 'Consumer secret', SECRET)], help: 'WooCommerce → Settings → Advanced → REST API (Read/Write).' },
   { id: 'bigcommerce', name: 'BigCommerce', auth: 'api_key', fields: [f('store_hash', 'Store hash'), f('access_token', 'API access token', SECRET)], help: 'Settings → Store-level API accounts.' },
   { id: 'amazon', name: 'Amazon Seller Central', auth: 'oauth', needs: ['AMAZON_SP_APP_ID', 'AMAZON_LWA_CLIENT_ID', 'AMAZON_LWA_CLIENT_SECRET'], help: 'Client authorizes ShipBay’s SP-API app in Seller Central.' },

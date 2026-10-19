@@ -489,3 +489,6 @@ table.skus .edit { background: none; border: 0; color: var(--orange-soft); font:
 .market .secret .in .edit { background: none; border: 0; color: var(--muted-2); font-size: 16px; cursor: pointer; padding: 0 4px; }
 .market .secret i { grid-column: 2; grid-row: 1 / span 2; text-align: right; }
 .market .secrets .btn-sm { margin-top: 10px; width: 100%; justify-content: center; }
+.modal .scopes { font-size: 12.5px; color: var(--muted); margin: 0 0 14px; }
+.modal .scopes > div { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.modal .scopes code { font-size: 11.5px; background: #EEF0F3; padding: 2px 6px; border-radius: 5px; color: var(--ink); }
