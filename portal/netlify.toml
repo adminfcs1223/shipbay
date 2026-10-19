@@ -6,6 +6,20 @@
 [build.environment]
   NODE_VERSION = "22"
 
+# Branded, same-host endpoints for marketplaces (Shopify requires the OAuth callback host to match the App URL host).
+# Proxied (200) so the browser stays on dashboard.shipbay3pl.com; query string, headers and body pass through.
+[[redirects]]
+  from = "/oauth/callback"
+  to = "https://poxlczzkpztmoiixyrth.supabase.co/functions/v1/integrations/callback"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/webhooks/shopify"
+  to = "https://poxlczzkpztmoiixyrth.supabase.co/functions/v1/shopify-webhook"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

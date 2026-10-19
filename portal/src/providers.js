@@ -26,8 +26,8 @@ export const SHIPPING = [
 export const COMMERCE = [
   { id: 'shopify', name: 'Shopify', auth: 'oauth', altAuth: 'api_key', needs: ['SHOPIFY_CLIENT_ID', 'SHOPIFY_CLIENT_SECRET'],
     oauthFields: [f('shop', 'Store domain', { placeholder: 'brand.myshopify.com' })],
-    fields: [f('shop', 'Store domain', { placeholder: 'brand.myshopify.com' }), f('access_token', 'Admin API access token', { ...SECRET, placeholder: 'shpat_…' })],
-    help: 'Connect lets the client approve ShipBay in their Shopify admin. Or paste a custom-app Admin API token (Settings → Apps → Develop apps).' },
+    fields: [f('shop', 'Store domain', { placeholder: 'brand.myshopify.com' }), f('access_token', 'Admin API access token', { ...SECRET, placeholder: 'shpat_…' }), f('api_secret', 'API secret key', { ...SECRET, optional: true, placeholder: 'from the same custom app — lets us verify order webhooks' })],
+    help: 'Connect lets the client approve ShipBay in their Shopify admin. Or paste a custom-app Admin API token (Settings → Apps → Develop apps). Either way we subscribe the store to order events automatically.' },
   { id: 'woocommerce', name: 'WooCommerce', auth: 'api_key', fields: [f('store_url', 'Store URL', { placeholder: 'https://brand.com' }), f('consumer_key', 'Consumer key'), f('consumer_secret', 'Consumer secret', SECRET)], help: 'WooCommerce → Settings → Advanced → REST API (Read/Write).' },
   { id: 'bigcommerce', name: 'BigCommerce', auth: 'api_key', fields: [f('store_hash', 'Store hash'), f('access_token', 'API access token', SECRET)], help: 'Settings → Store-level API accounts.' },
   { id: 'amazon', name: 'Amazon Seller Central', auth: 'oauth', needs: ['AMAZON_SP_APP_ID', 'AMAZON_LWA_CLIENT_ID', 'AMAZON_LWA_CLIENT_SECRET'], help: 'Client authorizes ShipBay’s SP-API app in Seller Central.' },

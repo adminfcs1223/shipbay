@@ -8,7 +8,7 @@ const fn = async (body) => { const { data, error } = await supabase.functions.in
 const MARKETS = [
   { id: 'shopify', name: 'Shopify', portal: 'https://partners.shopify.com', portalLabel: 'Shopify Partners',
     secrets: [['SHOPIFY_CLIENT_ID', 'Client ID'], ['SHOPIFY_CLIENT_SECRET', 'Client secret']],
-    steps: ['Simplest path (recommended): the client creates a custom app in their own admin — Settings → Apps and sales channels → Develop apps → Create app → scopes: read_orders, write_orders, read_products, read_inventory, write_inventory, write_fulfillments, read_locations → Install → copy the Admin API access token. Then use “Paste API token” on Connect. No Partner app needed.', 'Partner-app path (sign-in button): partners.shopify.com → Apps → Create app manually → App URL https://dashboard.shipbay3pl.com, add the callback URL under Allowed redirection URLs.', 'Distribution: “Custom distribution” binds the app to ONE store (enter that client’s brand.myshopify.com). Public distribution works for any store but requires Shopify app review.', 'Paste the Client ID and Client secret below — they apply to the one store you named.'],
+    steps: ['Simplest path (recommended): the client creates a custom app in their own admin — Settings → Apps and sales channels → Develop apps → Create app → scopes: read_orders, write_orders, read_products, read_inventory, write_inventory, write_fulfillments, read_locations → Install → copy the Admin API access token. Then use “Paste API token” on Connect. No Partner app needed.', 'Partner-app path (sign-in button): partners.shopify.com → Apps → Create app manually → App URL https://dashboard.shipbay3pl.com, and the callback URL above under Allowed redirection URLs (Shopify requires both on the same host — they are).', 'Distribution: “Custom distribution” binds the app to ONE store (enter that client’s brand.myshopify.com). Public distribution works for any store but requires Shopify app review.', 'Paste the Client ID and Client secret below — they apply to the one store you named.'],
     note: 'Because a custom-distribution app is single-store, treat the Partner path as per-client; the token path scales with no setup.' },
   { id: 'amazon', name: 'Amazon Seller Central', portal: 'https://sellercentral.amazon.com/sellingpartner/developerconsole', portalLabel: 'Developer Console',
     secrets: [['AMAZON_SP_APP_ID', 'App ID (amzn1.sp.solution.…)'], ['AMAZON_LWA_CLIENT_ID', 'LWA client ID'], ['AMAZON_LWA_CLIENT_SECRET', 'LWA client secret'], ['AMAZON_APP_PUBLISHED', 'Set to 1 only after Amazon approves the listing (optional)']],
@@ -53,7 +53,7 @@ export default function Marketplaces() {
     if (r.error) return setMsg({ kind: 'err', text: r.error });
     load();
   };
-  const redirect = st?.redirect_uri || 'https://poxlczzkpztmoiixyrth.supabase.co/functions/v1/integrations/callback';
+  const redirect = st?.redirect_uri || 'https://dashboard.shipbay3pl.com/oauth/callback';
   const copy = async () => { try { await navigator.clipboard.writeText(redirect); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* no clipboard */ } };
   const ready = MARKETS.filter((m) => st?.providers?.[m.id]?.ready).length;
 

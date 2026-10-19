@@ -14,7 +14,11 @@ const admin = createClient(SB_URL, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, apikey, x-client-info' };
 const json = (b: unknown, status = 200) => Response.json(b, { status, headers: cors });
 const DASH = 'https://dashboard.shipbay3pl.com/';
-const REDIRECT = `${SB_URL}/functions/v1/integrations/callback`;
+// Same-host endpoints on the dashboard domain (Netlify proxies them to these functions). Shopify requires the OAuth
+// callback host to match the app's App URL host, and a branded webhook address is what clients see in their admin.
+const REDIRECT = 'https://dashboard.shipbay3pl.com/oauth/callback';
+const SHOPIFY_WEBHOOK_URL = 'https://dashboard.shipbay3pl.com/webhooks/shopify';
+const SHOPIFY_TOPICS = ['orders/create', 'orders/updated', 'orders/cancelled'];
 // Credentials come from platform_secrets (entered on the staff Marketplaces screen), falling back to env secrets.
 let SEC: Record<string, string> = {};
 const env = (k: string) => SEC[k] || Deno.env.get(k) || '';
@@ -150,16 +154,38 @@ const OAUTH: Record<string, OAuth> = {
   },
 };
 
+// Make sure the store sends us order events. Idempotent: skips topics already pointed at our address.
+async function ensureShopifyWebhooks(shop: string, token: string): Promise<{ registered: string[]; error?: string }> {
+  const H = { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' };
+  const base = `https://${shop}/admin/api/2025-07`;
+  const have = await call(`${base}/webhooks.json?limit=250`, { headers: H });
+  if (!have.ok) return { registered: [], error: `could not list webhooks (HTTP ${have.status})` };
+  const existing = new Set((have.data?.webhooks ?? []).filter((w: any) => w.address === SHOPIFY_WEBHOOK_URL).map((w: any) => w.topic));
+  const registered: string[] = [];
+  for (const topic of SHOPIFY_TOPICS) {
+    if (existing.has(topic)) { registered.push(topic); continue; }
+    const r = await call(`${base}/webhooks.json`, { method: 'POST', headers: H, body: JSON.stringify({ webhook: { topic, address: SHOPIFY_WEBHOOK_URL, format: 'json' } }) });
+    if (r.ok) registered.push(topic); else return { registered, error: `${topic}: HTTP ${r.status} ${r.text.slice(0, 160)}` };
+  }
+  return { registered };
+}
+
 async function save(org_id: string, category: string, provider: string, auth_type: string, v: V, secrets: C, created_by: string | null, label?: string) {
   const row = { org_id, category, provider, auth_type, label: label ?? v.label ?? null, status: v.ok ? 'connected' : 'error', verified: v.ok, error: v.ok ? null : v.error ?? 'failed', meta: v.meta ?? {}, connected_at: v.ok ? new Date().toISOString() : null, created_by };
   const { data: integ, error } = await admin.from('integrations').upsert(row, { onConflict: 'org_id,category,provider' }).select('*').single();
   if (error || !integ) return { error: error?.message ?? 'save failed' };
   if (v.ok) {
     await admin.from('integration_secrets').upsert({ integration_id: integ.id, secrets, updated_at: new Date().toISOString() });
-    if (provider === 'shopify') { // keep the existing Shopify webhook/fulfillment functions working
+    if (provider === 'shopify') { // feed the order webhook + fulfillment functions, and subscribe the store to order events
       const shop = host(secrets.shop);
+      // webhooks are signed with the app's secret: our Partner app secret for OAuth, the custom app's API secret key for tokens
+      const webhookSecret = auth_type === 'oauth' ? env('SHOPIFY_CLIENT_SECRET') : (secrets.api_secret || null);
       await admin.from('orgs').update({ shopify_domain: shop }).eq('id', org_id);
-      await admin.from('org_integrations').upsert({ org_id, shopify_access_token: secrets.access_token, updated_at: new Date().toISOString() }, { onConflict: 'org_id' });
+      await admin.from('org_integrations').upsert({ org_id, shopify_access_token: secrets.access_token, ...(webhookSecret ? { shopify_webhook_secret: webhookSecret } : {}), updated_at: new Date().toISOString() }, { onConflict: 'org_id' });
+      const wh = await ensureShopifyWebhooks(shop, secrets.access_token);
+      const meta = { ...(integ.meta ?? {}), webhooks: wh.registered, webhook_error: wh.error ?? null, webhook_secret_set: !!webhookSecret };
+      await admin.from('integrations').update({ meta }).eq('id', integ.id);
+      integ.meta = meta;
     }
   }
   return { integration: integ };
