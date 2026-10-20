@@ -6,7 +6,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { upsertShopifyOrder } from '../_shared/shopify_orders.ts';
 
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, apikey' };
+const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, apikey, x-client-info' };
 const API = '2025-07';
 
 Deno.serve(async (req) => {

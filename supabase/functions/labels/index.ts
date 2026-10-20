@@ -11,7 +11,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, apikey' };
+const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, apikey, x-client-info' };
 const VEEQO = 'https://api.veeqo.com/shipping/api/v1';
 const SHIPBAY_FROM = { name: 'ShipBay 3PL', company: 'ShipBay 3PL', phone: '+17327836604', email: 'derekh@shipbay3pl.com', line1: '115 Stryker Ln', line2: 'Unit 10', town: 'Hillsborough Township', postcode: '08844', country_code: 'US', county: 'NJ' };
 
