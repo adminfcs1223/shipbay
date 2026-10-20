@@ -20,3 +20,13 @@ export const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.m
 export function forgetLocalSession() {
   try { localStorage.removeItem(STORAGE_KEY); } catch { /* storage unavailable */ }
 }
+
+/** Call an Edge Function and surface the JSON error it returned (FunctionsHttpError hides it in context). */
+export async function fn(name, body) {
+  const { data, error } = await supabase.functions.invoke(name, { body });
+  if (error) {
+    let msg = error.message; try { const j = await error.context?.json?.(); if (j?.error) msg = j.error; } catch { /* keep */ }
+    return { error: msg };
+  }
+  return data || {};
+}

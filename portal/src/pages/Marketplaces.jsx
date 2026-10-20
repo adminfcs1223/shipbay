@@ -132,6 +132,27 @@ export default function Marketplaces() {
         </div>
       </div>
 
+      <div className={`card market ${st?.keys?.VEEQO_API_KEY?.set ? 'ok' : ''}`} style={{ marginBottom: 14 }}>
+        <div className="cardhead">
+          <h3>Label buying (Veeqo — shipbay account)</h3>
+          <span className={`pill ${st?.keys?.VEEQO_API_KEY?.set ? 'connected' : 'pending'}`}>{st?.keys?.VEEQO_API_KEY?.set ? 'Ready' : 'Optional'}</span>
+          <div className="spacer" />
+          <a className="btn-sm" href="https://app.veeqo.com/settings/users" target="_blank" rel="noopener">Veeqo users ↗</a>
+        </div>
+        <div className="body">
+          <ol><li>Pack &amp; Ship buys labels with the client’s own Veeqo key (Onboarding → Systems → Shipping label access → Veeqo). This key is the fallback for clients who haven’t connected one.</li><li>Veeqo → Settings → Users → your user → Generate API Key → paste here.</li></ol>
+          <div className="secrets">
+            <div className="grouplabel">Keys</div>
+            <div className={`secret ${st?.keys?.VEEQO_API_KEY?.set ? 'set' : 'missing'}`}>
+              <span className="lbl">Veeqo API key</span>
+              <div className="in"><input type="password" autoComplete="off" placeholder={st?.keys?.VEEQO_API_KEY?.set ? `set · ends in ${st.keys.VEEQO_API_KEY.tail} — paste to replace` : 'Vqt/…'} value={vals.VEEQO_API_KEY ?? ''} onChange={(e) => setVals((v) => ({ ...v, VEEQO_API_KEY: e.target.value }))} /></div>
+              <i>{st?.keys?.VEEQO_API_KEY?.set ? 'set ✓' : 'not set'}</i>
+            </div>
+            <button className="btn-sm primary" disabled={busy === 'veeqo'} onClick={() => save('veeqo', ['VEEQO_API_KEY'])}>{busy === 'veeqo' ? 'Saving…' : 'Save key'}</button>
+          </div>
+        </div>
+      </div>
+
       <div className="card" style={{ padding: '14px 18px' }}>
         <b>Already working without any registration:</b> <span className="muted">WooCommerce, BigCommerce, Walmart Marketplace, Squarespace, Wix, Square Online, Faire, Magento, Ecwid, PrestaShop, Webflow, Wayfair (API keys the client pastes), plus Shopify via a custom-app token. Shipping: ShipStation, ShipEngine, Shippo, EasyPost, Pitney Bowes, Sendle, Easyship, Veeqo, UPS, FedEx, USPS, DHL Express.</span>
       </div>

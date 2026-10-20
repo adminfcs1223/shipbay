@@ -22,7 +22,7 @@ const SHOPIFY_TOPICS = ['orders/create', 'orders/updated', 'orders/cancelled'];
 // Credentials come from platform_secrets (entered on the staff Marketplaces screen), falling back to env secrets.
 let SEC: Record<string, string> = {};
 const env = (k: string) => SEC[k] || Deno.env.get(k) || '';
-const SETTABLE = new Set(['SHOPIFY_CLIENT_ID', 'SHOPIFY_CLIENT_SECRET', 'AMAZON_SP_APP_ID', 'AMAZON_LWA_CLIENT_ID', 'AMAZON_LWA_CLIENT_SECRET', 'AMAZON_APP_PUBLISHED', 'EBAY_CLIENT_ID', 'EBAY_CLIENT_SECRET', 'EBAY_RUNAME', 'ETSY_CLIENT_ID', 'TIKTOK_APP_KEY', 'TIKTOK_APP_SECRET', 'TIKTOK_SERVICE_ID', 'TIKTOK_REGION', 'RESEND_API_KEY']);
+const SETTABLE = new Set(['SHOPIFY_CLIENT_ID', 'SHOPIFY_CLIENT_SECRET', 'AMAZON_SP_APP_ID', 'AMAZON_LWA_CLIENT_ID', 'AMAZON_LWA_CLIENT_SECRET', 'AMAZON_APP_PUBLISHED', 'EBAY_CLIENT_ID', 'EBAY_CLIENT_SECRET', 'EBAY_RUNAME', 'ETSY_CLIENT_ID', 'TIKTOK_APP_KEY', 'TIKTOK_APP_SECRET', 'TIKTOK_SERVICE_ID', 'TIKTOK_REGION', 'RESEND_API_KEY', 'VEEQO_API_KEY']);
 async function loadSecrets() {
   const { data } = await admin.from('platform_secrets').select('key, value');
   SEC = Object.fromEntries((data ?? []).map((r: any) => [r.key, r.value]));

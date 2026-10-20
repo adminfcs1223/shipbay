@@ -9,6 +9,9 @@ import ClientSettings from './pages/ClientSettings';
 import Skus from './pages/Skus';
 import Marketplaces from './pages/Marketplaces';
 import ClientProducts from './pages/ClientProducts';
+import Orders from './pages/Orders';
+import Receiving from './pages/Receiving';
+import PackShip from './pages/PackShip';
 
 const STAFF = ['shipbay_admin', 'shipbay_staff'];
 
@@ -204,9 +207,15 @@ const Ico = {
   settings: svg(<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></>),
   markets: svg(<><path d="M3 9l1.5-5h15L21 9"/><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/><path d="M5 11v9h14v-9"/><path d="M9 20v-5h6v5"/></>),
   compliance: svg(<><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></>),
+  orders: svg(<><path d="M4 4h16v16H4z"/><path d="M4 9h16"/><path d="M9 13h6"/></>),
+  receiving: svg(<><path d="M3 12l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M12 14v6"/><path d="M9 17l3 3 3-3"/></>),
+  pack: svg(<><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4"/><path d="M12 11v10"/><path d="M7.5 5l9 4"/></>),
 };
 const STAFF_NAV = [
   { key: 'onboarding', label: 'Onboarding', icon: Ico.onboarding, page: Onboarding },
+  { key: 'orders', label: 'Orders', icon: Ico.orders, page: Orders },
+  { key: 'receiving', label: 'Receiving', icon: Ico.receiving, page: Receiving },
+  { key: 'pack', label: 'Pack & Ship', icon: Ico.pack, page: PackShip },
   { key: 'compliance', label: 'Compliance', icon: Ico.compliance, page: Compliance },
   { key: 'skus', label: 'SKUs', icon: Ico.skus, page: Skus },
   { key: 'markets', label: 'Marketplaces', icon: Ico.markets, page: Marketplaces },
@@ -221,6 +230,8 @@ const CLIENT_NAV = [
 function Shell({ me }) {
   const nav = !me ? [] : me.isStaff ? STAFF_NAV : CLIENT_NAV;
   const [page, setPage] = useState(null);
+  const [params, setParams] = useState({});
+  const go = (key, p = {}) => { setParams(p); setPage(key); };
   useEffect(() => { if (!page && nav.length) setPage(nav[0].key); }, [nav.length, page]);
   const active = nav.find((n) => n.key === page);
   const Page = active?.page;
@@ -233,7 +244,7 @@ function Shell({ me }) {
         <div className="tagline">shipbay.dashboard</div>
         {nav.length > 0 && <div className="section">{me?.isStaff ? 'Operations' : 'Your account'}</div>}
         {nav.map((n) => (
-          <button key={n.key} className={`navitem ${page === n.key ? 'active' : ''}`} onClick={() => setPage(n.key)}>{n.icon}{n.label}</button>
+          <button key={n.key} className={`navitem ${page === n.key ? 'active' : ''}`} onClick={() => go(n.key)}>{n.icon}{n.label}</button>
         ))}
         <div className="me">
           {me && <><b>{me.full_name || me.email}</b>{me.orgName || me.email}<br /><span className="role">{me.isStaff ? 'shipbay staff' : 'client'}</span></>}
@@ -241,7 +252,7 @@ function Shell({ me }) {
         </div>
       </aside>
       <main className="content">
-        {Page ? <Page me={me} /> : (
+        {Page ? <Page key={page} me={me} go={go} params={params} /> : (
           <div className="stage">
             <div className="blank">
               <img className="mark" src="/brand/09-mark.svg" alt="" />
