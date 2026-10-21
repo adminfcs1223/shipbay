@@ -13,6 +13,8 @@ import Orders from './pages/Orders';
 import Receiving from './pages/Receiving';
 import PackShip from './pages/PackShip';
 import Quotes from './pages/Quotes';
+import ClientOrders from './pages/ClientOrders';
+import { PageHelp } from './shared';
 
 const STAFF = ['shipbay_admin', 'shipbay_staff'];
 
@@ -213,30 +215,42 @@ const Ico = {
   pack: svg(<><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4"/><path d="M12 11v10"/><path d="M7.5 5l9 4"/></>),
   quotes: svg(<><path d="M12 2v20"/><path d="M17 6.5c0-1.9-2.2-3-5-3s-5 1.1-5 3 2.2 2.5 5 3 5 1.3 5 3.5-2.2 3.5-5 3.5-5-1.3-5-3"/></>),
 };
+// Grouped so the station screens sit together, client admin together, and setup at the bottom.
 const STAFF_NAV = [
+  { group: 'Warehouse' },
+  { key: 'orders', label: 'Orders', icon: Ico.orders, page: Orders, brandFirst: true },
+  { key: 'receiving', label: 'Receiving', icon: Ico.receiving, page: Receiving, brandFirst: true },
+  { key: 'pack', label: 'Pack & Ship', icon: Ico.pack, page: PackShip, brandFirst: true },
+  { group: 'Clients' },
   { key: 'onboarding', label: 'Onboarding', icon: Ico.onboarding, page: Onboarding },
-  { key: 'orders', label: 'Orders', icon: Ico.orders, page: Orders },
-  { key: 'receiving', label: 'Receiving', icon: Ico.receiving, page: Receiving },
-  { key: 'pack', label: 'Pack & Ship', icon: Ico.pack, page: PackShip },
   { key: 'quotes', label: 'Quotes', icon: Ico.quotes, page: Quotes },
-  { key: 'compliance', label: 'Compliance', icon: Ico.compliance, page: Compliance },
+  { key: 'compliance', label: 'Documents review', icon: Ico.compliance, page: Compliance },
   { key: 'skus', label: 'SKUs', icon: Ico.skus, page: Skus },
-  { key: 'markets', label: 'Marketplaces', icon: Ico.markets, page: Marketplaces },
   { key: 'settings', label: 'Client settings', icon: Ico.settings, page: ClientSettings },
+  { group: 'Setup' },
+  { key: 'markets', label: 'Integrations', icon: Ico.markets, page: Marketplaces },
 ];
 const CLIENT_NAV = [
+  { group: 'Your account' },
   { key: 'home', label: 'Overview', icon: Ico.home, page: ClientHome },
+  { key: 'corders', label: 'Orders', icon: Ico.orders, page: ClientOrders },
   { key: 'products', label: 'Products', icon: Ico.skus, page: ClientProducts },
   { key: 'documents', label: 'Documents', icon: Ico.documents, page: ClientDocuments },
 ];
 
 function Shell({ me }) {
   const nav = !me ? [] : me.isStaff ? STAFF_NAV : CLIENT_NAV;
+  const items = nav.filter((n) => n.key);
   const [page, setPage] = useState(null);
   const [params, setParams] = useState({});
-  const go = (key, p = {}) => { setParams(p); setPage(key); };
-  useEffect(() => { if (!page && nav.length) setPage(nav[0].key); }, [nav.length, page]);
-  const active = nav.find((n) => n.key === page);
+  // the brand the station screens are scoped to; chosen once, kept while moving between Orders / Receiving / Pack & Ship
+  const [brand, setBrandState] = useState(() => { try { return localStorage.getItem('shipbay-brand') || null; } catch { return null; } });
+  const [brandName, setBrandName] = useState(null);
+  const setBrand = (id) => { setBrandState(id); try { if (id) localStorage.setItem('shipbay-brand', id); else localStorage.removeItem('shipbay-brand'); } catch { /* ignore */ } };
+  useEffect(() => { if (!brand) { setBrandName(null); return; } supabase.from('orgs').select('name').eq('id', brand).single().then(({ data }) => setBrandName(data?.name || null)); }, [brand]);
+  const go = (key, p = {}) => { if (p.org) setBrand(p.org); setParams(p); setPage(key); };
+  useEffect(() => { if (!page && items.length) setPage(items[0].key); }, [items.length, page]);
+  const active = items.find((n) => n.key === page);
   const Page = active?.page;
   const signOut = async () => { await supabase.auth.signOut(); if (splitMode) window.location.replace(authUrl()); };
 
@@ -245,17 +259,25 @@ function Shell({ me }) {
       <aside className="sidenav">
         <a className="logo" href="/"><img src="/brand/06-horizontal-reverse.svg" alt="shipbay." /></a>
         <div className="tagline">shipbay.dashboard</div>
-        {nav.length > 0 && <div className="section">{me?.isStaff ? 'Operations' : 'Your account'}</div>}
-        {nav.map((n) => (
-          <button key={n.key} className={`navitem ${page === n.key ? 'active' : ''}`} onClick={() => go(n.key)}>{n.icon}{n.label}</button>
-        ))}
+        {nav.map((n, i) => n.group
+          ? <div key={`g${i}`} className="section">{n.group}</div>
+          : <button key={n.key} className={`navitem ${page === n.key ? 'active' : ''}`} onClick={() => go(n.key)}>{n.icon}{n.label}</button>)}
+        {me?.isStaff && (
+          <div className="brandchip">
+            <small>Working in</small>
+            {brand ? <><b>{brandName || '…'}</b><button onClick={() => setBrand(null)} title="Back to all brands">×</button></> : <b className="all">All brands</b>}
+          </div>
+        )}
         <div className="me">
           {me && <><b>{me.full_name || me.email}</b>{me.orgName || me.email}<br /><span className="role">{me.isStaff ? 'shipbay staff' : 'client'}</span></>}
           <br /><button onClick={signOut}>Sign out</button>
         </div>
       </aside>
       <main className="content">
-        {Page ? <Page key={page} me={me} go={go} params={params} /> : (
+        {Page ? <>
+          <PageHelp page={page} />
+          <Page key={page} me={me} go={go} params={params} brand={brand} setBrand={setBrand} />
+        </> : (
           <div className="stage">
             <div className="blank">
               <img className="mark" src="/brand/09-mark.svg" alt="" />

@@ -60,7 +60,7 @@ export default function Marketplaces() {
   return (
     <>
       <div className="pagehead">
-        <div><h1>Marketplaces<span className="dot">.</span></h1><p className="sub">One-time setup per marketplace. Once ShipBay’s app is registered, any client can sign in and connect from their portal.</p></div>
+        <div><h1>Integrations<span className="dot">.</span></h1><p className="sub">One-time setup per marketplace. Once ShipBay’s app is registered, any client can sign in and connect from their portal.</p></div>
         <div className="glance"><div><small>Ready</small><b>{st ? `${ready} of ${MARKETS.length}` : '…'}</b></div></div>
       </div>
 

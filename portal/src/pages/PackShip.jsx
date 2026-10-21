@@ -1,9 +1,10 @@
-// Pack & Ship — the packing station. Pull an order (scan the packing slip or pick from the queue), scan every unit to
-// verify the pick, weigh the box, shop rates through Veeqo, buy the label, print it on the 4×6 printer. Marking shipped
-// deducts inventory and pushes tracking to Shopify, which relays it to the marketplace through Mirakl Connect.
+// Pack & Ship — the packing station, one brand at a time. Pull an order (scan the packing slip or pick from the queue),
+// scan every unit to verify the pick, weigh the box, shop rates through Veeqo, buy the label, print it on the 4×6
+// printer. Marking shipped deducts inventory and pushes tracking back to the brand's order system (Veeqo or Shopify).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, fn } from '../lib';
 import { ScanBox, beep, STATUS, SOURCE, dueClass, fmtDate, money, printPackingSlip } from '../ops';
+import { useBrands, BrandPicker, BrandBar } from '../shared';
 
 const OPEN = ['new', 'picked', 'packed'];
 const BOXES = [
@@ -13,10 +14,11 @@ const CARRIERS = ['USPS', 'UPS', 'FedEx', 'DHL Express', 'Amazon Shipping', 'Oth
 const pref = (k, d) => { try { return localStorage.getItem(`shipbay-pack:${k}`) ?? d; } catch { return d; } };
 const setPref = (k, v) => { try { localStorage.setItem(`shipbay-pack:${k}`, v); } catch { /* ignore */ } };
 
-export default function PackShip({ me, go, params }) {
+export default function PackShip({ me, go, params, brand, setBrand }) {
   const [rows, setRows] = useState(null);
-  const [orgs, setOrgs] = useState([]);
-  const [org, setOrg] = useState(params?.org || '');
+  const [orgs] = useBrands();
+  const org = brand || '';
+  const [creating, setCreating] = useState(false);
   const [sel, setSel] = useState(params?.order || null);
   const [lines, setLines] = useState([]);
   const [last, setLast] = useState(null);
@@ -36,11 +38,8 @@ export default function PackShip({ me, go, params }) {
   const labelWin = useRef(null);
 
   const load = async () => {
-    const [{ data: r }, { data: o }] = await Promise.all([
-      supabase.from('v_orders_queue').select('*').in('status', OPEN).order('ship_by', { ascending: true, nullsFirst: false }).order('placed_at', { ascending: true }).limit(500),
-      supabase.from('orgs').select('id, name').order('name'),
-    ]);
-    setRows(r || []); setOrgs(o || []);
+    const { data: r } = await supabase.from('v_orders_queue').select('*').in('status', OPEN).order('ship_by', { ascending: true, nullsFirst: false }).order('placed_at', { ascending: true }).limit(800);
+    setRows(r || []);
   };
   const loadLines = async (id) => { const { data } = await supabase.from('order_lines').select('*').eq('order_id', id).order('name'); setLines(data || []); };
   useEffect(() => { load(); }, []);
@@ -68,7 +67,7 @@ export default function PackShip({ me, go, params }) {
   const verified = physical.reduce((s, l) => s + l.qty_verified, 0);
   const units = physical.reduce((s, l) => s + l.qty, 0);
   const complete = units > 0 && verified >= units;
-  const orgName = (id) => orgs.find((o) => o.id === id)?.name || current?.org_name || '';
+  const orgRow = (orgs || []).find((o) => o.id === org) || null;
 
   // a scan is either an order number (pull it up) or an item (verify it)
   const scan = async (code) => {
@@ -118,23 +117,31 @@ export default function PackShip({ me, go, params }) {
   };
   const next = () => { const n = queue.find((r) => r.id !== sel && OPEN.includes(r.status)); setFrozen(null); setSel(n?.id || null); };
 
+  if (!org) {
+    const stats = (o) => { const rs = (rows || []).filter((r) => r.org_id === o.id); return [['To pack', rs.filter((r) => r.status !== 'packed').length], ['Packed, no label', rs.filter((r) => r.status === 'packed').length, rs.some((r) => r.status === 'packed')]]; };
+    return (
+      <>
+        <div className="pagehead"><div><h1>Pack &amp; Ship<span className="dot">.</span></h1><p className="sub">Pick the brand you’re packing for. The station then only shows that brand’s orders and catalog.</p></div></div>
+        <BrandPicker orgs={orgs} onPick={setBrand} stats={stats} title="Brands" />
+      </>
+    );
+  }
+
   return (
     <>
+      <BrandBar org={orgRow} onBack={() => { setBrand(null); setSel(null); }}>
+        <button className="btn-sm" onClick={() => setCreating(true)}>+ Create order</button>
+        <label className="mult">Label <select value={labelFormat} onChange={(e) => setLabelFormat(e.target.value)}><option value="PDF">PDF (4×6, print from browser)</option><option value="ZPL">ZPL (raw thermal)</option></select></label>
+        <button className="btn-sm" onClick={() => go('orders', { org })}>All orders</button>
+      </BrandBar>
       <div className="pagehead">
-        <div><h1>Pack &amp; Ship<span className="dot">.</span></h1><p className="sub">Scan the packing slip or pick an order, scan every unit, weigh the box, buy the label. Tracking goes back to Shopify (and on to the marketplace) automatically.</p></div>
+        <div><h1>Pack &amp; Ship<span className="dot">.</span></h1><p className="sub">Scan the packing slip or pick an order, scan every unit, weigh the box, buy the label. Tracking goes back to the brand’s system automatically.</p></div>
         <div className="glance">
           <div><small>To pack</small><b>{queue.filter((r) => r.status !== 'packed').length}</b></div>
           <div><small>Packed, no label</small><b className={queue.some((r) => r.status === 'packed') ? 'hot' : ''}>{queue.filter((r) => r.status === 'packed').length}</b></div>
         </div>
       </div>
       {msg && <div className={`msg ${msg.kind} flash`}>{msg.text}<button onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
-
-      <div className="opsbar">
-        <select value={org} onChange={(e) => setOrg(e.target.value)}><option value="">All clients</option>{orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>
-        <div className="spacer" />
-        <label className="mult">Label format <select value={labelFormat} onChange={(e) => setLabelFormat(e.target.value)}><option value="PDF">PDF (4×6, print from browser)</option><option value="ZPL">ZPL (raw thermal)</option></select></label>
-        <button className="btn-sm" onClick={() => go('orders', { org })}>All orders</button>
-      </div>
 
       <div className="ops packship">
         <div className="card queue">
@@ -143,7 +150,7 @@ export default function PackShip({ me, go, params }) {
             <ul className="queuelist">{queue.map((r) => (
               <li key={r.id}><button className={`qitem ${r.id === sel ? 'active' : ''}`} onClick={() => setSel(r.id)}>
                 <div className="top"><b>{r.order_number}</b><span className={`statuspill ${STATUS[r.status]?.[1]}`}>{STATUS[r.status]?.[0]}</span></div>
-                <div className="meta">{r.org_name} · {r.marketplace || SOURCE[r.source] || 'Shopify'} · {r.units} unit{r.units === 1 ? '' : 's'}{r.ship_by ? <> · <span className={`due ${dueClass(r.ship_by)}`}>ship by {fmtDate(r.ship_by)}</span></> : ''}</div>
+                <div className="meta">{r.marketplace || (r.channel === 'veeqo' ? 'Veeqo' : r.channel === 'manual' ? 'Manual' : SOURCE[r.source] || 'Shopify')} · {r.units} unit{r.units === 1 ? '' : 's'}{r.ship_by ? <> · <span className={`due ${dueClass(r.ship_by)}`}>ship by {fmtDate(r.ship_by)}</span></> : ''}</div>
               </button></li>
             ))}</ul>
           )}
@@ -178,7 +185,7 @@ export default function PackShip({ me, go, params }) {
               <div className="shipped">
                 <h4>Shipped ✓ {done.carrier}{done.service ? ` · ${done.service}` : ''}</h4>
                 <div>Tracking <b>{done.tracking}</b>{done.cost != null && ` · ${money(done.cost)}`}</div>
-                <div className="sm">{done.shopify?.ok ? 'Tracking sent to Shopify — the customer and the marketplace get it from there.' : done.shopify?.skipped ? `Shopify: ${done.shopify.skipped}.` : done.shopify?.error ? `Shopify update failed: ${done.shopify.error}` : ''}</div>
+                <div className="sm">{done.shopify?.ok ? `Tracking sent to ${done.shopify.channel === 'veeqo' ? 'Veeqo' : 'Shopify'} — the customer and the marketplace get it from there.` : done.shopify?.skipped ? `${done.shopify.channel === 'veeqo' ? 'Veeqo' : done.shopify.channel === 'shopify' ? 'Shopify' : 'Channel'}: ${done.shopify.skipped}.` : done.shopify?.error ? `${done.shopify.channel === 'veeqo' ? 'Veeqo' : 'Shopify'} update failed: ${done.shopify.error}` : ''}</div>
                 <div className="actions">
                   {done.label_url && <a className="btn-sm primary" href={done.label_url} target="_blank" rel="noopener">{done.label_format === 'ZPL' ? 'Download ZPL' : 'Open label (print 4×6)'}</a>}
                   <button className="btn-sm" onClick={() => printPackingSlip(current, lines, current.org_name)}>Packing slip</button>
@@ -225,6 +232,70 @@ export default function PackShip({ me, go, params }) {
           </>}
         </div>
       </div>
+      {creating && orgRow && <CreateOrder org={orgRow} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); load().then(() => setSel(id)); }} />}
     </>
+  );
+}
+
+/* ---------- Create order by hand (sample, replacement, wholesale, phone order) ---------- */
+const US = ['AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
+export function CreateOrder({ org, onClose, onCreated }) {
+  const [skus, setSkus] = useState([]);
+  const [o, setO] = useState({ order_number: '', email: '', shipping_method: '', ship_by: '', notes: '', ship_to: { name: '', company: '', address1: '', address2: '', city: '', province_code: 'NJ', zip: '', country_code: 'US', phone: '' } });
+  const [lines, setLines] = useState([{ sku_id: '', qty: 1 }]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  useEffect(() => { supabase.from('skus').select('id, sku, name, variant').eq('org_id', org.id).eq('active', true).order('sku').then(({ data }) => setSkus(data || [])); }, [org.id]);
+  const setTo = (k, v) => setO({ ...o, ship_to: { ...o.ship_to, [k]: v } });
+  const submit = async (e) => {
+    e.preventDefault(); setErr(null);
+    const ls = lines.filter((l) => l.sku_id && Number(l.qty) > 0);
+    if (!ls.length) return setErr('Add at least one item.');
+    if (!o.ship_to.name || !o.ship_to.address1 || !o.ship_to.city || !o.ship_to.zip) return setErr('Name, address, city and ZIP are required.');
+    setBusy(true);
+    const { data, error } = await supabase.rpc('create_manual_order', { p_org_id: org.id, p_order: { ...o, ship_to: { ...o.ship_to, country: o.ship_to.country_code === 'US' ? 'United States' : o.ship_to.country_code } }, p_lines: ls.map((l) => ({ sku_id: l.sku_id, qty: Number(l.qty) })) });
+    setBusy(false);
+    if (error) return setErr(error.message);
+    onCreated(data);
+  };
+  return (
+    <div className="overlay" onClick={onClose}>
+      <form className="modal wide" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <h3>Create order — {org.name}<span className="dot">.</span></h3>
+        <p className="sm" style={{ marginBottom: 12 }}>For samples, replacements, wholesale or phone orders that aren’t in the brand’s system. It goes straight into the queue; nothing is sent back to Veeqo or Shopify.</p>
+        {err && <div className="msg err">{err}</div>}
+        <div className="grid2">
+          <div className="field"><label>Order # (blank = auto)</label><input value={o.order_number} onChange={(e) => setO({ ...o, order_number: e.target.value })} placeholder="M-…" /></div>
+          <div className="field"><label>Ship by</label><input type="date" value={o.ship_by} onChange={(e) => setO({ ...o, ship_by: e.target.value })} /></div>
+        </div>
+        <div className="lbl">Ship to</div>
+        <div className="grid2">
+          <div className="field"><label>Name</label><input required value={o.ship_to.name} onChange={(e) => setTo('name', e.target.value)} /></div>
+          <div className="field"><label>Company</label><input value={o.ship_to.company} onChange={(e) => setTo('company', e.target.value)} /></div>
+          <div className="field"><label>Address</label><input required value={o.ship_to.address1} onChange={(e) => setTo('address1', e.target.value)} /></div>
+          <div className="field"><label>Apt / suite</label><input value={o.ship_to.address2} onChange={(e) => setTo('address2', e.target.value)} /></div>
+          <div className="field"><label>City</label><input required value={o.ship_to.city} onChange={(e) => setTo('city', e.target.value)} /></div>
+          <div className="field"><label>State / ZIP</label><div style={{ display: 'flex', gap: 8 }}><select value={o.ship_to.province_code} onChange={(e) => setTo('province_code', e.target.value)}>{US.map((st) => <option key={st}>{st}</option>)}</select><input required placeholder="ZIP" value={o.ship_to.zip} onChange={(e) => setTo('zip', e.target.value)} /></div></div>
+          <div className="field"><label>Phone</label><input value={o.ship_to.phone} onChange={(e) => setTo('phone', e.target.value)} /></div>
+          <div className="field"><label>Email</label><input type="email" value={o.email} onChange={(e) => setO({ ...o, email: e.target.value })} /></div>
+        </div>
+        <div className="lbl">Items</div>
+        <div className="exprows">
+          {lines.map((l, i) => (
+            <div className="exprow" key={i}>
+              <select value={l.sku_id} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, sku_id: e.target.value } : x)))}><option value="">— item —</option>{skus.map((s) => <option key={s.id} value={s.id}>{s.sku} · {s.name}{s.variant ? ` (${s.variant})` : ''}</option>)}</select>
+              <input type="number" min="1" value={l.qty} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)))} />
+              <button type="button" className="btn-xs" onClick={() => setLines(lines.filter((_, j) => j !== i))} disabled={lines.length === 1}>×</button>
+            </div>
+          ))}
+          <div><button type="button" className="btn-xs" onClick={() => setLines([...lines, { sku_id: '', qty: 1 }])}>+ Add item</button></div>
+        </div>
+        <div className="grid2" style={{ marginTop: 12 }}>
+          <div className="field"><label>Shipping method / notes for the packer</label><input value={o.shipping_method} onChange={(e) => setO({ ...o, shipping_method: e.target.value })} placeholder="Ground, 2-day, gift wrap…" /></div>
+          <div className="field"><label>Notes</label><input value={o.notes} onChange={(e) => setO({ ...o, notes: e.target.value })} /></div>
+        </div>
+        <div className="actions"><button type="button" className="btn-sm" onClick={onClose}>Cancel</button><button className="btn-sm primary" disabled={busy}>{busy ? 'Creating…' : 'Create order'}</button></div>
+      </form>
+    </div>
   );
 }

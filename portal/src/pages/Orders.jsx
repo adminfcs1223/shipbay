@@ -1,18 +1,31 @@
-// Orders — every order flowing in from connected stores (Shopify, incl. the marketplace orders Mirakl Connect relays
-// into Shopify), sorted by ship-by deadline. Staff can hold/release, print packing slips and jump into Pack & Ship.
+// Orders — two levels. No brand picked: the overview, every open order across all brands sorted by ship-by, plus one
+// Sync button that pulls each brand's orders from wherever they live. Click an order (or a brand card) → that brand's
+// orders page: queue, detail, hold/release, packing slip, Pack & ship, and ⚙ Order settings (which systems we pull from).
 import { useEffect, useMemo, useState } from 'react';
 import { supabase, fn } from '../lib';
 import { STATUS, SOURCE, dueClass, fmtDate, printPackingSlip } from '../ops';
+import { useBrands, BrandPicker, BrandBar, CHANNELS, channelsLabel } from '../shared';
+import { CreateOrder } from './PackShip';
 
 const TABS = [['open', 'Open'], ['hold', 'On hold'], ['shipped', 'Shipped'], ['all', 'All']];
-const OPEN = ['new', 'picked', 'packed'];
+export const OPEN = ['new', 'picked', 'packed'];
 const ago = (d) => { const h = (Date.now() - new Date(d)) / 36e5; return h < 1 ? 'just now' : h < 24 ? `${Math.floor(h)}h ago` : `${Math.floor(h / 24)}d ago`; };
+const chan = (r) => r.marketplace || (r.channel === 'veeqo' ? 'Veeqo' : r.channel === 'manual' ? 'Manual' : SOURCE[r.source] || 'Shopify');
 
-export default function Orders({ me, go, params }) {
+/** Sync every enabled channel for a brand. Returns a one-line summary. */
+export async function syncBrand(o) {
+  const c = o.order_channels || {};
+  const out = [];
+  if (c.veeqo) { const r = await fn('veeqo-sync', { action: 'backfill', org_id: o.id }); out.push(r.error ? `Veeqo: ${r.error}` : `Veeqo: ${r.imported} new, ${r.updated} updated${r.closed ? `, ${r.closed} closed` : ''}`); }
+  if (c.shopify) { const r = await fn('shopify-sync', { action: 'backfill', org_id: o.id }); out.push(r.error ? `Shopify: ${r.error}` : `Shopify: ${r.imported} new, ${r.updated} updated`); }
+  if (!out.length) out.push('no order system connected — turn one on under ⚙ Order settings');
+  return `${o.name} — ${out.join(' · ')}`;
+}
+
+export default function Orders({ me, go, params, brand, setBrand }) {
   const [rows, setRows] = useState(null);
-  const [orgs, setOrgs] = useState([]);
+  const [orgs, reloadOrgs] = useBrands();
   const [tab, setTab] = useState('open');
-  const [org, setOrg] = useState(params?.org || '');
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(params?.order || null);
   const [lines, setLines] = useState([]);
@@ -20,13 +33,12 @@ export default function Orders({ me, go, params }) {
   const [busy, setBusy] = useState(null);
   const [msg, setMsg] = useState(null);
   const [holdNote, setHoldNote] = useState('');
+  const [settings, setSettings] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const load = async () => {
-    const [{ data: r }, { data: o }] = await Promise.all([
-      supabase.from('v_orders_queue').select('*').order('ship_by', { ascending: true, nullsFirst: false }).order('placed_at', { ascending: true }).limit(1000),
-      supabase.from('orgs').select('id, name, status, shopify_domain').order('name'),
-    ]);
-    setRows(r || []); setOrgs(o || []);
+    const { data: r } = await supabase.from('v_orders_queue').select('*').order('ship_by', { ascending: true, nullsFirst: false }).order('placed_at', { ascending: true }).limit(1500);
+    setRows(r || []);
   };
   useEffect(() => { load(); }, []);
   useEffect(() => {
@@ -37,27 +49,24 @@ export default function Orders({ me, go, params }) {
     return () => { live = false; };
   }, [sel]);
 
-  const list = useMemo(() => (rows || []).filter((r) =>
-    (tab === 'all' || (tab === 'open' ? OPEN.includes(r.status) : tab === 'hold' ? ['on_hold', 'backordered'].includes(r.status) : r.status === tab))
-    && (!org || r.org_id === org)
-    && (!q || [r.order_number, r.customer_name, r.marketplace, r.tracking, r.ship_to?.city, r.ship_to?.zip].filter(Boolean).some((s) => String(s).toLowerCase().includes(q.toLowerCase())))
-  ), [rows, tab, org, q]);
-  const current = (rows || []).find((r) => r.id === sel) || null;
+  const org = (orgs || []).find((o) => o.id === brand) || null;
   const today = new Date().toISOString().slice(0, 10);
-  const glance = useMemo(() => {
-    const open = (rows || []).filter((r) => OPEN.includes(r.status) && (!org || r.org_id === org));
-    return { open: open.length, late: open.filter((r) => r.ship_by && r.ship_by < today).length, today: open.filter((r) => r.ship_by === today).length,
-      shippedToday: (rows || []).filter((r) => r.status === 'shipped' && r.shipped_at && r.shipped_at.slice(0, 10) === today && (!org || r.org_id === org)).length };
-  }, [rows, org, today]);
-  const counts = useMemo(() => ({ open: (rows || []).filter((r) => OPEN.includes(r.status)).length, hold: (rows || []).filter((r) => ['on_hold', 'backordered'].includes(r.status)).length }), [rows]);
+  const mine = useMemo(() => (rows || []).filter((r) => !brand || r.org_id === brand), [rows, brand]);
+  const list = useMemo(() => mine.filter((r) =>
+    (tab === 'all' || (tab === 'open' ? OPEN.includes(r.status) : tab === 'hold' ? ['on_hold', 'backordered'].includes(r.status) : r.status === tab))
+    && (!q || [r.order_number, r.customer_name, r.marketplace, r.tracking, r.ship_to?.city, r.ship_to?.zip].filter(Boolean).some((s) => String(s).toLowerCase().includes(q.toLowerCase())))
+  ), [mine, tab, q]);
+  const current = (rows || []).find((r) => r.id === sel) || null;
+  const counts = useMemo(() => ({ open: mine.filter((r) => OPEN.includes(r.status)).length, hold: mine.filter((r) => ['on_hold', 'backordered'].includes(r.status)).length,
+    late: mine.filter((r) => OPEN.includes(r.status) && r.ship_by && r.ship_by < today).length, today: mine.filter((r) => OPEN.includes(r.status) && r.ship_by === today).length,
+    shippedToday: mine.filter((r) => r.status === 'shipped' && r.shipped_at && r.shipped_at.slice(0, 10) === today).length }), [mine, today]);
+  const brandStats = (o) => { const rs = (rows || []).filter((r) => r.org_id === o.id); const open = rs.filter((r) => OPEN.includes(r.status)); return [['Open', open.length], ['Late', open.filter((r) => r.ship_by && r.ship_by < today).length, open.some((r) => r.ship_by && r.ship_by < today)], ['Shipped today', rs.filter((r) => r.status === 'shipped' && r.shipped_at?.slice(0, 10) === today).length]]; };
 
   const sync = async () => {
-    const targets = orgs.filter((o) => o.shopify_domain && (!org || o.id === org));
-    if (!targets.length) return setMsg({ kind: 'err', text: 'No client has Shopify connected yet — connect it under Onboarding → Systems first.' });
+    const targets = (orgs || []).filter((o) => !brand || o.id === brand);
     setBusy('sync'); setMsg(null);
-    const out = [];
-    for (const o of targets) { const r = await fn('shopify-sync', { action: 'backfill', org_id: o.id }); out.push(r.error ? `${o.name}: ${r.error}` : `${o.name}: ${r.imported} new, ${r.updated} updated (${r.total} open in Shopify)`); }
-    setBusy(null); setMsg({ kind: out.some((s) => /HTTP|isn’t|error/i.test(s)) ? 'err' : 'ok', text: out.join(' · ') });
+    const out = []; for (const o of targets) out.push(await syncBrand(o));
+    setBusy(null); setMsg({ kind: out.some((s) => /HTTP|isn’t|error|no order system/i.test(s)) ? 'err' : 'ok', text: out.join(' | ') });
     load();
   };
   const setStatus = async (status, extra = {}) => {
@@ -66,39 +75,83 @@ export default function Orders({ me, go, params }) {
     setBusy(null); if (error) return setMsg({ kind: 'err', text: error.message });
     setHoldNote(''); load();
   };
-  const orgName = (id) => orgs.find((o) => o.id === id)?.name || '';
+  const openOrder = (r) => { setBrand(r.org_id); setSel(r.id); };
 
+  /* ---------- level 1: overview ---------- */
+  if (!brand) {
+    const open = (rows || []).filter((r) => OPEN.includes(r.status));
+    return (
+      <>
+        <div className="pagehead">
+          <div><h1>Orders<span className="dot">.</span></h1><p className="sub">Every brand, every open order, earliest deadline first. Click one to work in that brand.</p></div>
+          <div className="glance">
+            <div><small>Open</small><b>{open.length}</b></div>
+            <div><small>Due today</small><b className={counts.today ? 'hot' : ''}>{counts.today}</b></div>
+            <div><small>Late</small><b className={counts.late ? 'hot' : ''}>{counts.late}</b></div>
+            <div><small>Shipped today</small><b>{counts.shippedToday}</b></div>
+          </div>
+        </div>
+        {msg && <div className={`msg ${msg.kind} flash`}>{msg.text}<button onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
+        <div className="opsbar">
+          <input className="search" placeholder="Search order #, customer, marketplace, tracking…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <div className="spacer" />
+          <button className="btn-sm primary" disabled={busy === 'sync'} onClick={sync}>{busy === 'sync' ? 'Syncing…' : '↻ Sync all brands'}</button>
+        </div>
+        <BrandPicker orgs={orgs} onPick={setBrand} stats={brandStats} title="Brands" hint="click to open that brand’s orders" />
+        <div className="card overview" style={{ marginTop: 18 }}>
+          <div className="cardhead"><h3>Open orders — all brands</h3><span className="sm">{open.length} open</span></div>
+          {rows === null ? <div className="empty">Loading…</div> : open.length === 0 ? <div className="empty">Nothing open. New orders appear here as they come in; press Sync to catch up.</div> : (
+            <div className="tablewrap"><table className="ordertable">
+              <thead><tr><th>Order</th><th>Brand</th><th>Channel</th><th>Ship by</th><th>Customer</th><th>Units</th><th>Status</th></tr></thead>
+              <tbody>{open.filter((r) => !q || [r.order_number, r.customer_name, r.marketplace, r.org_name].filter(Boolean).some((s) => String(s).toLowerCase().includes(q.toLowerCase()))).map((r) => (
+                <tr key={r.id} onClick={() => openOrder(r)}>
+                  <td><b>{r.order_number}</b><div className="sm">{ago(r.placed_at)}</div></td>
+                  <td>{r.org_name}</td>
+                  <td><span className={`pill ${r.marketplace ? 'connected' : ''}`}>{chan(r)}</span></td>
+                  <td className={`due ${dueClass(r.ship_by)}`}>{r.ship_by ? fmtDate(r.ship_by) : '—'}</td>
+                  <td>{r.customer_name}<div className="sm">{[r.ship_to?.city, r.ship_to?.province_code].filter(Boolean).join(', ')}{r.is_international ? ' · intl' : ''}</div></td>
+                  <td>{r.units}</td>
+                  <td><span className={`statuspill ${STATUS[r.status]?.[1]}`}>{STATUS[r.status]?.[0] || r.status}</span></td>
+                </tr>
+              ))}</tbody>
+            </table></div>
+          )}
+        </div>
+      </>
+    );
+  }
+
+  /* ---------- level 2: one brand ---------- */
   return (
     <>
+      <BrandBar org={org} onBack={() => { setBrand(null); setSel(null); }}>
+        <button className="btn-sm" onClick={() => setCreating(true)}>+ Create order</button>
+        <button className="btn-sm" disabled={busy === 'sync'} onClick={sync}>{busy === 'sync' ? 'Syncing…' : '↻ Sync'}</button>
+        <button className="btn-sm primary" onClick={() => go('pack', { org: brand })}>Pack &amp; Ship →</button>
+        <button className="gear" title="Order settings — where this brand’s orders come from" onClick={() => setSettings(true)}>⚙</button>
+      </BrandBar>
       <div className="pagehead">
-        <div><h1>Orders<span className="dot">.</span></h1><p className="sub">Everything coming in from connected stores, sorted by ship-by date. Marketplace orders (Nordstrom, Kohl’s, …) arrive through Shopify via Mirakl Connect.</p></div>
+        <div><h1>{org?.name || 'Orders'}<span className="dot">.</span></h1><p className="sub">Orders{channelsLabel(org)}. Sorted by ship-by date.</p></div>
         <div className="glance">
-          <div><small>Open</small><b>{glance.open}</b></div>
-          <div><small>Due today</small><b className={glance.today ? 'hot' : ''}>{glance.today}</b></div>
-          <div><small>Late</small><b className={glance.late ? 'hot' : ''}>{glance.late}</b></div>
-          <div><small>Shipped today</small><b>{glance.shippedToday}</b></div>
+          <div><small>Open</small><b>{counts.open}</b></div>
+          <div><small>Due today</small><b className={counts.today ? 'hot' : ''}>{counts.today}</b></div>
+          <div><small>Late</small><b className={counts.late ? 'hot' : ''}>{counts.late}</b></div>
+          <div><small>Shipped today</small><b>{counts.shippedToday}</b></div>
         </div>
       </div>
       {msg && <div className={`msg ${msg.kind} flash`}>{msg.text}<button onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
-
-      <div className="opsbar">
-        <select value={org} onChange={(e) => setOrg(e.target.value)}><option value="">All clients</option>{orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>
-        <input className="search" placeholder="Search order #, customer, marketplace, tracking…" value={q} onChange={(e) => setQ(e.target.value)} />
-        <div className="spacer" />
-        <button className="btn-sm" disabled={busy === 'sync'} onClick={sync}>{busy === 'sync' ? 'Syncing…' : '↻ Sync from Shopify'}</button>
-        <button className="btn-sm primary" onClick={() => go('pack', { org })}>Pack &amp; Ship →</button>
-      </div>
+      <div className="opsbar"><input className="search" placeholder="Search order #, customer, marketplace, tracking…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
 
       <div className="ops">
         <div className="card queue">
           <div className="tabs">{TABS.map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}{k === 'open' && counts.open ? <i>{counts.open}</i> : null}{k === 'hold' && counts.hold ? <i>{counts.hold}</i> : null}</button>)}</div>
-          {rows === null ? <div className="empty">Loading…</div> : list.length === 0 ? <div className="empty">{tab === 'open' ? 'No open orders. New ones show up here the moment Shopify sends them.' : 'Nothing here.'}</div> : (
+          {rows === null ? <div className="empty">Loading…</div> : list.length === 0 ? <div className="empty">{tab === 'open' ? 'No open orders for this brand. Press Sync to pull in anything new.' : 'Nothing here.'}</div> : (
             <div className="tablewrap"><table className="ordertable">
               <thead><tr><th>Order</th><th>Channel</th><th>Ship by</th><th>Customer</th><th>Units</th><th>Status</th></tr></thead>
               <tbody>{list.map((r) => (
                 <tr key={r.id} className={r.id === sel ? 'active' : ''} onClick={() => setSel(r.id)}>
-                  <td><b>{r.order_number}</b><div className="sm">{r.org_name} · {ago(r.placed_at)}</div></td>
-                  <td>{r.marketplace ? <span className="pill connected">{r.marketplace}</span> : <span className="pill">{SOURCE[r.source] || r.source || 'Shopify'}</span>}</td>
+                  <td><b>{r.order_number}</b><div className="sm">{ago(r.placed_at)}</div></td>
+                  <td><span className={`pill ${r.marketplace ? 'connected' : ''}`}>{chan(r)}</span></td>
                   <td className={`due ${dueClass(r.ship_by)}`}>{r.ship_by ? fmtDate(r.ship_by) : '—'}</td>
                   <td>{r.customer_name}<div className="sm">{[r.ship_to?.city, r.ship_to?.province_code].filter(Boolean).join(', ')}{r.is_international ? ' · intl' : ''}</div></td>
                   <td>{r.units}{r.status !== 'shipped' && r.units_verified > 0 ? <div className="sm">{r.units_verified} verified</div> : null}</td>
@@ -113,7 +166,7 @@ export default function Orders({ me, go, params }) {
           {!current ? <div className="empty">Select an order.</div> : <>
             <div className="cardhead">
               <div><h3>{current.order_number} <span className={`statuspill ${STATUS[current.status]?.[1]}`}>{STATUS[current.status]?.[0]}</span></h3>
-                <div className="small">{current.org_name} · {current.marketplace || SOURCE[current.source] || 'Shopify'} · placed {new Date(current.placed_at).toLocaleString()}{current.ship_by ? ` · ship by ${fmtDate(current.ship_by)}` : ''}</div></div>
+                <div className="small">{chan(current)} · placed {new Date(current.placed_at).toLocaleString()}{current.ship_by ? ` · ship by ${fmtDate(current.ship_by)}` : ''}</div></div>
               <div className="spacer" />
               <button className="btn-sm" onClick={() => printPackingSlip(current, lines, current.org_name)}>Packing slip</button>
               {OPEN.includes(current.status) && <button className="btn-sm primary" onClick={() => go('pack', { order: current.id, org: current.org_id })}>Pack &amp; ship →</button>}
@@ -140,12 +193,43 @@ export default function Orders({ me, go, params }) {
                   <div className="field" style={{ flex: 1, marginBottom: 0 }}><label>Hold reason</label><input value={holdNote} onChange={(e) => setHoldNote(e.target.value)} placeholder="e.g. address needs confirming, waiting on stock" /></div>
                   <button className="btn-sm" disabled={busy === 'status'} onClick={() => setStatus('on_hold', { hold_reason: holdNote || null })}>Put on hold</button>
                 </>}
-                <button className="btn-sm reject" disabled={busy === 'status'} onClick={() => { if (window.confirm(`Cancel ${current.order_number} in the warehouse queue? (This does not cancel it in Shopify.)`)) setStatus('cancelled'); }}>Cancel</button>
+                <button className="btn-sm reject" disabled={busy === 'status'} onClick={() => { if (window.confirm(`Cancel ${current.order_number} in the warehouse queue? (This does not cancel it in ${chan(current)}.)`)) setStatus('cancelled'); }}>Cancel</button>
               </div>
             )}
           </>}
         </div>
       </div>
+
+      {settings && org && <OrderSettings org={org} onClose={() => setSettings(false)} onSaved={() => { reloadOrgs(); setSettings(false); setMsg({ kind: 'ok', text: 'Order settings saved.' }); }} />}
+      {creating && org && <CreateOrder org={org} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); load(); setSel(id); setTab('open'); }} />}
     </>
+  );
+}
+
+/* ---------- ⚙ Order settings: which systems we pull this brand's orders from ---------- */
+export function OrderSettings({ org, onClose, onSaved }) {
+  const [c, setC] = useState({ shopify: false, veeqo: false, manual: true, ...(org.order_channels || {}) });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const desc = { veeqo: 'Pull open orders from the brand’s Veeqo account (which already gathers their Shopify + marketplace orders). Tracking goes back to Veeqo.', shopify: 'Pull orders straight from their Shopify store (needs the Shopify connection under Onboarding → Systems). Tracking goes back to Shopify.', manual: 'Orders keyed in by staff — samples, replacements, wholesale. Always available.' };
+  const save = async () => {
+    setBusy(true); setErr(null);
+    const { error } = await supabase.from('orgs').update({ order_channels: { ...c, manual: true } }).eq('id', org.id);
+    setBusy(false); if (error) return setErr(error.message); onSaved();
+  };
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Order settings — {org.name}<span className="dot">.</span></h3>
+        <p className="sm" style={{ marginBottom: 12 }}>Where do this brand’s orders come from? Sync pulls from every system that’s on.</p>
+        {err && <div className="msg err">{err}</div>}
+        <div className="chanlist">
+          {CHANNELS.map(([k, l]) => (
+            <label key={k} className={c[k] ? 'on' : ''}><input type="checkbox" checked={!!c[k] || k === 'manual'} disabled={k === 'manual'} onChange={(e) => setC({ ...c, [k]: e.target.checked })} /><div><b>{l}</b><div className="d">{desc[k]}</div></div></label>
+          ))}
+        </div>
+        <div className="actions"><button type="button" className="btn-sm" onClick={onClose}>Cancel</button><button className="btn-sm primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button></div>
+      </div>
+    </div>
   );
 }

@@ -660,3 +660,58 @@ table.bench tr.warnrow td { background: #FFF4D6; }
 table.bench td .sm { font-size: 11px; color: var(--muted-2); }
 .qtables { grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr); }
 .ordertable.profit td, .ordertable.profit th { padding: 6px 6px; font-size: 12.5px; }
+
+/* ---------- Quick help strip ---------- */
+.help { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 16px; background: var(--bg-soft); }
+.help .helphead { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 0; background: none; text-align: left; cursor: pointer; font: inherit; color: var(--ink); }
+.help .q { width: 20px; height: 20px; border-radius: 50%; background: var(--orange); color: #fff; font-weight: 800; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.help .helphead b { font-size: 13.5px; white-space: nowrap; }
+.help .what { color: var(--muted); font-size: 13px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.help .chev { color: var(--muted-2); }
+.help ol { margin: 0; padding: 0 16px 12px 44px; font-size: 13px; color: var(--ink); line-height: 1.5; }
+.help ol li { margin-bottom: 4px; }
+.help.open .what { white-space: normal; }
+
+/* ---------- Brand picker / bar / chip ---------- */
+.brandpick .lbl { font: 600 11px var(--font-body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted-2); margin: 4px 0 10px; }
+.brandgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.brandcard { text-align: left; background: #fff; border: 1.5px solid var(--line); border-radius: 14px; padding: 16px 18px; cursor: pointer; font: inherit; color: var(--ink); transition: border-color .15s, transform .15s; }
+.brandcard:hover { border-color: var(--orange); transform: translateY(-1px); }
+.brandcard .bname { font-family: var(--font-display); font-weight: 700; font-size: 17px; }
+.brandcard .bmeta { margin-top: 4px; font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.brandcard .bstats { display: flex; gap: 18px; margin-top: 12px; }
+.brandcard .bstats b { display: block; font-size: 20px; font-family: var(--font-display); }
+.brandcard .bstats b.hot { color: var(--orange-soft); }
+.brandcard .bstats small { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted-2); }
+.brandbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 14px; flex-wrap: wrap; }
+.brandbar .crumb { background: none; border: 0; color: var(--orange-soft); font: 600 13.5px var(--font-body); cursor: pointer; padding: 0; }
+.brandbar .sep { color: var(--muted-2); }
+.brandbar b { font-family: var(--font-display); font-size: 16px; }
+.brandchip { margin: 18px 8px 0; padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,.05); color: #C9D3EA; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.brandchip small { width: 100%; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #8A93A3; }
+.brandchip b { font-size: 13.5px; color: #fff; } .brandchip b.all { color: #C9D3EA; font-weight: 500; }
+.brandchip button { margin-left: auto; background: rgba(255,255,255,.1); border: 0; color: #fff; border-radius: 6px; width: 22px; height: 22px; cursor: pointer; }
+.gear { background: #fff; border: 1.5px solid var(--line); border-radius: 8px; width: 34px; height: 34px; cursor: pointer; font-size: 16px; display: inline-flex; align-items: center; justify-content: center; }
+.gear:hover { border-color: var(--ink); }
+.overview .ordertable tbody tr { cursor: pointer; }
+.chanlist label { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 10px; margin-bottom: 8px; cursor: pointer; }
+.chanlist label.on { border-color: var(--orange); background: var(--orange-tint); }
+.chanlist input { accent-color: var(--orange); }
+.chanlist .d { font-size: 12px; color: var(--muted); }
+.skupick { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; padding: 12px 18px; }
+.skupick button { text-align: left; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; padding: 10px 12px; cursor: pointer; font: inherit; color: var(--ink); }
+.skupick button:hover { border-color: var(--orange); }
+.skupick button.on { border-color: var(--orange); background: var(--orange-tint); }
+.skupick button.done { border-color: rgba(30,158,111,.5); background: rgba(30,158,111,.06); }
+.skupick b { display: block; font-size: 13px; } .skupick small { color: var(--muted); font-size: 11.5px; } .skupick em { float: right; font-style: normal; font-weight: 700; }
+.labelprompt { margin: 0 18px 12px; padding: 14px 16px; border-radius: 12px; background: var(--orange-tint); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.labelprompt b { font-size: 14px; } .labelprompt .sm { flex-basis: 100%; }
+.labelprompt input { width: 70px; padding: 6px 8px; border: 1.5px solid var(--line); border-radius: 8px; font: inherit; }
+.exprows { display: grid; gap: 6px; }
+.exprow { display: flex; gap: 8px; align-items: center; }
+.exprow select { flex: 1; } .exprow input { width: 80px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.mono { font-family: var(--font-mono); }
+.modal.wide { width: min(760px, 100%); max-height: 92vh; overflow: auto; }
+.modal .lbl { font: 600 11px var(--font-body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted-2); margin: 6px 0 8px; }
+.modal .field select { width: 100%; padding: 11px 12px; border: 1.5px solid var(--line); border-radius: 10px; font: 14px var(--font-body); background: #fff; }

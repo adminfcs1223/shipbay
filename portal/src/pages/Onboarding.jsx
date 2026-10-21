@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib';
 import { CATEGORY, providerName } from '../providers';
+import { printPackingSlip } from '../ops';
 
 export const DOC_KIND = { intake_form: 'intake_form', w9: 'w9', formation_cert: 'formation_cert', rate_card: 'rate_card', agreement: 'agreement', sla: 'sla', packaging_spec: 'packaging_spec', returns_rules: 'returns_rules', packing_sops: 'packing_sops', sku_catalog: 'sku_catalog' };
 // what a document task accepts: default PDF only; 'pdf,doc,image' for specs / SOPs
@@ -168,6 +169,15 @@ function AccountDetail({ account, me, onChange }) {
     if (error) return alert(error.message);
     load(); onChange();
   };
+  // packing slip: use ShipBay's standard slip (marks the step done) — or the client uploads their own template
+  const useOurSlip = async (t) => {
+    await supabase.from('orgs').update({ packing_slip: 'shipbay' }).eq('id', org.id);
+    await supabase.from('onboarding_tasks').update({ done: true, done_at: new Date().toISOString(), done_by: me.id }).eq('id', t.id);
+    load(); onChange();
+  };
+  const sampleSlip = () => printPackingSlip(
+    { order_number: 'SAMPLE-1001', placed_at: new Date().toISOString(), ship_by: new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10), shipping_method: 'USPS Ground Advantage', marketplace: null, ship_to: { name: 'Sample Customer', address1: '88 Congress Ave', city: 'Austin', province_code: 'TX', zip: '78701', country_code: 'US' }, notes: 'Gift — no prices shown.' },
+    [{ sku: 'SKU-001', name: 'Example item A', qty: 1, is_physical: true }, { sku: 'SKU-002', name: 'Example item B — Brown', qty: 2, is_physical: true }], org.name);
   const schedule = async (t, date) => {
     await supabase.from('onboarding_tasks').update({ scheduled_for: date || null }).eq('id', t.id);
     if (date) { // keep an inbound record so receiving can work against it
@@ -271,7 +281,8 @@ function AccountDetail({ account, me, onChange }) {
                   <div className="lbl">{t.label}{t.optional && <span className="opt">optional</span>}
                     {t.kind === 'document' && sign && <UploadButton accept=".pdf" onFile={(f) => upload(t, f, true)} label={tpl ? 'Replace unsigned PDF' : 'Upload for signature'} primary={!tpl} />}
                     {t.kind === 'document' && sign && tpl && <button className="viewdoc" onClick={() => viewDoc(tpl)}>View unsigned</button>}
-                    {t.kind === 'document' && !sign && <UploadButton accept={acceptFor(t).ext} onFile={(f) => upload(t, f)} label={multi ? 'Upload PDF' : latest ? `Replace ${acceptFor(t).label}` : `Upload ${acceptFor(t).label}`} />}
+                    {t.kind === 'document' && !sign && t.key !== 'packing_slip' && <UploadButton accept={acceptFor(t).ext} onFile={(f) => upload(t, f)} label={multi ? 'Upload PDF' : latest ? `Replace ${acceptFor(t).label}` : `Upload ${acceptFor(t).label}`} />}
+                    {t.key === 'packing_slip' && <><button className={`btn-xs ${t.done && org.packing_slip === 'shipbay' ? '' : 'primary'}`} onClick={() => useOurSlip(t)}>{t.done && org.packing_slip === 'shipbay' ? 'Using ShipBay’s slip' : 'Use ShipBay’s slip'}</button><button className="viewdoc" onClick={sampleSlip}>View sample</button><UploadButton accept={acceptFor(t).ext} onFile={async (f) => { await supabase.from('orgs').update({ packing_slip: 'custom' }).eq('id', org.id); upload(t, f); }} label={latest ? 'Replace their template' : 'Upload their template'} /></>}
                     {t.kind === 'document' && sign && tpl && !latest && <UploadButton accept=".pdf" onFile={(f) => upload(t, f)} label="Upload signed copy" />}
                     {t.kind === 'catalog' && <button className={`btn-xs ${skuCount ? '' : 'primary'}`} onClick={() => setCatalogOpen(true)}>{skuCount ? 'Upload CSV again' : 'Upload CSV'}</button>}
                     {t.kind === 'schedule' && <input type="date" className="inlinedate sm" value={t.scheduled_for || ''} min={new Date().toISOString().slice(0, 10)} onChange={(e) => schedule(t, e.target.value)} />}
@@ -280,6 +291,7 @@ function AccountDetail({ account, me, onChange }) {
                     {t.kind === 'integration' && <button className="btn-xs primary" onClick={() => setConnectOpen(t.key)}>Connect</button>}
                   </div>
                   {t.kind === 'document' && sign && !latest && <div className="note">{tpl ? <>Sent for signature {fmt(tpl.created_at)} — waiting on the client’s signed copy</> : <>Upload the unsigned PDF; the client signs it from their portal and sends it back.</>}</div>}
+                  {t.key === 'packing_slip' && !latest && <div className="note">{t.done && org.packing_slip === 'shipbay' ? 'Every order ships with ShipBay’s standard slip (brand name, items, order barcode the station scans).' : 'Our standard slip works for most brands — tap View sample. If the brand wants their own layout, upload their template and we’ll build it in.'}</div>}
                   {t.kind === 'document' && !multi && latest && <div className="note">{latest.status === 'approved' ? 'Approved' : latest.status === 'rejected' ? 'Rejected — upload a corrected copy' : sign ? 'Signed copy received, awaiting review' : 'Uploaded, awaiting review'} · {fmt(latest.created_at)}{latest.review_note ? ` · ${latest.review_note}` : ''}</div>}
                   {multi && (mine.length ? (
                     <ul className="doclist">

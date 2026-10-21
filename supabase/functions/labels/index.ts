@@ -9,6 +9,7 @@
 //   label_url  { shipment_id }                                                                → { label_url } (15-minute signed link)
 // Deploy: supabase functions deploy labels
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { veeqoMarkShipped } from '../_shared/veeqo_orders.ts';
 
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, apikey, x-client-info' };
@@ -87,6 +88,13 @@ async function shopifyFulfill(shipmentId: string) {
   } catch (e) { return { error: String(e?.message ?? e) }; }
 }
 
+// Push tracking back to wherever the order came from (Shopify webhook/token path, or Veeqo). Never fails the ship.
+async function channelUpdate(shipId: string, o: any, key: string | null, carrier: string, tracking: string, service?: string | null) {
+  if (o.channel === 'veeqo' && o.veeqo_order_id) { const r = key ? await veeqoMarkShipped(key, o.raw, carrier, tracking, service) : { skipped: 'no veeqo key' }; return { channel: 'veeqo', ...r }; }
+  if (o.shopify_order_id) { const r = await shopifyFulfill(shipId); return { channel: 'shopify', ...r }; }
+  return { channel: o.channel || 'manual', skipped: 'manual order — nothing to update' };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   const auth = req.headers.get('Authorization') ?? '';
@@ -112,12 +120,12 @@ Deno.serve(async (req) => {
       const { data: shipId, error } = await user.rpc('ship_order', { p_order_id: o.id, p_carrier: b.carrier, p_service: b.service || null, p_tracking: String(b.tracking).trim(), p_label_source: 'manual', p_label_cost: b.label_cost ?? null, p_packaging: b.packaging || null, p_weight_oz: b.weight_oz ?? null });
       if (error) return err(error.message, 500);
       await admin.from('shipments').update({ provider: 'manual', tracking_url: trackingUrl(b.carrier, String(b.tracking).trim()) }).eq('id', shipId);
-      const shopify = await shopifyFulfill(shipId);
+      const shopify = await channelUpdate(shipId, o, await veeqoKey(o.org_id), b.carrier, String(b.tracking).trim(), b.service || null);
       return json({ shipment_id: shipId, tracking: String(b.tracking).trim(), shopify });
     }
 
     const key = await veeqoKey(o.org_id);
-    if (!key) return err('Veeqo isn’t connected for this client. Connect it under Onboarding → Systems → Shipping label access (Veeqo API key), or add VEEQO_API_KEY on the Marketplaces page.', 409);
+    if (!key) return err('Veeqo isn’t connected for this client. Connect it under Onboarding → Systems → Shipping label access (Veeqo API key), or add VEEQO_API_KEY on the Integrations page.', 409);
     const p = b.parcel ?? {};
     const weightOz = Number(p.weight_oz);
     if (!(weightOz > 0)) return err('Enter the packed weight first.');
@@ -133,9 +141,9 @@ Deno.serve(async (req) => {
         customer_reference: o.order_number, seller_display_name: org.name, contents: 'Merchandise', currency_code: 'USD', include_unavailable_quotes: false,
       };
       if (o.ship_by) req_.due_date = `${o.ship_by}T23:59:59Z`;
-      const value = rawLines.reduce((s, li) => s + Number(li.price ?? 0) * Number(li.quantity ?? 0), 0);
+      const value = rawLines.reduce((s, li) => s + Number(li.price ?? li.price_per_unit ?? 0) * Number(li.quantity ?? 0), 0);
       if (value > 0) req_.estimated_value = value.toFixed(2);
-      if (intl) req_.channel_items = lines.map((l: any) => { const rl = rawLines.find((x) => String(x.id) === String(l.shopify_line_id)); return { description: String(l.name).replace(/[^A-Za-z0-9 ]/g, '').slice(0, 40) || 'Merchandise', quantity: l.qty, value: rl ? Number(rl.price ?? 0).toFixed(2) : undefined, currency_code: 'USD' }; });
+      if (intl) req_.channel_items = lines.map((l: any) => { const rl = rawLines.find((x) => String(x.id) === String(l.shopify_line_id ?? l.veeqo_line_id)); return { description: String(l.name).replace(/[^A-Za-z0-9 ]/g, '').slice(0, 40) || 'Merchandise', quantity: l.qty, value: rl ? Number(rl.price ?? rl.price_per_unit ?? 0).toFixed(2) : undefined, currency_code: 'USD' }; });
       const r = await veeqo(key, '/rates', req_);
       if (!r.ok) return err(veeqoErr(r), 502);
       const quotes = (r.data.quotes ?? []).map((q: any) => ({ rate_id: q.rate_id, carrier: q.carrier_id || q.carrier_nice_name || q.service_carrier || q.carrier, service_name: q.service_name, service_id: q.service_id,
@@ -171,7 +179,7 @@ Deno.serve(async (req) => {
       }
       await admin.from('shipments').update({ provider: 'veeqo', provider_ref: ok.external_shipment_id || b.remote_shipment_id, label_path, tracking_url: trackingUrl(carrier, tracking),
         rate: { rate_id: b.rate_id, service_id: ok.service_id, service_name: ok.service_name, carrier, total_charge: ok.total_charge, charges: ok.charges, signature_type: ok.signature_type, label_format: fmt } }).eq('id', shipId);
-      const shopify = await shopifyFulfill(shipId);
+      const shopify = await channelUpdate(shipId, o, key, carrier, tracking, ok.service_name || null);
       let label_url: string | null = null;
       if (label_path) { const { data } = await admin.storage.from('labels').createSignedUrl(label_path, 900); label_url = data?.signedUrl ?? null; }
       return json({ shipment_id: shipId, tracking, carrier, service: ok.service_name, cost, label_url, label_format: fmt, shopify });
