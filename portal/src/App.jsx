@@ -14,6 +14,7 @@ import Receiving from './pages/Receiving';
 import PackShip from './pages/PackShip';
 import Quotes from './pages/Quotes';
 import ClientOrders from './pages/ClientOrders';
+import AdminSettings from './pages/AdminSettings';
 import { PageHelp } from './shared';
 
 const STAFF = ['shipbay_admin', 'shipbay_staff'];
@@ -213,6 +214,7 @@ const Ico = {
   orders: svg(<><path d="M4 4h16v16H4z"/><path d="M4 9h16"/><path d="M9 13h6"/></>),
   receiving: svg(<><path d="M3 12l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M12 14v6"/><path d="M9 17l3 3 3-3"/></>),
   pack: svg(<><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4"/><path d="M12 11v10"/><path d="M7.5 5l9 4"/></>),
+  admin: svg(<><path d="M16 11a4 4 0 1 0-8 0 4 4 0 0 0 8 0z"/><path d="M4 21v-1a5 5 0 0 1 5-5h6a5 5 0 0 1 5 5v1"/><path d="M19 3v4M17 5h4"/></>),
   quotes: svg(<><path d="M12 2v20"/><path d="M17 6.5c0-1.9-2.2-3-5-3s-5 1.1-5 3 2.2 2.5 5 3 5 1.3 5 3.5-2.2 3.5-5 3.5-5-1.3-5-3"/></>),
 };
 // Grouped so the station screens sit together, client admin together, and setup at the bottom.
@@ -229,6 +231,7 @@ const STAFF_NAV = [
   { key: 'settings', label: 'Client settings', icon: Ico.settings, page: ClientSettings },
   { group: 'Setup' },
   { key: 'markets', label: 'Integrations', icon: Ico.markets, page: Marketplaces },
+  { key: 'admin', label: 'Admin settings', icon: Ico.admin, page: AdminSettings, adminOnly: true },
 ];
 const CLIENT_NAV = [
   { group: 'Your account' },
@@ -239,7 +242,7 @@ const CLIENT_NAV = [
 ];
 
 function Shell({ me }) {
-  const nav = !me ? [] : me.isStaff ? STAFF_NAV : CLIENT_NAV;
+  const nav = (!me ? [] : me.isStaff ? STAFF_NAV : CLIENT_NAV).filter((n) => !n.adminOnly || me?.role === 'shipbay_admin');
   const items = nav.filter((n) => n.key);
   const [page, setPage] = useState(null);
   const [params, setParams] = useState({});
