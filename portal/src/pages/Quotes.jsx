@@ -224,9 +224,9 @@ function QuoteDetail({ q, card, onSaved, onErr }) {
         <div>
           <div className="lbl" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>Profit at volume <span className="sm" style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>scenarios:</span>{d.scenarios.map((v, i) => <input key={i} className="inline sm num" type="number" value={v} onChange={(e) => setD({ ...d, scenarios: d.scenarios.map((x, j) => (j === i ? Number(e.target.value) : x)) })} />)}</div>
           <div className="tablewrap"><table className="ordertable profit">
-            <thead><tr><th>Orders / mo</th>{hasIntro && <th>Phase</th>}<th className="n">Services</th><th className="n">All-in</th><th className="n">$ / order</th><th className="n">Labor hrs</th><th className="n">Cost to serve</th><th className="n">Contribution</th><th className="n">Margin</th></tr></thead>
+            <thead><tr><th>Orders</th>{hasIntro && <th>Phase</th>}<th className="n">Client all-in</th><th className="n">$ / order</th><th className="n">Hrs</th><th className="n">Our cost</th><th className="n">Contribution</th><th className="n">Margin</th></tr></thead>
             <tbody>{sc.flatMap((s) => s.rows.map((x) => (
-              <tr key={`${s.orders}-${x.phase}`}><td><b>{s.orders.toLocaleString()}</b></td>{hasIntro && <td>{x.label}</td>}<td className="n">{money(x.services, 0)}</td><td className="n">{money(x.allIn, 0)}</td><td className="n">{money(x.perOrder)}</td><td className="n">{x.laborHours}</td><td className="n">{money(x.cost.total, 0)}</td><td className={`n ${x.contribution < 0 ? 'neg' : 'pos'}`}><b>{money(x.contribution, 0)}</b></td><td className={`n ${x.contribution < 0 ? 'neg' : ''}`}>{pct(x.margin)}</td></tr>
+              <tr key={`${s.orders}-${x.phase}`}><td><b>{s.orders.toLocaleString()}</b></td>{hasIntro && <td style={{ whiteSpace: 'nowrap' }}>{x.label}</td>}<td className="n">{money(x.allIn, 0)}<div className="sm">{money(x.services, 0)} svc</div></td><td className="n">{money(x.perOrder)}</td><td className="n">{x.laborHours}</td><td className="n">{money(x.cost.total, 0)}</td><td className={`n ${x.contribution < 0 ? 'neg' : 'pos'}`}><b>{money(x.contribution, 0)}</b></td><td className={`n ${x.contribution < 0 ? 'neg' : ''}`}>{pct(x.margin)}</td></tr>
             )))}</tbody>
           </table></div>
           <p className="sm" style={{ marginTop: 8 }}>Contribution = services billed − labor − packaging − space − account overhead (+ any postage margin). Rent and your time aren’t in it; storage lines carry the space cost.</p>
@@ -243,14 +243,15 @@ function QuoteDetail({ q, card, onSaved, onErr }) {
 
 /* ---------- Standard rate card ---------- */
 function RateCard({ card, onSaved, onErr, me }) {
-  const [d, setD] = useState(card);
+  const [draft, setD] = useState(null);           // null = untouched → mirrors the saved card
   const [busy, setBusy] = useState(false);
-  useEffect(() => setD(card), [card]);
-  if (!card) return <div className="card detail"><div className="empty">No standard rate card yet — run the latest migration.</div></div>;
+  useEffect(() => setD(null), [card]);
+  const d = draft || card;
+  if (!d) return <div className="card detail"><div className="empty">No standard rate card yet — run the latest migration.</div></div>;
   const set = (k, v) => setD({ ...d, [k]: v });
   const setTier = (i, k, v) => setD({ ...d, tiers: d.tiers.map((t, j) => (j === i ? { ...t, [k]: v } : t)) });
   const setEx = (k, v) => setD({ ...d, extras: { ...(d.extras || {}), [k]: v } });
-  const dirty = JSON.stringify(d) !== JSON.stringify(card);
+  const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(card);
   const save = async () => {
     setBusy(true);
     const { id, created_at, updated_at, ...rest } = d;
@@ -263,7 +264,7 @@ function RateCard({ card, onSaved, onErr, me }) {
   const floor = { pick_first: (DEFAULT_COSTS.min_per_order / 60) * DEFAULT_COSTS.labor_rate + DEFAULT_COSTS.pack_cost_mailer + DEFAULT_COSTS.dunnage_per_order, pick_addl: (DEFAULT_COSTS.min_per_addl_unit / 60) * DEFAULT_COSTS.labor_rate, storage_pallet: DEFAULT_COSTS.space_cost_pallet, storage_bin: DEFAULT_COSTS.space_cost_bin, receiving_pallet: (DEFAULT_COSTS.min_per_pallet_in / 60) * DEFAULT_COSTS.labor_rate, returns: (DEFAULT_COSTS.min_per_return / 60) * DEFAULT_COSTS.labor_rate, minimum: 0, kitting_hr: DEFAULT_COSTS.labor_rate };
 
   return (
-    <div className="card detail quote">
+    <div className="card detail quote ratecard">
       <div className="cardhead">
         <div style={{ flex: 1 }}><h3>Standard rate card <span className="pill connected">current</span></h3><div className="small">Effective {d.effective_from} · what shipbay3pl.com/pricing, the emailed rate card and every new quote start from. Edit here, then update the site copy.</div></div>
         <button className="btn-sm primary" onClick={save} disabled={busy || !dirty}>{busy ? 'Saving…' : dirty ? 'Save rate card' : 'Saved'}</button>
@@ -284,7 +285,8 @@ function RateCard({ card, onSaved, onErr, me }) {
           <div className="lbl">Storage</div>
           <div className="qrow"><Num label="Pallet / mo" value={d.storage_pallet} onChange={(v) => set('storage_pallet', v)} prefix="$" small /><Num label="Shelf / mo" value={d.storage_shelf} onChange={(v) => set('storage_shelf', v)} prefix="$" small /><Num label="Bin / mo" value={d.storage_bin} onChange={(v) => set('storage_bin', v)} step={0.25} prefix="$" small /></div>
           <div className="lbl">Receiving</div>
-          <div className="qrow"><Num label="Pallet" value={d.receiving_pallet} onChange={(v) => set('receiving_pallet', v)} prefix="$" small /><Num label="Loose carton" value={d.receiving_carton} onChange={(v) => set('receiving_carton', v)} prefix="$" small /><Num label="20′ container" value={ex.container_20 ?? 350} onChange={(v) => setEx('container_20', v)} prefix="$" small /><Num label="40′ container" value={ex.container_40 ?? 500} onChange={(v) => setEx('container_40', v)} prefix="$" small /><Num label="Floor-loaded +" value={ex.floor_loaded ?? 150} onChange={(v) => setEx('floor_loaded', v)} prefix="$" small /></div>
+          <div className="qrow"><Num label="Pallet" value={d.receiving_pallet} onChange={(v) => set('receiving_pallet', v)} prefix="$" small /><Num label="Loose carton" value={d.receiving_carton} onChange={(v) => set('receiving_carton', v)} prefix="$" small /></div>
+          <div className="qrow"><Num label="20′ container" value={ex.container_20 ?? 350} onChange={(v) => setEx('container_20', v)} prefix="$" small /><Num label="40′ container" value={ex.container_40 ?? 500} onChange={(v) => setEx('container_40', v)} prefix="$" small /><Num label="Floor-loaded +" value={ex.floor_loaded ?? 150} onChange={(v) => setEx('floor_loaded', v)} prefix="$" small /></div>
         </section>
         <section>
           <div className="lbl">Everything else</div>
@@ -295,17 +297,17 @@ function RateCard({ card, onSaved, onErr, me }) {
           <div className="lbl">Notes</div>
           <textarea className="notes" rows={5} value={d.notes || ''} onChange={(e) => set('notes', e.target.value)} />
         </section>
-        <section>
+      </div>
+      <div className="benchwrap">
           <div className="lbl">Where we sit — 2026 published benchmarks</div>
           <table className="bench">
             <thead><tr><th>Line</th><th className="n">Ours</th><th>Industry typical</th><th>The majors</th><th className="n">Our floor</th></tr></thead>
-            <tbody>{BENCHMARKS.map((b) => { const v = Number(val(b.key)); const f = floor[b.key]; const under = f != null && v > 0 && v < f; return (
-              <tr key={b.key} className={under ? 'warnrow' : ''}><td>{b.label}<div className="sm">{b.unit}</div></td><td className="n"><b>{money(v)}</b></td><td>{b.typical}</td><td>{b.majors}</td><td className="n">{b.key === 'minimum' ? '—' : money(f)}{under ? <div className="sm neg">below cost</div> : null}</td></tr>
+            <tbody>{BENCHMARKS.map((b) => { const v = Number(val(b.key)); const f = floor[b.key]; const isSpace = b.key.startsWith('storage'); const under = f != null && v > 0 && v < (isSpace ? f * 0.9 : f); const near = isSpace && !under && v < f; return (
+              <tr key={b.key} className={under ? 'warnrow' : ''}><td>{b.label}<div className="sm">{b.unit}</div></td><td className="n"><b>{money(v)}</b></td><td>{b.typical}</td><td>{b.majors}</td><td className="n">{b.key === 'minimum' ? '—' : money(f)}<div className={`sm ${under ? 'neg' : ''}`}>{under ? 'below cost' : near ? 'rent share — storage pays the rent, pick & pack carries margin' : isSpace ? 'rent share' : 'labor at ' + money(DEFAULT_COSTS.labor_rate) + '/hr'}</div></td></tr>
             ); })}</tbody>
           </table>
-          <p className="sm" style={{ marginTop: 8 }}>“Our floor” = labor minutes × {money(DEFAULT_COSTS.labor_rate)}/hr burdened (+ mailer and dunnage on the first unit; rent ÷ positions on storage). Anything priced under its floor is a loss leader on purpose, not an accident.</p>
+          <p className="sm" style={{ marginTop: 8 }}>“Our floor” = labor minutes × {money(DEFAULT_COSTS.labor_rate)}/hr burdened (+ mailer and dunnage on the first unit). Storage floor = rent ÷ ~62 pallet positions, a fixed cost we pay either way. Anything priced under its floor is a loss leader on purpose, not an accident.</p>
           <p className="sm">Sources: {BENCHMARK_SOURCES.map(([t, u], i) => <span key={u}>{i ? ' · ' : ''}<a href={u} target="_blank" rel="noreferrer">{t}</a></span>)}</p>
-        </section>
       </div>
     </div>
   );

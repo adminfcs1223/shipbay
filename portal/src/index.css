@@ -653,3 +653,10 @@ table.bench .n { text-align: right; white-space: nowrap; }
 table.bench tr.warnrow td { background: #FFF4D6; }
 .kpis > div.batch { background: var(--orange-tint); }
 .kpis > div.batch small { color: var(--orange-soft); }
+
+.ratecard .qgrid { grid-template-columns: 1.15fr 1fr; }
+.benchwrap { padding: 6px 18px 16px; }
+.benchwrap .lbl { margin-bottom: 8px; }
+table.bench td .sm { font-size: 11px; color: var(--muted-2); }
+.qtables { grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr); }
+.ordertable.profit td, .ordertable.profit th { padding: 6px 6px; font-size: 12.5px; }
