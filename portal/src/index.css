@@ -597,3 +597,59 @@ table.skus .edit { background: none; border: 0; color: var(--orange-soft); font:
 .shipped .actions { padding: 12px 0 0; }
 .shipped .btn-sm { text-decoration: none; }
 @media (max-width: 1100px) { .ops, .ops.packship { grid-template-columns: 1fr; } .ops .detailgrid { grid-template-columns: 1fr; } }
+
+/* ---------- Quotes ---------- */
+.ops.quotes { grid-template-columns: 280px minmax(0, 1fr); }
+.quote .cardhead { gap: 8px; }
+.quote .cardhead .chk { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.quote .cardhead .chk input, .chk input { accent-color: var(--orange); }
+.chk { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.quote input.inline { border: 0; border-bottom: 1.5px dashed var(--line); background: none; font: inherit; color: inherit; padding: 0 2px; min-width: 120px; }
+.quote input.inline:focus { outline: none; border-bottom-color: var(--orange); }
+.quote input.inline.sm { font-size: 12.5px; min-width: 90px; }
+.quote input.inline.num { width: 70px; min-width: 0; text-align: right; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; padding: 16px 18px 10px; }
+.kpis > div { background: var(--bg-soft); border-radius: 12px; padding: 12px 14px; }
+.kpis small { display: block; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-2); font-weight: 600; }
+.kpis b { display: block; font-family: var(--font-display); font-size: 22px; margin: 3px 0 1px; }
+.kpis span { font-size: 11.5px; color: var(--muted); }
+.pos { color: #177A56; } .neg { color: #B03A33; }
+.qgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; padding: 8px 18px 4px; }
+@media (max-width: 1280px) { .qgrid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 900px) { .qgrid { grid-template-columns: 1fr; } .ops.quotes { grid-template-columns: 1fr; } }
+.qgrid section .lbl { margin: 10px 0 8px; }
+.qgrid section .lbl:first-child { margin-top: 0; }
+.qf { display: block; margin-bottom: 10px; min-width: 0; }
+.qf > span { display: block; font-size: 11.5px; font-weight: 600; color: var(--muted); margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qf .qin { display: flex; align-items: center; border: 1.5px solid var(--line); border-radius: 8px; background: #fff; padding: 0 8px; }
+.qf .qin:focus-within { border-color: var(--orange); }
+.qf .qin i { font-style: normal; font-size: 12px; color: var(--muted-2); }
+.qf input[type=number], .qf input[type=text], .qf > input { width: 100%; border: 0; background: none; font: 13.5px var(--font-body); color: var(--ink); padding: 7px 4px; min-width: 0; }
+.qf > input, .qf select { width: 100%; border: 1.5px solid var(--line); border-radius: 8px; padding: 7px 8px; font: 13.5px var(--font-body); background: #fff; color: var(--ink); }
+.qf input:focus, .qf select:focus { outline: none; border-color: var(--orange); }
+.qf small { display: block; font-size: 11px; color: var(--muted-2); margin-top: 2px; }
+.qrow { display: flex; gap: 8px; }
+.qrow .qf { flex: 1; }
+.qrow.tier { align-items: flex-end; }
+.introbox { background: var(--orange-tint); border-radius: 10px; padding: 10px 10px 2px; margin-bottom: 10px; }
+.introbox > small { display: block; font-size: 11px; color: var(--orange-soft); margin: -4px 0 8px; }
+.costsum { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; background: var(--bg-soft); border-radius: 10px; padding: 10px 12px; font-size: 12.5px; margin-top: 4px; }
+.costsum > div { display: flex; justify-content: space-between; }
+.costsum .tot { border-top: 1px solid var(--line); padding-top: 6px; font-weight: 700; }
+.qtables { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 18px; padding: 10px 18px 14px; }
+@media (max-width: 1100px) { .qtables { grid-template-columns: 1fr; } }
+.ordertable.bill td, .ordertable.profit td, .ordertable.bill th, .ordertable.profit th { padding: 7px 8px; font-size: 13px; }
+.ordertable .n { text-align: right; white-space: nowrap; }
+.ordertable tr.zero td { color: var(--muted-2); }
+.ordertable tr.sub td { border-top: 1px solid var(--line); font-weight: 600; }
+.ordertable tr.tot td { font-weight: 800; border-top: 2px solid var(--ink); font-size: 14px; }
+.ordertable.bill tbody tr, .ordertable.profit tbody tr { cursor: default; }
+.notes { width: 100%; border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 12px; font: 13px/1.5 var(--font-body); color: var(--ink); resize: vertical; margin-bottom: 14px; }
+.notes:focus { outline: none; border-color: var(--orange); }
+table.bench { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.bench th { text-align: left; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted-2); padding: 6px 6px; border-bottom: 1px solid var(--line); }
+table.bench td { padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.bench .n { text-align: right; white-space: nowrap; }
+table.bench tr.warnrow td { background: #FFF4D6; }
+.kpis > div.batch { background: var(--orange-tint); }
+.kpis > div.batch small { color: var(--orange-soft); }

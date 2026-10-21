@@ -12,6 +12,7 @@ import ClientProducts from './pages/ClientProducts';
 import Orders from './pages/Orders';
 import Receiving from './pages/Receiving';
 import PackShip from './pages/PackShip';
+import Quotes from './pages/Quotes';
 
 const STAFF = ['shipbay_admin', 'shipbay_staff'];
 
@@ -210,12 +211,14 @@ const Ico = {
   orders: svg(<><path d="M4 4h16v16H4z"/><path d="M4 9h16"/><path d="M9 13h6"/></>),
   receiving: svg(<><path d="M3 12l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M12 14v6"/><path d="M9 17l3 3 3-3"/></>),
   pack: svg(<><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4"/><path d="M12 11v10"/><path d="M7.5 5l9 4"/></>),
+  quotes: svg(<><path d="M12 2v20"/><path d="M17 6.5c0-1.9-2.2-3-5-3s-5 1.1-5 3 2.2 2.5 5 3 5 1.3 5 3.5-2.2 3.5-5 3.5-5-1.3-5-3"/></>),
 };
 const STAFF_NAV = [
   { key: 'onboarding', label: 'Onboarding', icon: Ico.onboarding, page: Onboarding },
   { key: 'orders', label: 'Orders', icon: Ico.orders, page: Orders },
   { key: 'receiving', label: 'Receiving', icon: Ico.receiving, page: Receiving },
   { key: 'pack', label: 'Pack & Ship', icon: Ico.pack, page: PackShip },
+  { key: 'quotes', label: 'Quotes', icon: Ico.quotes, page: Quotes },
   { key: 'compliance', label: 'Compliance', icon: Ico.compliance, page: Compliance },
   { key: 'skus', label: 'SKUs', icon: Ico.skus, page: Skus },
   { key: 'markets', label: 'Marketplaces', icon: Ico.markets, page: Marketplaces },
