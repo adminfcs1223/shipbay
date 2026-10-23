@@ -47,12 +47,13 @@ export const HELP = {
   },
   quotes: {
     title: 'Quotes',
-    what: 'What a prospect will pay, what it costs us to serve them, and what’s left — before anything is promised.',
+    what: 'What a prospect will pay, what it costs us to serve them, and what’s left — then a proposal they can sign.',
     steps: [
-      'Pick a quote or start one. The standard rate card prices it at the right tier for the volume; change any line to make it a custom offer.',
-      'Left column = the prospect (orders, units, storage, inbound, returns). Middle = our price. Right = our cost model (minutes per order, labor rate, packaging, space).',
-      'The client’s month shows the bill line by line. Profit at volume shows contribution at three volumes, phase by phase (waivers → founding rates → standard).',
-      'Save when it’s the offer you want to send; mark it Sent. When they sign, “Make it their rate card” turns the quote into their billing rates.',
+      '+ New quote: name the company, pick the model that matches how they sell (DTC, subscription / batch drop, DTC + wholesale, B2B only, FBA prep, launch, storage-only, project) and their volume. The standard rate card prices it at the right tier.',
+      'Pricing & profit: left = the prospect (volume, drops, storage, inbound, returns), middle = our price, right = our cost model. The bill shows their month (or project) line by line; Profit at volume shows contribution at three volumes, phase by phase.',
+      'Value-added services: tick what they need — kitting, inserts, gift notes, FBA prep, lot tracking, routing-guide compliance, Saturday shifts and more. Set the rate and share; our labor and material cost ride along so the margin stays real. Tick what prints under “What’s included”.',
+      'Proposal: write the opening in their words ({company}, {first}, {volume} fill themselves), three points that matter to them, terms and validity. Preview, then Save PDF (print dialog → Save as PDF, margins None). The standard rate card prints the same way as a generic rate card for cold outreach.',
+      'Save, mark it Sent. When they sign, “Make it their rate card” turns the quote into their billing rates.',
     ],
   },
   compliance: { title: 'Compliance', what: 'Documents brands have sent that need a yes or a no.', steps: ['Open a document, read it, Approve or Reject with a note.', 'Approving completes the matching onboarding step; rejecting tells the brand what to fix.'] },
