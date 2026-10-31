@@ -1,342 +1,224 @@
-// Financials — the finance sheet, live. Ledger (every dollar), recurring burn, pipeline, and QuickBooks pulled in.
+// Financials — one screen. Pick a month, see money in / money out / bottom line, where it went, and every transaction
+// (yours + QuickBooks) underneath. Add an expense or income with one button.
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib';
-import { ownerFn, fetchAll, money, pct, num, ymd, monthKey, monthLabel, ago } from './util';
+import { ownerFn, fetchAll, money, pct, ymd, monthKey, monthLabel, ago } from './util';
 
-const MARGIN = 0.35;   // contribution margin on services at Rate Card v2 (what's left after labor + supplies)
-const KINDS = [['expense', 'Expense'], ['revenue', 'Revenue (invoice)'], ['capex', 'Capex (equipment)'], ['owner_contribution', 'Owner put money in'], ['owner_draw', 'Owner took money out']];
-const CATS = ['Software', 'Marketing & outbound', 'Souled fulfillment fee (base)', 'Pallet positions', 'Supplies', 'Labor', 'Legal & professional', 'Insurance', 'Capex (racking, equipment)', 'Services revenue', 'Owner contribution', 'Owner draw', 'Other'];
+const CATS = ['Software', 'Marketing & outbound', 'Souled fulfillment fee (base)', 'Pallet positions', 'Supplies', 'Labor', 'Legal & professional', 'Insurance', 'Travel', 'Capex (racking, equipment)', 'Refunds', 'Other'];
+const INCATS = ['Services revenue', 'Storage', 'Receiving', 'Other income'];
+const PALETTE = ['#FF6B15', '#101C2B', '#1E9E6F', '#3B82F6', '#A855F7', '#F59E0B', '#EF4444', '#14B8A6', '#6B7280', '#EC4899', '#84CC16', '#0EA5E9'];
 
 export default function Financials({ status, refreshStatus }) {
-  const [tx, setTx] = useState(null); const [rec, setRec] = useState([]); const [pipe, setPipe] = useState([]); const [cash, setCash] = useState({ amount: 0 });
-  const [qbo, setQbo] = useState({});
-  const [msg, setMsg] = useState(null); const [busy, setBusy] = useState(null);
-  const [view, setView] = useState('overview');
+  const [tx, setTx] = useState(null); const [ar, setAr] = useState(null);
+  const [period, setPeriod] = useState(() => ({ kind: 'month', key: monthKey(new Date()) }));
+  const [pie, setPie] = useState('out');
+  const [adding, setAdding] = useState(null); const [editing, setEditing] = useState(null);
+  const [q, setQ] = useState(''); const [showDupes, setShowDupes] = useState(false);
+  const [msg, setMsg] = useState(null); const [busy, setBusy] = useState(false);
 
   const load = async () => {
-    const [t, r, p, s, q] = await Promise.all([
-      fetchAll('fin_transactions', '*', (q) => q.order('txn_date', { ascending: false })),
-      fetchAll('fin_recurring', '*', (q) => q.order('amount', { ascending: false })),
-      fetchAll('fin_pipeline', '*', (q) => q.order('probability', { ascending: false })),
-      supabase.from('fin_settings').select('*').eq('key', 'cash_on_hand').maybeSingle(),
-      supabase.from('fin_qbo_reports').select('report, period_start, period_end, data, fetched_at').order('fetched_at', { ascending: false }).limit(12),
+    const [t, r] = await Promise.all([
+      fetchAll('fin_transactions', '*', (qq) => qq.order('txn_date', { ascending: false }).order('created_at', { ascending: false })),
+      supabase.from('fin_qbo_reports').select('data').eq('report', 'AgedReceivables').order('fetched_at', { ascending: false }).limit(1).maybeSingle(),
     ]);
-    setTx(t); setRec(r); setPipe(p); setCash(s.data?.value || { amount: 0 });
-    const latest = {}; for (const row of q.data || []) if (!latest[row.report]) latest[row.report] = row; setQbo(latest);
+    setTx(t); setAr(r.data ? arTotal(r.data.data) : null);
   };
   useEffect(() => { load(); }, []);
 
-  const m = useMemo(() => summarize(tx || [], rec, pipe, cash), [tx, rec, pipe, cash]);
-
   const say = (r, ok) => { if (r?.error) setMsg({ kind: 'err', text: r.error }); else if (ok) setMsg({ kind: 'ok', text: ok }); };
-  const qboConnect = async () => { setBusy('qbo'); const r = await ownerFn({ action: 'qbo_connect' }); setBusy(null); if (r.error) return say(r); window.location.href = r.url; };
-  const qboSync = async () => { setBusy('qbo'); const r = await ownerFn({ action: 'qbo_sync' }); setBusy(null); say(r, `Pulled ${r.reports?.join(', ')} from QuickBooks.`); load(); refreshStatus(); };
-  const qboDisconnect = async () => { if (!window.confirm('Disconnect QuickBooks? Cached reports stay; new pulls stop until you reconnect.')) return; setBusy('qbo'); const r = await ownerFn({ action: 'qbo_disconnect' }); setBusy(null); say(r, 'QuickBooks disconnected.'); refreshStatus(); };
-  const saveCash = async (amount) => { const value = { ...cash, amount: Number(amount) || 0, at: new Date().toISOString() }; await supabase.from('fin_settings').upsert({ key: 'cash_on_hand', value }); setCash(value); };
+  const connect = async () => { setBusy(true); const r = await ownerFn({ action: 'qbo_connect' }); setBusy(false); if (r.error) return say(r); window.location.href = r.url; };
+  const sync = async () => { setBusy(true); const r = await ownerFn({ action: 'qbo_sync' }); setBusy(false); say(r, r.error ? null : `QuickBooks synced · ${r.imported || 0} transactions.`); load(); refreshStatus(); };
 
-  if (tx === null) return <div className="card"><div className="empty">Loading the books…</div></div>;
+  const m = useMemo(() => tx ? summarize(tx, period) : null, [tx, period]);
+  if (!m) return <div className="card"><div className="empty">Loading…</div></div>;
+
+  const qbo = status.qbo || {};
+  const shift = (d) => { const [y, mo] = period.key.split('-').map(Number); setPeriod({ kind: 'month', key: monthKey(new Date(y, mo - 1 + d, 1)) }); };
+  const title = period.kind === 'year' ? `${period.key} · year to date` : new Date(Number(period.key.slice(0, 4)), Number(period.key.slice(5, 7)) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const slices = pie === 'out' ? m.outByCat : m.inByWho;
+  const rows = [...m.rows].sort((a, b) => b.txn_date.localeCompare(a.txn_date)).filter((t) => (showDupes || !t.dupe) && (!q || [t.counterparty, t.description, t.category].filter(Boolean).some((s) => s.toLowerCase().includes(q.toLowerCase()))));
+
   return (
     <>
       {msg && <div className={`msg ${msg.kind} flash`}>{msg.text}<button onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
+      <div className="finhead">
+        <div className="period">
+          <button className="btn-sm" onClick={() => shift(-1)} disabled={period.kind !== 'month'}>‹</button>
+          <b>{title}</b>
+          <button className="btn-sm" onClick={() => shift(1)} disabled={period.kind !== 'month' || period.key >= monthKey(new Date())}>›</button>
+          <span className="seg tight"><button className={period.kind === 'month' ? 'on' : ''} onClick={() => setPeriod({ kind: 'month', key: monthKey(new Date()) })}>This month</button><button className={period.kind === 'year' ? 'on' : ''} onClick={() => setPeriod({ kind: 'year', key: String(new Date().getFullYear()) })}>This year</button></span>
+        </div>
+        <div className="qbo">
+          {qbo.connected_at
+            ? <><span className="dotok" /> QuickBooks · {qbo.company_name || 'connected'} · synced {ago(qbo.last_sync_at)} <button className="btn-sm primary" disabled={busy} onClick={sync}>{busy ? '…' : 'Sync now'}</button></>
+            : <><span className="dotoff" /> QuickBooks not connected {status.qbo_keys_set ? <button className="btn-sm primary" disabled={busy} onClick={connect}>Connect</button> : <span className="sm">· add the app keys under Settings</span>}</>}
+          {qbo.last_error && <div className="sm neg">{qbo.last_error}</div>}
+        </div>
+      </div>
+
       <div className="kpis fin">
-        <Tile label="Cash in the business" value={money(m.cash)} sub={m.cash ? `${m.runway === Infinity ? 'no burn' : m.runway.toFixed(1) + ' months of runway'}` : 'none yet — Derek pays everything personally'} edit={() => { const v = window.prompt('Cash ShipBay has on hand right now ($):', m.cash); if (v != null) saveCash(v); }} />
-        <Tile label="Burn this month" value={money(m.burn)} sub="recurring costs before a single order" hot />
-        <Tile label="Break-even" value={`${money(m.breakEven)} / mo`} sub={`services billed at ${pct(MARGIN)} margin · ≈ ${num(Math.ceil(m.breakEven / 2.45))} Launch orders`} />
-        <Tile label="Owed to you" value={money(m.owed)} sub="invoices sent, not paid yet" />
-        <Tile label={`${monthLabel(m.thisKey)} so far`} value={money(m.thisNet)} sub={`${money(m.thisRev)} in · ${money(m.thisExp)} out`} tone={m.thisNet < 0 ? 'bad' : 'ok'} />
-        <Tile label="Derek has put in" value={money(m.ownerIn)} sub={`all-time spend ${money(m.spentAll)} · revenue ${money(m.revAll)}`} />
+        <div className="tile"><small>Money in</small><b className="pos">{money(m.inn)}</b><span>{m.inCount} payment{m.inCount === 1 ? '' : 's'}</span></div>
+        <div className="tile"><small>Money out</small><b>{money(m.out)}</b><span>{m.outCount} transaction{m.outCount === 1 ? '' : 's'}</span></div>
+        <div className={`tile ${m.net < 0 ? 'bad' : 'ok'}`}><small>Bottom line</small><b>{money(m.net)}</b><span>{m.prevNet != null ? `${monthLabel(m.prevKey)}: ${money(m.prevNet)}` : ' '}</span></div>
+        <div className="tile"><small>Owed to you</small><b>{money(ar ?? m.owed)}</b><span>{ar != null ? 'open invoices in QuickBooks' : 'unpaid invoices'}</span></div>
       </div>
 
-      <div className="card plain">
-        <h3>What the numbers say</h3>
-        <ul className="plainlist">
-          <li>Every month the business costs <b>{money(m.burn)}</b> whether or not an order ships (Souled fee, software, Fulfill.com). That is your <b>burn</b>.</li>
-          <li>Roughly <b>{pct(MARGIN)}</b> of every services dollar is left after labor and supplies. To cover the burn you need <b>{money(m.breakEven)}</b> of services billed a month — about <b>{num(Math.ceil(m.breakEven / 2.45))}</b> small-brand orders.</li>
-          <li>Signed + likely clients add up to <b>{money(m.weighted)}/mo</b> weighted (<b>{money(m.signed)}/mo</b> from signed accounts). {m.weighted >= m.breakEven ? 'That clears break-even on paper — now it has to show up as invoices.' : `Gap to break-even: ${money(m.breakEven - m.weighted)}/mo — about ${Math.ceil((m.breakEven - m.weighted) / 472)} more Launch-size brands.`}</li>
-          <li>So far the company has spent <b>{money(m.spentAll)}</b> ({money(m.capexAll)} of it equipment that keeps value) and billed <b>{money(m.revAll)}</b>. All of that came out of Derek’s pocket, logged as owner contributions — it is capital in, not a loss you “lost”.</li>
-        </ul>
+      <div className="opsbar wrap actions">
+        <button className="btn-sm primary" onClick={() => setAdding('expense')}>+ Add expense</button>
+        <button className="btn-sm" onClick={() => setAdding('revenue')}>+ Add income</button>
+        <button className="btn-sm" onClick={() => setAdding('owner_contribution')}>+ Money I put in</button>
+        <div className="spacer" />
+        <span className="sm">You’ve put in <b>{money(m.ownerAll)}</b> all-time · the business has spent <b>{money(m.spentAll)}</b> and earned <b>{money(m.earnedAll)}</b></span>
       </div>
 
-      <div className="seg">{[['overview', 'Month by month'], ['ledger', 'Ledger'], ['recurring', 'Recurring costs'], ['pipeline', 'Clients & pipeline'], ['qbo', 'QuickBooks']].map(([k, l]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{l}</button>)}</div>
+      <div className="ownergrid">
+        <div className="card">
+          <div className="cardhead"><h3>{pie === 'out' ? 'Where the money went' : 'Where the money came from'}</h3><span className="seg tight"><button className={pie === 'out' ? 'on' : ''} onClick={() => setPie('out')}>Out</button><button className={pie === 'in' ? 'on' : ''} onClick={() => setPie('in')}>In</button></span></div>
+          {slices.length === 0 ? <div className="empty">Nothing {pie === 'out' ? 'spent' : 'earned'} in this period.</div> : (
+            <div className="piewrap">
+              <Donut slices={slices} total={pie === 'out' ? m.out : m.inn} />
+              <ul className="legend">{slices.map((s, i) => (
+                <li key={s.name}><i style={{ background: PALETTE[i % PALETTE.length] }} /><span className="nm">{s.name}</span><b>{money(s.amount)}</b><span className="pc">{pct(s.amount / (pie === 'out' ? m.out : m.inn))}</span>{s.flag && <span className="flag" title={s.flag}>{s.flag}</span>}</li>
+              ))}</ul>
+            </div>
+          )}
+        </div>
+        <div className="card">
+          <div className="cardhead"><h3>Last 6 months</h3><span className="sm"><i className="sw in" /> in &nbsp; <i className="sw out" /> out</span></div>
+          <Trend months={m.trend} />
+        </div>
+      </div>
 
-      {view === 'overview' && <Months m={m} />}
-      {view === 'ledger' && <Ledger tx={tx} reload={load} say={say} />}
-      {view === 'recurring' && <Recurring rec={rec} reload={load} say={say} />}
-      {view === 'pipeline' && <Pipeline pipe={pipe} reload={load} say={say} />}
-      {view === 'qbo' && <QuickBooks status={status} qbo={qbo} busy={busy} onConnect={qboConnect} onSync={qboSync} onDisconnect={qboDisconnect} />}
+      <div className="card">
+        <div className="cardhead">
+          <h3>Transactions</h3>
+          <input className="search" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
+          {m.dupes > 0 && <label className="chk sm"><input type="checkbox" checked={showDupes} onChange={(e) => setShowDupes(e.target.checked)} /> show {m.dupes} possible duplicate{m.dupes === 1 ? '' : 's'}</label>}
+        </div>
+        {rows.length === 0 ? <div className="empty">No transactions in this period.</div> : (
+          <div className="tablewrap"><table className="ordertable fin txns">
+            <thead><tr><th>Date</th><th>Who</th><th>What</th><th>Category</th><th>From</th><th className="n">Amount</th></tr></thead>
+            <tbody>{rows.map((t) => (
+              <tr key={t.id} className="click" onClick={() => setEditing(t)}>
+                <td className="sm mono">{t.txn_date.slice(5)}</td>
+                <td><b>{t.counterparty || '—'}</b></td>
+                <td className="sm">{t.description}</td>
+                <td><span className="pill">{t.category}</span></td>
+                <td>{t.source === 'qbo' ? <span className="pill connected">QuickBooks</span> : <span className="pill">manual</span>}</td>
+                <td className={`n ${t.kind === 'revenue' ? 'pos' : t.kind === 'owner_contribution' ? '' : 'neg'}`}>{t.kind === 'revenue' || t.kind === 'owner_contribution' ? '+' : '−'}{money(t.amount, 2)}{t.kind === 'owner_contribution' && <div className="sm">put in</div>}{t.kind === 'capex' && <div className="sm">equipment</div>}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </div>
+
+      {adding && <TxModal kind={adding} onClose={() => setAdding(null)} onSaved={() => { setAdding(null); load(); }} say={say} />}
+      {editing && <TxModal tx={editing} kind={editing.kind} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} say={say} />}
     </>
   );
 }
 
-function Tile({ label, value, sub, hot, tone, edit }) {
-  return <div className={`tile ${tone || ''}`}><small>{label}{edit && <button className="linkbtn" onClick={edit}>edit</button>}</small><b className={hot ? 'hot' : ''}>{value}</b>{sub && <span>{sub}</span>}</div>;
-}
-
-/* ---------- the math ---------- */
-function summarize(tx, rec, pipe, cash) {
-  const now = new Date(); const thisKey = monthKey(now);
-  const activeIn = (r, key) => r.starts.slice(0, 7) <= key && (!r.ends || r.ends.slice(0, 7) >= key);
-  const burnFor = (key) => rec.filter((r) => activeIn(r, key)).reduce((s, r) => s + Number(r.amount), 0);
-  const pipeFor = (key) => pipe.filter((p) => p.status !== 'lost' && (!p.start_month || p.start_month.slice(0, 7) <= key)).reduce((s, p) => s + Number(p.services_mo) * Number(p.probability), 0);
-  const months = {};
-  const bump = (k, f, v) => { months[k] = months[k] || { rev: 0, exp: 0, capex: 0, ownerIn: 0, ownerOut: 0 }; months[k][f] += Number(v); };
-  for (const t of tx) {
-    const k = t.txn_date.slice(0, 7);
-    if (t.kind === 'revenue') bump(k, 'rev', t.amount); else if (t.kind === 'expense') bump(k, 'exp', t.amount); else if (t.kind === 'capex') bump(k, 'capex', t.amount);
-    else if (t.kind === 'owner_contribution') bump(k, 'ownerIn', t.amount); else if (t.kind === 'owner_draw') bump(k, 'ownerOut', t.amount);
-  }
-  // table: from the first month with data (or 3 months back) to 4 months ahead
-  const keys = Object.keys(months).sort(); const first = keys[0] || monthKey(new Date(now.getFullYear(), now.getMonth() - 3, 1));
-  const rows = []; let cur = new Date(Number(first.slice(0, 4)), Number(first.slice(5, 7)) - 1, 1); const end = new Date(now.getFullYear(), now.getMonth() + 4, 1);
-  let cum = 0;
-  while (cur <= end) {
-    const k = monthKey(cur); const a = months[k] || { rev: 0, exp: 0, capex: 0, ownerIn: 0, ownerOut: 0 };
-    const future = k > thisKey; const expRev = pipeFor(k); const expBurn = burnFor(k);
-    const net = future ? expRev - expBurn : a.rev - a.exp;
-    cum += net;
-    rows.push({ key: k, label: monthLabel(k), future, current: k === thisKey, rev: a.rev, exp: a.exp, capex: a.capex, ownerIn: a.ownerIn, expRev, expBurn, net, cum });
-    cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
-  }
-  const burn = burnFor(thisKey); const breakEven = burn / MARGIN;
-  const cashAmt = Number(cash?.amount) || 0;
+/* ---------- numbers ---------- */
+function inPeriod(t, p) { return p.kind === 'year' ? t.txn_date.startsWith(p.key) : t.txn_date.startsWith(p.key); }
+function summarize(tx, period) {
+  const cur = tx.filter((t) => inPeriod(t, period));
+  // manual rows that look like a QuickBooks row (same date + amount) are probably the same charge
+  const qboKeys = new Set(cur.filter((t) => t.source === 'qbo').map((t) => `${t.txn_date}|${Number(t.amount).toFixed(2)}`));
+  for (const t of cur) t.dupe = t.source !== 'qbo' && t.kind !== 'owner_contribution' && qboKeys.has(`${t.txn_date}|${Number(t.amount).toFixed(2)}`);
+  const live = cur.filter((t) => !t.dupe);
+  const sum = (arr) => arr.reduce((s, t) => s + Number(t.amount), 0);
+  const inn = sum(live.filter((t) => t.kind === 'revenue')); const out = sum(live.filter((t) => t.kind === 'expense' || t.kind === 'capex'));
+  const group = (arr, key) => { const g = {}; for (const t of arr) g[key(t)] = (g[key(t)] || 0) + Number(t.amount); return Object.entries(g).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount); };
+  // previous period for flags
+  const prevKey = period.kind === 'month' ? monthKey(new Date(Number(period.key.slice(0, 4)), Number(period.key.slice(5, 7)) - 2, 1)) : String(Number(period.key) - 1);
+  const prev = tx.filter((t) => t.txn_date.startsWith(prevKey));
+  const prevOut = group(prev.filter((t) => t.kind === 'expense' || t.kind === 'capex'), (t) => t.category);
+  const outByCat = group(live.filter((t) => t.kind === 'expense' || t.kind === 'capex'), (t) => t.category).map((s) => {
+    const p = prevOut.find((x) => x.name === s.name)?.amount || 0;
+    let flag = null;
+    if (out && s.amount / out >= 0.4 && s.amount >= 500) flag = `${pct(s.amount / out)} of everything you spent`;
+    else if (p && s.amount >= p * 1.5 && s.amount - p >= 100) flag = `up ${pct(s.amount / p - 1)} vs ${monthLabel(prevKey)}`;
+    return { ...s, flag };
+  });
+  const inByWho = group(live.filter((t) => t.kind === 'revenue'), (t) => t.counterparty || t.category || 'Other');
+  const prevNet = prev.length ? sum(prev.filter((t) => t.kind === 'revenue')) - sum(prev.filter((t) => t.kind === 'expense' || t.kind === 'capex')) : null;
+  // 6-month trend ending at the selected month (or current month for year view)
+  const endKey = period.kind === 'month' ? period.key : monthKey(new Date());
+  const trend = [];
+  for (let i = 5; i >= 0; i--) { const k = monthKey(new Date(Number(endKey.slice(0, 4)), Number(endKey.slice(5, 7)) - 1 - i, 1)); const T = tx.filter((t) => t.txn_date.startsWith(k)); trend.push({ key: k, label: monthLabel(k), inn: sum(T.filter((t) => t.kind === 'revenue')), out: sum(T.filter((t) => t.kind === 'expense' || t.kind === 'capex')) }); }
   return {
-    thisKey, rows, burn, breakEven, cash: cashAmt, runway: burn ? cashAmt / burn : Infinity,
-    owed: tx.filter((t) => t.kind === 'revenue' && !t.paid).reduce((s, t) => s + Number(t.amount), 0),
-    thisRev: months[thisKey]?.rev || 0, thisExp: (months[thisKey]?.exp || 0) + (months[thisKey]?.capex || 0), thisNet: (months[thisKey]?.rev || 0) - (months[thisKey]?.exp || 0) - (months[thisKey]?.capex || 0),
-    ownerIn: tx.filter((t) => t.kind === 'owner_contribution').reduce((s, t) => s + Number(t.amount), 0) - tx.filter((t) => t.kind === 'owner_draw').reduce((s, t) => s + Number(t.amount), 0),
-    spentAll: tx.filter((t) => t.kind === 'expense' || t.kind === 'capex').reduce((s, t) => s + Number(t.amount), 0),
-    capexAll: tx.filter((t) => t.kind === 'capex').reduce((s, t) => s + Number(t.amount), 0),
-    revAll: tx.filter((t) => t.kind === 'revenue').reduce((s, t) => s + Number(t.amount), 0),
-    weighted: pipe.filter((p) => p.status !== 'lost').reduce((s, p) => s + Number(p.services_mo) * Number(p.probability), 0),
-    signed: pipe.filter((p) => ['signed', 'live'].includes(p.status) || Number(p.probability) >= 0.9).reduce((s, p) => s + Number(p.services_mo), 0),
+    rows: cur, inn, out, net: inn - out, inCount: live.filter((t) => t.kind === 'revenue').length, outCount: live.filter((t) => t.kind === 'expense' || t.kind === 'capex').length,
+    outByCat, inByWho, prevKey, prevNet, trend, dupes: cur.filter((t) => t.dupe).length,
+    owed: sum(tx.filter((t) => t.kind === 'revenue' && !t.paid)),
+    ownerAll: sum(tx.filter((t) => t.kind === 'owner_contribution')) - sum(tx.filter((t) => t.kind === 'owner_draw')),
+    spentAll: sum(tx.filter((t) => (t.kind === 'expense' || t.kind === 'capex') && !t.dupe)), earnedAll: sum(tx.filter((t) => t.kind === 'revenue')),
   };
 }
+function arTotal(rep) { try { const walk = (rows, out) => { for (const r of rows || []) { if (r.Summary) out.push(r.Summary.ColData.map((c) => c.value)); if (r.Rows) walk(r.Rows.Row, out); } return out; }; const t = walk(rep?.Rows?.Row, []).find((r) => /^total$/i.test(r[0])); return t ? Number(t[t.length - 1]) || 0 : null; } catch { return null; } }
 
-/* ---------- Month by month: bars + table ---------- */
-function Months({ m }) {
-  const max = Math.max(1, ...m.rows.map((r) => Math.max(r.future ? r.expRev : r.rev, r.future ? r.expBurn : r.exp + r.capex)));
+/* ---------- donut ---------- */
+function Donut({ slices, total }) {
+  const R = 54, C = 2 * Math.PI * R; let acc = 0;
   return (
-    <div className="card">
-      <h3>Money in vs money out, by month</h3>
-      <p className="hint">Solid months happened. Striped months are expected: recurring costs vs weighted pipeline. Green = in, orange = out.</p>
-      <div className="bars">
-        {m.rows.map((r) => { const inn = r.future ? r.expRev : r.rev; const out = r.future ? r.expBurn : r.exp + r.capex; return (
-          <div key={r.key} className={`bar-m ${r.future ? 'future' : ''} ${r.current ? 'current' : ''}`} title={`${r.label}: in ${money(inn)} · out ${money(out)}`}>
-            <div className="cols"><i className="in" style={{ height: `${(inn / max) * 100}%` }} /><i className="out" style={{ height: `${(out / max) * 100}%` }} /></div>
-            <small>{r.label}</small>
-          </div>
-        ); })}
-      </div>
-      <div className="tablewrap"><table className="ordertable fin">
-        <thead><tr><th>Month</th><th className="n">In (revenue)</th><th className="n">Out (expenses)</th><th className="n">Equipment</th><th className="n">Net</th><th className="n">Running total</th><th className="n">Derek put in</th></tr></thead>
-        <tbody>{m.rows.map((r) => (
-          <tr key={r.key} className={r.future ? 'muted' : r.current ? 'hl' : ''}>
-            <td><b>{r.label}</b>{r.future && <span className="sm"> expected</span>}{r.current && <span className="sm"> now</span>}</td>
-            <td className="n">{money(r.future ? r.expRev : r.rev)}</td>
-            <td className="n">{money(r.future ? r.expBurn : r.exp)}</td>
-            <td className="n">{r.future ? '—' : money(r.capex)}</td>
-            <td className={`n ${r.net < 0 ? 'neg' : 'pos'}`}>{money(r.net)}</td>
-            <td className={`n ${r.cum < 0 ? 'neg' : 'pos'}`}>{money(r.cum)}</td>
-            <td className="n">{r.future ? '—' : money(r.ownerIn)}</td>
-          </tr>
-        ))}</tbody>
-      </table></div>
-    </div>
+    <svg viewBox="0 0 140 140" className="donut" role="img" aria-label="Breakdown">
+      <circle cx="70" cy="70" r={R} fill="none" stroke="#EEF0F3" strokeWidth="22" />
+      {slices.map((s, i) => { const f = total ? s.amount / total : 0; const el = <circle key={s.name} cx="70" cy="70" r={R} fill="none" stroke={PALETTE[i % PALETTE.length]} strokeWidth="22" strokeDasharray={`${f * C} ${C}`} strokeDashoffset={-acc * C} transform="rotate(-90 70 70)"><title>{s.name}: {money(s.amount)}</title></circle>; acc += f; return el; })}
+      <text x="70" y="66" textAnchor="middle" className="dtot">{money(total)}</text>
+      <text x="70" y="82" textAnchor="middle" className="dsub">{slices.length} categor{slices.length === 1 ? 'y' : 'ies'}</text>
+    </svg>
   );
 }
 
-/* ---------- Ledger ---------- */
-function Ledger({ tx, reload, say }) {
-  const blank = { txn_date: ymd(new Date()), kind: 'expense', category: 'Software', counterparty: '', description: '', amount: '', paid: true };
-  const [f, setF] = useState(blank); const [q, setQ] = useState(''); const [busy, setBusy] = useState(false);
+/* ---------- 6-month trend ---------- */
+function Trend({ months }) {
+  const max = Math.max(1, ...months.map((x) => Math.max(x.inn, x.out)));
+  return (
+    <>
+      <div className="bars">{months.map((x) => (
+        <div key={x.key} className="bar-m" title={`${x.label}: in ${money(x.inn)} · out ${money(x.out)}`}>
+          <div className="cols"><i className="in" style={{ height: `${(x.inn / max) * 100}%` }} /><i className="out" style={{ height: `${(x.out / max) * 100}%` }} /></div>
+          <small>{x.label}</small>
+        </div>
+      ))}</div>
+      <table className="ordertable fin mini"><tbody>
+        <tr><td>In</td>{months.map((x) => <td key={x.key} className="n pos">{money(x.inn)}</td>)}</tr>
+        <tr><td>Out</td>{months.map((x) => <td key={x.key} className="n">{money(x.out)}</td>)}</tr>
+        <tr><td><b>Bottom line</b></td>{months.map((x) => <td key={x.key} className={`n ${x.inn - x.out < 0 ? 'neg' : 'pos'}`}><b>{money(x.inn - x.out)}</b></td>)}</tr>
+      </tbody></table>
+    </>
+  );
+}
+
+/* ---------- add / edit one transaction ---------- */
+function TxModal({ tx, kind, onClose, onSaved, say }) {
+  const isQbo = tx?.source === 'qbo';
+  const [f, setF] = useState(tx ? { ...tx } : { txn_date: ymd(new Date()), kind, category: kind === 'revenue' ? 'Services revenue' : kind === 'owner_contribution' ? 'Owner contribution' : 'Software', counterparty: '', description: '', amount: '', paid: true });
+  const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
-  const add = async (e) => {
-    e.preventDefault(); if (!f.amount) return; setBusy(true);
-    const { error } = await supabase.from('fin_transactions').insert({ ...f, amount: Number(f.amount), source: 'manual' });
-    setBusy(false); if (error) return say({ error: error.message }); setF({ ...blank, txn_date: f.txn_date }); reload();
+  const titles = { expense: 'Add an expense', revenue: 'Add income', owner_contribution: 'Money you put in', capex: 'Equipment' };
+  const save = async (e) => {
+    e.preventDefault(); if (!f.amount || Number(f.amount) <= 0) return; setBusy(true);
+    const row = { txn_date: f.txn_date, kind: f.kind, category: f.category, counterparty: f.counterparty || null, description: f.description || null, amount: Number(f.amount), paid: f.paid !== false };
+    const r = tx ? await supabase.from('fin_transactions').update(isQbo ? { category: row.category, kind: row.kind } : row).eq('id', tx.id) : await supabase.from('fin_transactions').insert({ ...row, source: 'manual' });
+    setBusy(false); if (r.error) return say({ error: r.error.message }); say(null, tx ? 'Saved.' : 'Added.'); onSaved();
   };
-  const del = async (t) => { if (!window.confirm(`Delete ${money(t.amount, 2)} ${t.counterparty || ''}?`)) return; await supabase.from('fin_transactions').delete().eq('id', t.id); reload(); };
-  const togglePaid = async (t) => { await supabase.from('fin_transactions').update({ paid: !t.paid }).eq('id', t.id); reload(); };
-  const list = tx.filter((t) => !q || [t.counterparty, t.description, t.category, t.kind].filter(Boolean).some((s) => s.toLowerCase().includes(q.toLowerCase()))).slice(0, 200);
+  const del = async () => { if (!window.confirm('Delete this transaction?')) return; await supabase.from('fin_transactions').delete().eq('id', tx.id); onSaved(); };
+  const cats = f.kind === 'revenue' ? INCATS : f.kind === 'owner_contribution' ? ['Owner contribution'] : CATS;
   return (
-    <>
-      <form className="card addrow" onSubmit={add}>
-        <h3>Add a line</h3>
-        <div className="addgrid">
-          <label>Date<input type="date" value={f.txn_date} onChange={set('txn_date')} /></label>
-          <label>Type<select value={f.kind} onChange={set('kind')}>{KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
-          <label>Category<select value={f.category} onChange={set('category')}>{CATS.map((c) => <option key={c}>{c}</option>)}</select></label>
-          <label>Who<input value={f.counterparty} onChange={set('counterparty')} placeholder="Vendor or client" /></label>
-          <label className="wide">What<input value={f.description} onChange={set('description')} placeholder="What it was for" /></label>
-          <label>Amount $<input type="number" step="0.01" min="0" value={f.amount} onChange={set('amount')} /></label>
-          <label className="chk"><input type="checkbox" checked={f.paid} onChange={set('paid')} /> paid</label>
-          <button className="btn-sm primary" disabled={busy}>Add</button>
-        </div>
-        <p className="hint">Rule of thumb: if you paid it from your own card, add the expense <i>and</i> an “Owner put money in” line for the same amount. Invoices you send go in as Revenue, unchecked “paid” until the money lands.</p>
-      </form>
-      <div className="card">
-        <div className="opsbar"><input className="search" placeholder="Search the ledger…" value={q} onChange={(e) => setQ(e.target.value)} /><div className="spacer" /><span className="sm">{tx.length} lines</span></div>
-        <div className="tablewrap"><table className="ordertable fin">
-          <thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Who</th><th>What</th><th className="n">Amount</th><th>Paid</th><th /></tr></thead>
-          <tbody>{list.map((t) => (
-            <tr key={t.id}>
-              <td className="sm">{t.txn_date}</td>
-              <td><span className={`pill ${t.kind === 'revenue' ? 'connected' : t.kind.startsWith('owner') ? 'pending' : ''}`}>{KINDS.find((k) => k[0] === t.kind)?.[1] || t.kind}</span></td>
-              <td className="sm">{t.category}</td><td>{t.counterparty}</td><td className="sm">{t.description}</td>
-              <td className={`n ${t.kind === 'revenue' || t.kind === 'owner_contribution' ? 'pos' : 'neg'}`}>{money(t.amount, 2)}</td>
-              <td><button className={`btn-xs ${t.paid ? '' : 'warn'}`} onClick={() => togglePaid(t)}>{t.paid ? 'paid' : 'unpaid'}</button></td>
-              <td className="n"><button className="btn-xs" onClick={() => del(t)}>×</button></td>
-            </tr>
-          ))}</tbody>
-        </table></div>
+    <div className="overlay" onClick={onClose}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={save}>
+      <h3>{tx ? (isQbo ? 'QuickBooks transaction' : 'Edit transaction') : titles[kind]}</h3>
+      {isQbo && <p className="lead">Pulled from QuickBooks. Change the amount or the date there; here you can only re-categorize it.</p>}
+      <div className="addgrid two">
+        <label>Amount $<input type="number" step="0.01" min="0" value={f.amount} onChange={set('amount')} autoFocus={!tx} disabled={isQbo} /></label>
+        <label>Date<input type="date" value={f.txn_date} onChange={set('txn_date')} disabled={isQbo} /></label>
+        <label>Who<input value={f.counterparty || ''} onChange={set('counterparty')} placeholder={f.kind === 'revenue' ? 'Client' : 'Vendor'} disabled={isQbo} /></label>
+        <label>Category<select value={cats.includes(f.category) ? f.category : '__custom'} onChange={(e) => setF({ ...f, category: e.target.value === '__custom' ? '' : e.target.value })}>{cats.map((c) => <option key={c}>{c}</option>)}<option value="__custom">Other…</option></select></label>
+        {!cats.includes(f.category) && <label>Category name<input value={f.category} onChange={set('category')} /></label>}
+        <label className="wide2">What<input value={f.description || ''} onChange={set('description')} placeholder="One line" disabled={isQbo} /></label>
+        {tx && f.kind !== 'owner_contribution' && !isQbo && <label>Type<select value={f.kind} onChange={set('kind')}><option value="expense">Expense</option><option value="capex">Equipment</option><option value="revenue">Income</option></select></label>}
+        {f.kind === 'revenue' && <label className="chk"><input type="checkbox" checked={f.paid !== false} onChange={set('paid')} /> paid</label>}
       </div>
-    </>
+      <div className="row">{tx && !isQbo && <button type="button" className="btn-xs" onClick={del}>Delete</button>}<div className="spacer" /><button type="button" className="btn-sm" onClick={onClose}>Cancel</button><button className="btn-sm primary" disabled={busy}>{tx ? 'Save' : 'Add'}</button></div>
+    </form></div>
   );
-}
-
-/* ---------- Recurring ---------- */
-function Recurring({ rec, reload, say }) {
-  const blank = { item: '', category: 'Software', amount: '', starts: ymd(new Date()).slice(0, 7) + '-01', ends: '', note: '' };
-  const [f, setF] = useState(blank);
-  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-  const add = async (e) => { e.preventDefault(); if (!f.item || !f.amount) return; const { error } = await supabase.from('fin_recurring').insert({ ...f, amount: Number(f.amount), ends: f.ends || null }); if (error) return say({ error: error.message }); setF(blank); reload(); };
-  const del = async (r) => { if (!window.confirm(`Remove ${r.item}?`)) return; await supabase.from('fin_recurring').delete().eq('id', r.id); reload(); };
-  const end = async (r) => { await supabase.from('fin_recurring').update({ ends: ymd(new Date()) }).eq('id', r.id); reload(); };
-  const k = monthKey(new Date()); const active = rec.filter((r) => r.starts.slice(0, 7) <= k && (!r.ends || r.ends.slice(0, 7) >= k));
-  return (
-    <>
-      <form className="card addrow" onSubmit={add}>
-        <h3>Add a recurring cost</h3>
-        <div className="addgrid">
-          <label className="wide">Item<input value={f.item} onChange={set('item')} placeholder="e.g. Dialer subscription" /></label>
-          <label>Category<select value={f.category} onChange={set('category')}>{CATS.map((c) => <option key={c}>{c}</option>)}</select></label>
-          <label>$ / month<input type="number" step="0.01" value={f.amount} onChange={set('amount')} /></label>
-          <label>Starts<input type="date" value={f.starts} onChange={set('starts')} /></label>
-          <label>Ends<input type="date" value={f.ends} onChange={set('ends')} /></label>
-          <label className="wide">Note<input value={f.note} onChange={set('note')} /></label>
-          <button className="btn-sm primary">Add</button>
-        </div>
-      </form>
-      <div className="card">
-        <div className="opsbar"><b>{money(active.reduce((s, r) => s + Number(r.amount), 0))} / month right now</b><div className="spacer" /><span className="sm">{active.length} active · {rec.length - active.length} ended or future</span></div>
-        <div className="tablewrap"><table className="ordertable fin">
-          <thead><tr><th>Item</th><th>Category</th><th className="n">$ / mo</th><th>From</th><th>To</th><th>Note</th><th /></tr></thead>
-          <tbody>{rec.map((r) => { const on = active.includes(r); return (
-            <tr key={r.id} className={on ? '' : 'muted'}>
-              <td><b>{r.item}</b></td><td className="sm">{r.category}</td><td className="n">{money(r.amount, 2)}</td><td className="sm">{r.starts.slice(0, 7)}</td><td className="sm">{r.ends ? r.ends.slice(0, 7) : 'open'}</td><td className="sm">{r.note}</td>
-              <td className="n" style={{ whiteSpace: 'nowrap' }}>{on && <button className="btn-xs" onClick={() => end(r)}>Cancelled today</button>} <button className="btn-xs" onClick={() => del(r)}>×</button></td>
-            </tr>
-          ); })}</tbody>
-        </table></div>
-      </div>
-    </>
-  );
-}
-
-/* ---------- Pipeline ---------- */
-const PSTAT = ['prospect', 'quoted', 'signed', 'live', 'lost'];
-function Pipeline({ pipe, reload, say }) {
-  const blank = { client: '', status: 'prospect', model: 'DTC', orders_mo: '', services_mo: '', probability: 0.5, start_month: '', notes: '' };
-  const [f, setF] = useState(blank);
-  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-  const add = async (e) => { e.preventDefault(); if (!f.client) return; const { error } = await supabase.from('fin_pipeline').insert({ ...f, orders_mo: f.orders_mo ? Number(f.orders_mo) : null, services_mo: Number(f.services_mo) || 0, probability: Number(f.probability), start_month: f.start_month ? f.start_month + '-01' : null }); if (error) return say({ error: error.message }); setF(blank); reload(); };
-  const upd = async (p, patch) => { await supabase.from('fin_pipeline').update(patch).eq('id', p.id); reload(); };
-  const del = async (p) => { if (!window.confirm(`Remove ${p.client}?`)) return; await supabase.from('fin_pipeline').delete().eq('id', p.id); reload(); };
-  const w = pipe.filter((p) => p.status !== 'lost').reduce((s, p) => s + Number(p.services_mo) * Number(p.probability), 0);
-  return (
-    <>
-      <form className="card addrow" onSubmit={add}>
-        <h3>Add a client or prospect</h3>
-        <div className="addgrid">
-          <label className="wide">Client<input value={f.client} onChange={set('client')} /></label>
-          <label>Status<select value={f.status} onChange={set('status')}>{PSTAT.map((s) => <option key={s}>{s}</option>)}</select></label>
-          <label>Model<input value={f.model} onChange={set('model')} placeholder="DTC / subscription / B2B" /></label>
-          <label>Orders / mo<input type="number" value={f.orders_mo} onChange={set('orders_mo')} /></label>
-          <label>Services $ / mo<input type="number" step="0.01" value={f.services_mo} onChange={set('services_mo')} /></label>
-          <label>Probability<input type="number" step="0.05" min="0" max="1" value={f.probability} onChange={set('probability')} /></label>
-          <label>Start month<input type="month" value={f.start_month} onChange={set('start_month')} /></label>
-          <label className="wide">Notes<input value={f.notes} onChange={set('notes')} /></label>
-          <button className="btn-sm primary">Add</button>
-        </div>
-      </form>
-      <div className="card">
-        <div className="opsbar"><b>{money(w)} / month weighted</b><span className="sm"> · services only; postage is on the client’s account</span><div className="spacer" /></div>
-        <div className="tablewrap"><table className="ordertable fin">
-          <thead><tr><th>Client</th><th>Status</th><th>Model</th><th className="n">Orders / mo</th><th className="n">Services $ / mo</th><th className="n">Prob.</th><th className="n">Weighted</th><th>Start</th><th>Notes</th><th /></tr></thead>
-          <tbody>{pipe.map((p) => (
-            <tr key={p.id} className={p.status === 'lost' ? 'muted' : ''}>
-              <td><b>{p.client}</b></td>
-              <td><select className="statusselect" value={p.status} onChange={(e) => upd(p, { status: e.target.value })}>{PSTAT.map((s) => <option key={s}>{s}</option>)}</select></td>
-              <td className="sm">{p.model}</td><td className="n">{num(p.orders_mo)}</td><td className="n">{money(p.services_mo)}</td>
-              <td className="n"><input className="cellnum" type="number" step="0.05" min="0" max="1" defaultValue={p.probability} onBlur={(e) => Number(e.target.value) !== Number(p.probability) && upd(p, { probability: Number(e.target.value) })} /></td>
-              <td className="n"><b>{money(Number(p.services_mo) * Number(p.probability))}</b></td>
-              <td className="sm">{p.start_month ? p.start_month.slice(0, 7) : '—'}</td><td className="sm">{p.notes}</td>
-              <td className="n"><button className="btn-xs" onClick={() => del(p)}>×</button></td>
-            </tr>
-          ))}</tbody>
-        </table></div>
-      </div>
-    </>
-  );
-}
-
-/* ---------- QuickBooks ---------- */
-function QuickBooks({ status, qbo, busy, onConnect, onSync, onDisconnect }) {
-  const s = status.qbo || {};
-  const pl = qbo.ProfitAndLoss ? plSummary(qbo.ProfitAndLoss.data) : null;
-  const bs = qbo.BalanceSheet ? pickRows(qbo.BalanceSheet.data, /^(Total Bank Accounts|Total Accounts Receivable|Total Current Assets|Total Assets|Total Liabilities|Total Equity|Total Credit Cards)$/) : [];
-  const ar = qbo.AgedReceivables ? pickRows(qbo.AgedReceivables.data, /^TOTAL$/i) : [];
-  const tl = qbo.TransactionList ? flatRows(qbo.TransactionList.data).slice(0, 60) : [];
-  return (
-    <>
-      <div className="card">
-        <div className="opsbar">
-          <div>
-            <h3 style={{ margin: 0 }}>QuickBooks Online</h3>
-            <span className="sm">{s.connected_at ? <>Connected to <b>{s.company_name || s.realm_id}</b> · last pull {ago(s.last_sync_at)}</> : status.qbo_keys_set ? 'App keys saved — connect to pull your books.' : 'Paste the Intuit app keys under Settings first.'}</span>
-            {s.last_error && <div className="msg err" style={{ marginTop: 8 }}>{s.last_error}</div>}
-          </div>
-          <div className="spacer" />
-          {!s.connected_at && <button className="btn-sm primary" disabled={busy === 'qbo' || !status.qbo_keys_set} onClick={onConnect}>Connect QuickBooks</button>}
-          {s.connected_at && <><button className="btn-sm primary" disabled={busy === 'qbo'} onClick={onSync}>{busy === 'qbo' ? 'Pulling…' : 'Pull latest'}</button> <button className="btn-sm" disabled={busy === 'qbo'} onClick={onDisconnect}>Disconnect</button></>}
-        </div>
-        <p className="hint">What gets pulled: Profit & Loss by month (this year), Balance Sheet (today), the last 90 days of transactions, and who owes you (aged receivables). The Ledger above stays ShipBay’s own book of record until QuickBooks is clean; use this to check the two agree.</p>
-      </div>
-      {pl && (
-        <div className="card">
-          <h3>Profit & Loss by month (QuickBooks)</h3>
-          <div className="tablewrap"><table className="ordertable fin">
-            <thead><tr><th /> {pl.cols.map((c) => <th key={c} className="n">{c}</th>)}</tr></thead>
-            <tbody>{pl.rows.map((r) => <tr key={r.label}><td><b>{r.label}</b></td>{r.vals.map((v, i) => <td key={i} className={`n ${v < 0 ? 'neg' : ''}`}>{money(v)}</td>)}</tr>)}</tbody>
-          </table></div>
-        </div>
-      )}
-      {(bs.length > 0 || ar.length > 0) && (
-        <div className="card">
-          <h3>Balance sheet (today)</h3>
-          <table className="ordertable fin"><tbody>{bs.map((r) => <tr key={r[0]}><td>{r[0]}</td><td className="n">{money(r[1])}</td></tr>)}{ar.map((r) => <tr key="ar"><td>Owed to you (all invoices)</td><td className="n">{money(r[r.length - 1])}</td></tr>)}</tbody></table>
-        </div>
-      )}
-      {tl.length > 0 && (
-        <div className="card">
-          <h3>Last 90 days of QuickBooks transactions</h3>
-          <div className="tablewrap"><table className="ordertable fin">
-            <thead><tr><th>Date</th><th>Type</th><th>Name</th><th>Memo</th><th>Account</th><th className="n">Amount</th></tr></thead>
-            <tbody>{tl.map((r, i) => <tr key={i}><td className="sm">{r[0]}</td><td className="sm">{r[1]}</td><td>{r[3]}</td><td className="sm">{r[4]}</td><td className="sm">{r[5]}</td><td className={`n ${Number(r[6]) < 0 ? 'neg' : ''}`}>{money(r[6], 2)}</td></tr>)}</tbody>
-          </table></div>
-        </div>
-      )}
-    </>
-  );
-}
-// QBO report JSON: Columns.Column[].ColTitle, Rows.Row[] nested with Header/Rows/Summary; Summary.ColData[] holds the totals.
-function walk(rows, out) { for (const r of rows || []) { if (r.ColData) out.push(r.ColData.map((c) => c.value)); if (r.Summary) out.push(r.Summary.ColData.map((c) => c.value)); if (r.Rows) walk(r.Rows.Row, out); } return out; }
-function flatRows(rep) { return walk(rep?.Rows?.Row, []).filter((r) => r[0] && !/^Total/i.test(r[0])); }
-function pickRows(rep, re) { return walk(rep?.Rows?.Row, []).filter((r) => re.test(r[0])).map((r) => [r[0], Number(r[r.length - 1]) || 0]); }
-function plSummary(rep) {
-  const cols = (rep?.Columns?.Column || []).slice(1).map((c) => c.ColTitle);
-  const want = ['Total Income', 'Total Cost of Goods Sold', 'Gross Profit', 'Total Expenses', 'Net Operating Income', 'Net Income'];
-  const all = walk(rep?.Rows?.Row, []);
-  const rows = want.map((w) => all.find((r) => r[0] === w)).filter(Boolean).map((r) => ({ label: r[0], vals: r.slice(1).map((v) => Number(v) || 0) }));
-  return { cols, rows };
 }

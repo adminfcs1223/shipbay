@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react';
 import { ownerFn, getToken, setToken } from './util';
 import Financials from './Financials';
 import Sales from './Sales';
+import Strategies from './Strategies';
 
-const TABS = [['fin', 'Financials'], ['sales', 'Sales'], ['settings', 'Settings']];
+const TABS = [['fin', 'Financials'], ['sales', 'Sales'], ['strat', 'Strategies'], ['settings', 'Settings']];
 
 export default function Owner({ me }) {
   const [status, setStatus] = useState(null);     // from action:status
@@ -27,9 +28,9 @@ export default function Owner({ me }) {
 
   const lock = () => { setToken(null); refresh(); };
   return (
-    <>
+    <div className="owner">
       <div className="pagehead">
-        <div><h1>Owner<span className="dot">.</span></h1><p className="sub">Only you can open this. Money on the left side of your head, leads on the right.</p></div>
+        <div><h1>Owner<span className="dot">.</span></h1><p className="sub">Money, leads and the plays behind them. Only you can open this.</p></div>
         <div className="glance">
           <div><small>QuickBooks</small><b>{status.qbo?.connected_at ? <span className="statuspill ok">Connected</span> : <span className="statuspill muted">Not connected</span>}</b></div>
           <div><small>Smartlead</small><b>{status.smartlead_key_set ? <span className="statuspill ok">Key saved</span> : <span className="statuspill muted">No key</span>}</b></div>
@@ -40,8 +41,9 @@ export default function Owner({ me }) {
       <div className="card ownertabs"><div className="tabs">{TABS.map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}</div></div>
       {tab === 'fin' && <Financials status={status} refreshStatus={refresh} />}
       {tab === 'sales' && <Sales me={me} status={status} refreshStatus={refresh} />}
+      {tab === 'strat' && <Strategies />}
       {tab === 'settings' && <Settings status={status} refreshStatus={refresh} />}
-    </>
+    </div>
   );
 }
 
@@ -88,14 +90,14 @@ function Settings({ status, refreshStatus }) {
       {msg && <div className={`msg ${msg.kind} flash span2`}>{msg.text}<button onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
       <div className="card">
         <h3>QuickBooks app keys</h3>
-        <p className="hint">One-time setup so the Financials tab can pull your real QuickBooks numbers. In the Intuit developer portal create an app (QuickBooks Online Accounting scope), set its redirect URI to <code className="mono">https://dashboard.shipbay3pl.com/oauth/qbo</code>, then paste its production Client ID and Client Secret here. Status: <b>{status.qbo_keys_set ? 'keys saved' : 'not set'}</b>.</p>
+        <p className="hint">Production Client ID + Secret from the Intuit developer app (redirect URI <code className="mono">https://dashboard.shipbay3pl.com/oauth/qbo</code>). {status.qbo_keys_set ? 'Keys saved.' : 'Not set yet.'}{status.qbo?.connected_at ? ` Connected to ${status.qbo.company_name || 'QuickBooks'}.` : ''}</p>
         <div className="field"><label>Client ID</label><input value={qid} onChange={(e) => setQid(e.target.value)} placeholder={status.qbo_keys_set ? '•••••••• (saved — paste to replace)' : ''} autoComplete="off" /></div>
         <div className="field"><label>Client Secret</label><input type="password" value={qsec} onChange={(e) => setQsec(e.target.value)} placeholder={status.qbo_keys_set ? '•••••••• (saved)' : ''} autoComplete="off" /></div>
-        <div className="row"><button className="btn-sm primary" disabled={busy === 'QBO_CLIENT_ID' || (!qid && !qsec)} onClick={async () => { if (qid) await saveSecret('QBO_CLIENT_ID', qid, 'Client ID'); if (qsec) await saveSecret('QBO_CLIENT_SECRET', qsec, 'Client Secret'); setQid(''); setQsec(''); }}>Save keys</button></div>
+        <div className="row"><button className="btn-sm primary" disabled={busy === 'QBO_CLIENT_ID' || (!qid && !qsec)} onClick={async () => { if (qid) await saveSecret('QBO_CLIENT_ID', qid, 'Client ID'); if (qsec) await saveSecret('QBO_CLIENT_SECRET', qsec, 'Client Secret'); setQid(''); setQsec(''); }}>Save keys</button><div className="spacer" />{status.qbo?.connected_at && <button className="btn-sm" onClick={async () => { if (!window.confirm('Disconnect QuickBooks?')) return; const r = await ownerFn({ action: 'qbo_disconnect' }); say(r, 'QuickBooks disconnected.'); }}>Disconnect QuickBooks</button>}</div>
       </div>
       <div className="card">
         <h3>Smartlead</h3>
-        <p className="hint">API key from Smartlead → Settings → API. Campaign IDs comma-separated (the cold-email campaign is 4039101). Status: <b>{status.smartlead_key_set ? 'key saved' : 'no key'}</b>.</p>
+        <p className="hint">API key from Smartlead → Settings → API. Campaign IDs comma-separated. {status.smartlead_key_set ? 'Key saved.' : 'No key yet.'}</p>
         <div className="field"><label>API key</label><input type="password" value={slk} onChange={(e) => setSlk(e.target.value)} placeholder={status.smartlead_key_set ? '•••••••• (saved — paste to replace)' : ''} autoComplete="off" /></div>
         <div className="field"><label>Campaign IDs</label><input value={slc} onChange={(e) => setSlc(e.target.value)} placeholder="4039101" /></div>
         <div className="row"><button className="btn-sm primary" disabled={!!busy} onClick={async () => { if (slk) await saveSecret('SMARTLEAD_API_KEY', slk, 'Smartlead key'); if (slc && slc !== status.smartlead_campaigns) await saveSecret('SMARTLEAD_CAMPAIGNS', slc, 'Campaigns'); setSlk(''); }}>Save</button></div>

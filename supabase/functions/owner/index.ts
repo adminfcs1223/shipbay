@@ -89,6 +89,16 @@ async function qboGet(tok: any, path: string) {
 function ymd(d: Date) { return d.toISOString().slice(0, 10); }
 
 // ---------- Smartlead ----------
+// 'SL-A1-selfship-NJmetro-v1' → 'A1'
+const listCode = (v: unknown) => { const m = String(v || '').match(/^SL-([A-Z]\d+)-/); return m ? m[1] : (String(v || '') || null); };
+// reply HTML → readable text, quoted history cut off
+function replyText(html: string) {
+  let t = String(html || '').replace(/<(style|script)[\s\S]*?<\/\1>/gi, '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|tr|li|h\d)>/gi, '\n').replace(/<[^>]+>/g, '');
+  t = t.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\r/g, '');
+  const lines = t.split('\n').map((l) => l.trimEnd());
+  const cut = lines.findIndex((l, i) => /^>/.test(l.trim()) || /^On .{5,160}wrote:?$/.test(l.trim()) || /^-{2,}\s*Original Message/i.test(l.trim()) || (/^From:/.test(l.trim()) && i > 0));
+  return (cut > 0 ? lines.slice(0, cut) : lines).join('\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000);
+}
 async function smartleadSync(uid: string) {
   const key = await secret('SMARTLEAD_API_KEY'); if (!key) return { error: 'Add the Smartlead API key under Owner → Settings first.' };
   const campaigns = (await secret('SMARTLEAD_CAMPAIGNS') || '4039101').split(',').map((s) => s.trim()).filter(Boolean);
@@ -103,12 +113,13 @@ async function smartleadSync(uid: string) {
       const j = await (await fetch(`${base}/campaigns/${cid}/leads?api_key=${key}&offset=${off}&limit=100`)).json().catch(() => ({}));
       const d = j?.data || []; leads.push(...d); if (d.length < 100) break;
     }
-    const byEmail = new Map<string, string>();
+    const byEmail = new Map<string, string>(); const slId = new Map<string, string>();
     for (const x of leads) {
       const l = x.lead || {}; const email = String(l.email || '').toLowerCase(); if (!email) continue;
+      if (l.id) slId.set(email, String(l.id));
       const domain = String(l.website || '').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '').toLowerCase() || null;
       const cf = l.custom_fields || {};
-      const row: any = { source: 'cold_email', filter_id: cf.list_source || null, company: l.company_name || null, domain, contact_name: [l.first_name, l.last_name].filter(Boolean).join(' ') || null, email, phone: l.phone_number || null, title: cf.title || null, orders_est: cf.orders_est || null, in_email: true };
+      const row: any = { source: 'cold_email', filter_id: listCode(cf.list_source), company: l.company_name || null, domain, contact_name: [l.first_name, l.last_name].filter(Boolean).join(' ') || null, email, phone: l.phone_number || null, title: cf.title || null, orders_est: cf.orders_est || null, in_email: true };
       // find existing by domain then email
       let ex: any = null;
       if (domain) ({ data: ex } = await admin.from('sales_leads').select('id, in_calls, stage').ilike('domain', domain).maybeSingle());
@@ -130,9 +141,20 @@ async function smartleadSync(uid: string) {
       const bounced = s.is_bounced === true || s.is_bounced === 'true';
       const bounceBack = !!rt && (bounced || rt.getTime() - sent.getTime() < 60000);
       const prev = keep.get(s.stats_id);
-      return { external_id: s.stats_id, lead_id: byEmail.get(String(s.lead_email).toLowerCase()) || null, lead_email: s.lead_email, lead_name: s.lead_name, campaign: label, step: s.sequence_number, variant: String(s.seq_variant_id), subject: s.email_subject, sent_at: sent.toISOString(), opened: !!s.open_time, open_count: Number(s.open_count || 0), replied: !!rt && !bounceBack, bounced, reply_type: prev ?? (rt && tags[String(s.lead_email).toLowerCase()]) ?? (bounceBack ? 'Bounce-back' : null) };
+      return { external_id: s.stats_id, lead_id: byEmail.get(String(s.lead_email).toLowerCase()) || null, sl_lead_id: slId.get(String(s.lead_email).toLowerCase()) || (s.lead_id ? String(s.lead_id) : null), lead_email: s.lead_email, lead_name: s.lead_name, campaign: label, step: s.sequence_number, variant: String(s.seq_variant_id), subject: s.email_subject, sent_at: sent.toISOString(), opened: !!s.open_time, open_count: Number(s.open_count || 0), replied: !!rt && !bounceBack, bounced, reply_type: prev ?? (rt && tags[String(s.lead_email).toLowerCase()]) ?? (bounceBack ? 'Bounce-back' : null) };
     });
     for (let i = 0; i < rows.length; i += 200) await admin.from('sales_email_sends').upsert(rows.slice(i, i + 200), { onConflict: 'external_id' });
+    // reply bodies: one message-history call per lead that replied and has no text stored yet (max 40 per sync)
+    const { data: need } = await admin.from('sales_email_sends').select('id, sl_lead_id, lead_email, sent_at').eq('campaign', label).eq('replied', true).is('reply_body', null).not('sl_lead_id', 'is', null).limit(40);
+    let bodies = 0;
+    for (const n of need || []) {
+      try {
+        const h = await (await fetch(`${base}/campaigns/${cid}/leads/${n.sl_lead_id}/message-history?api_key=${key}`)).json();
+        const sentAt = new Date(n.sent_at).getTime();
+        const rep = (h?.history || []).filter((m: any) => m.type === 'REPLY' && new Date(m.time).getTime() >= sentAt - 60000).sort((a: any, b: any) => new Date(a.time).getTime() - new Date(b.time).getTime())[0];
+        if (rep) { await admin.from('sales_email_sends').update({ reply_body: replyText(rep.email_body), reply_subject: rep.subject || null, reply_at: rep.time ? new Date(rep.time).toISOString() : null }).eq('id', n.id); bodies++; }
+      } catch { /* next */ }
+    }
     // stages: contacted if sent, replied if a real reply and not already further along
     const touched = [...new Set(rows.map((r) => r.lead_id).filter(Boolean))] as string[];
     for (let i = 0; i < touched.length; i += 200) await admin.from('sales_leads').update({ stage: 'contacted', last_touch_at: new Date().toISOString() }).in('id', touched.slice(i, i + 200)).eq('stage', 'new');
@@ -140,10 +162,38 @@ async function smartleadSync(uid: string) {
     if (replied.length) await admin.from('sales_leads').update({ stage: 'replied' }).in('id', replied).in('stage', ['new', 'contacted']);
     const neg = [...new Set(rows.filter((r) => r.reply_type === 'Negative').map((r) => r.lead_id).filter(Boolean))] as string[];
     if (neg.length) await admin.from('sales_leads').update({ stage: 'dnc' }).in('id', neg);
-    out[label] = { leads: leads.length, sends: rows.length, analytics: await (await fetch(`${base}/campaigns/${cid}/analytics?api_key=${key}`)).json().catch(() => null) };
+    out[label] = { leads: leads.length, sends: rows.length, reply_bodies: bodies, analytics: await (await fetch(`${base}/campaigns/${cid}/analytics?api_key=${key}`)).json().catch(() => null) };
   }
   await setSetting('smartlead_last_sync', { at: new Date().toISOString(), by: uid, out });
   return { ok: true, campaigns: out };
+}
+
+// QuickBooks TransactionList → fin_transactions (source 'qbo'). Invoices/sales receipts = money in; expenses/checks/bills/card charges = money out.
+// Payments, bill payments, transfers, deposits and journal entries are skipped (they move money, they don't earn or spend it).
+const QBO_IN = new Set(['Invoice', 'Sales Receipt']);
+const QBO_OUT = new Set(['Expense', 'Check', 'Bill', 'Credit Card Expense', 'Cash Expense', 'Purchase', 'Credit Card Charge']);
+const QBO_REFUND = new Set(['Refund Receipt', 'Credit Memo']);
+async function qboToLedger(rep: any) {
+  const cols: string[] = (rep?.Columns?.Column || []).map((c: any) => c.ColType || c.ColTitle);
+  const ix = (n: string) => cols.findIndex((c) => c === n);
+  const [iDate, iType, iDoc, iName, iMemo, iAcct, iOther, iAmt] = ['tx_date', 'txn_type', 'doc_num', 'name', 'memo', 'account_name', 'other_account', 'subt_nat_amount'].map(ix);
+  const out: any[] = [];
+  const walk = (rows: any[]) => { for (const r of rows || []) { if (r.ColData) out.push(r.ColData); if (r.Rows?.Row) walk(r.Rows.Row); } };
+  walk(rep?.Rows?.Row);
+  const txns: any[] = [];
+  for (const c of out) {
+    const v = (i: number) => (i >= 0 ? String(c[i]?.value ?? '') : '');
+    const type = v(iType); const amt = Math.abs(Number(v(iAmt)) || 0); if (!amt) continue;
+    let kind: string; let category = v(iOther) && v(iOther) !== '-Split-' ? v(iOther) : v(iAcct);
+    if (QBO_IN.has(type)) { kind = 'revenue'; if (!category || category === v(iAcct)) category = 'Services revenue'; }
+    else if (QBO_OUT.has(type)) kind = 'expense';
+    else if (QBO_REFUND.has(type)) { kind = 'expense'; category = 'Refunds'; }
+    else continue;
+    const id = c[iDate]?.id || c[iDoc]?.id || c[iName]?.id || `${v(iDate)}|${type}|${v(iDoc)}|${v(iName)}|${amt}`;
+    txns.push({ txn_date: v(iDate), kind, category: category || 'Other', counterparty: v(iName) || null, description: [v(iMemo), v(iDoc) ? `#${v(iDoc)}` : ''].filter(Boolean).join(' ') || type, amount: amt, paid: true, source: 'qbo', external_id: `qbo:${type}:${id}`, account: v(iAcct) || null, txn_type: type });
+  }
+  for (let i = 0; i < txns.length; i += 200) await admin.from('fin_transactions').upsert(txns.slice(i, i + 200), { onConflict: 'external_id', ignoreDuplicates: false });
+  return txns.length;
 }
 
 Deno.serve(async (req) => {
@@ -231,8 +281,9 @@ Deno.serve(async (req) => {
       const now = new Date(); const y = now.getFullYear();
       const pl = await qboGet(tok, `/reports/ProfitAndLoss?start_date=${y}-01-01&end_date=${ymd(now)}&summarize_column_by=Month&accounting_method=Accrual`);
       const bs = await qboGet(tok, `/reports/BalanceSheet?start_date=${ymd(now)}&end_date=${ymd(now)}&accounting_method=Accrual`);
-      const since = new Date(now.getTime() - 90 * 86400000);
-      const tl = await qboGet(tok, `/reports/TransactionList?start_date=${ymd(since)}&end_date=${ymd(now)}&columns=tx_date,txn_type,doc_num,name,memo,account_name,subt_nat_amount`);
+      const since = new Date(y, 0, 1);
+      const tl = await qboGet(tok, `/reports/TransactionList?start_date=${ymd(since)}&end_date=${ymd(now)}&columns=tx_date,txn_type,doc_num,name,memo,account_name,other_account,subt_nat_amount`);
+      const imported = await qboToLedger(tl);
       const ar = await qboGet(tok, `/reports/AgedReceivables?report_date=${ymd(now)}`).catch(() => null);
       const rows = [
         { report: 'ProfitAndLoss', period_start: `${y}-01-01`, period_end: ymd(now), data: pl },
@@ -242,7 +293,7 @@ Deno.serve(async (req) => {
       if (ar) rows.push({ report: 'AgedReceivables', period_start: ymd(now), period_end: ymd(now), data: ar });
       await admin.from('fin_qbo_reports').insert(rows);
       await admin.from('fin_qbo_status').update({ last_sync_at: new Date().toISOString(), last_error: null }).eq('id', 1);
-      return json({ ok: true, reports: rows.map((r) => r.report) });
+      return json({ ok: true, reports: rows.map((r) => r.report), imported });
     } catch (e) { await admin.from('fin_qbo_status').update({ last_error: String(e).slice(0, 300) }).eq('id', 1); return json({ error: String(e) }, 500); }
   }
   return json({ error: 'unknown action' }, 400);

@@ -68,14 +68,12 @@ export const HELP = {
   documents: { title: 'Documents', what: 'Everything you’ve sent us and its review status.', steps: ['Pending = we have it and are reviewing. Approved = done. Rejected = see the note and re-upload from Overview.'] },
   owner: {
     title: 'the Owner area',
-    what: 'Your private view: the company’s money and every lead, behind a second passphrase.',
+    what: 'Your money, your leads and the plays behind them — behind a second passphrase.',
     steps: [
-      'Financials: tiles up top are the four numbers to know — burn (what a month costs with zero orders), break-even (services you must bill to cover it), cash, and what you’ve put in. The Ledger is every dollar; add a line whenever money moves.',
-      'Connect QuickBooks once (Settings → paste the app keys, then Financials → Connect). “Pull latest” refreshes the P&L, balance sheet and recent transactions so you can check they match the Ledger.',
-      'Sales → Master leads is every company from every channel. Replies and booked calls float to the top. Click a row to edit it or see its call and email history.',
-      'Sales → Email syncs the Smartlead campaign. Tag each reply Positive / Negative — that’s the only honest measure of the campaign.',
-      'Sales → Calls is the dialer: Start session, Start call, tap the outcome. It times you, grades each list, and parks a lead after 4 tries with no human.',
-      'Sales → Third party is where Fulfill.com, fulfilment.com, agency and referral leads go, with their costs, so every channel is judged by cost per signed client.',
+      'Financials: pick a month. Money in, money out, bottom line. The pie shows where it went; the list underneath is every transaction, yours and QuickBooks’. Add an expense or income with the buttons.',
+      'Sales → Overview is the command center: the funnel, who’s waiting on you, and how each channel and list is doing. All leads, Email, Calls and Third party are the detail behind it.',
+      'Email shows each reply in full — tag it Positive or Negative. Calls is the dialer. Third party is where Fulfill.com and partner leads go.',
+      'Strategies: one card per play with its live numbers and a log. Add a note when something changes.',
     ],
   },
 };
