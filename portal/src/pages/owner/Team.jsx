@@ -196,11 +196,7 @@ export default function Team() {
     <>
       {msg && <div className={`msg ${msg.kind} flash`}>{msg.text}<button onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
       <div className="opsbar"><span className="seg tight">{RANGES.map(([k, l]) => <button key={k} className={range === k ? 'on' : ''} onClick={() => setRange(k)}>{l}</button>)}</span><div className="spacer" /><span className="sm">Team: <b>{num(tot.dials)}</b> dials · <b>{num(tot.booked)}</b> booked · <b>{num(tot.answered)}</b> replies answered · <b>{num(tot.won)}</b> won · close rate <b>{teamClose == null ? '—' : pct(teamClose)}</b></span></div>
-      <div className="card"><div className="cardhead"><h3>Scoreboard</h3><span className="sm">{RANGES.find((r) => r[0] === range)[1].toLowerCase()}</span></div><TeamTable rows={rows} calls={d.calls} /></div>
-      <div className="ownergrid">
-        <TrendCard title="Dials per month" series={d.people.filter((p) => p.is_sales || p.is_owner).map((p) => ({ name: name(p), points: byMonth(d.calls.filter((c) => c.by_user === p.id), (c) => c.started_at) }))} />
-        <TrendCard title="Calls booked per month" series={d.people.filter((p) => p.is_sales || p.is_owner).map((p) => ({ name: name(p), points: byMonth(d.calls.filter((c) => c.by_user === p.id && c.outcome === 'booked'), (c) => c.started_at) }))} />
-      </div>
+      <div className="card"><div className="cardhead"><h3>Scoreboard</h3><span className="sm">{RANGES.find((r) => r[0] === range)[1].toLowerCase()}</span></div><TeamTable rows={rows} /></div>
       <div className="ownergrid three">
         <RepBars title="Dials" rows={rows} get={(r) => r.dials} />
         <RepBars title="Calls booked" rows={rows} get={(r) => r.booked} color="#1E9E6F" />

@@ -4,8 +4,8 @@
 // `rep` mode scopes everything to the signed-in salesperson (RLS enforces it; the UI just hides owner controls).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../lib';
-import { useTeamData, teamStats, TeamTable, useGoals, goalsFor, GoalBars, bonusFor, bonusProgress, BonusBar, BONUS_METRICS, TrendCard, Spark } from './Team';
-import { ownerFn, fetchAll, money, pct, num, ago, mmss, hhmm, STAGES, stageLabel, stageClass, parseCsv, guessColumns, byMonth } from './util';
+import { useTeamData, teamStats, TeamTable, useGoals, goalsFor, GoalBars, bonusFor, bonusProgress, BonusBar, BONUS_METRICS } from './Team';
+import { ownerFn, fetchAll, money, pct, num, ago, mmss, hhmm, STAGES, stageLabel, stageClass, parseCsv, guessColumns } from './util';
 
 const SUB = [['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['calendar', 'Calendar'], ['bonus', 'Bonus']];
 export const LIST_NAMES = { A1: 'Self-ship brands · NJ metro', A2: 'Already on a 3PL · NJ metro', A3: 'Self-ship brands · Northeast', A4: 'Shopify Plus upgrades', B1: 'Founder-run · NJ metro', C1: 'Amazon sellers · Northeast', C2: 'Q4 overflow', X0: 'Control group' };
@@ -124,15 +124,11 @@ function Overview({ me, rep, leads, pool, sends, sources, counts, go, openLead, 
         <div className="card">
           <div className="cardhead"><h3>Channel leaderboard</h3><span className="sm">ranked by won, then booked, then reply rate</span></div>
           <div className="tablewrap"><table className="ordertable fin">
-            <thead><tr><th>#</th><th>Channel</th><th className="n">Leads</th><th className="n">Contacted</th><th className="n">Reply %</th><th className="n">Booked</th><th className="n">Won</th><th>3-mo touched</th></tr></thead>
-            <tbody>{byChannel.map((r, i) => <tr key={r.k} className={i === 0 && r.contacted ? 'hl' : ''}><td className="mono">{i + 1}</td><td><b>{r.label}</b></td><td className="n">{num(r.leads)}</td><td className="n">{num(r.contacted)}</td><td className="n">{pct(r.replyRate, 1)}</td><td className="n">{num(r.booked)}</td><td className="n">{num(r.signed)}</td><td><Spark points={byMonth(leads.filter((l) => l.source === r.k && l.stage !== 'new'), (l) => l.last_touch_at)} /></td></tr>)}</tbody>
+            <thead><tr><th>#</th><th>Channel</th><th className="n">Leads</th><th className="n">Contacted</th><th className="n">Reply %</th><th className="n">Booked</th><th className="n">Won</th></tr></thead>
+            <tbody>{byChannel.map((r, i) => <tr key={r.k} className={i === 0 && r.contacted ? 'hl' : ''}><td className="mono">{i + 1}</td><td><b>{r.label}</b></td><td className="n">{num(r.leads)}</td><td className="n">{num(r.contacted)}</td><td className="n">{pct(r.replyRate, 1)}</td><td className="n">{num(r.booked)}</td><td className="n">{num(r.signed)}</td></tr>)}</tbody>
           </table></div>
         </div>
       </div>}
-      <div className="ownergrid">
-        <TrendCard title="Activity" series={[{ name: 'Dials', points: byMonth(calls, (c) => c.started_at) }, ...(rep ? [] : [{ name: 'Emails sent', points: byMonth(sends, (e) => e.sent_at) }]), { name: 'Replies', points: byMonth(sends.filter((e) => e.replied), (e) => e.reply_at || e.sent_at) }, { name: 'Calls booked', points: byMonth(calls.filter((c) => c.outcome === 'booked'), (c) => c.started_at) }]} />
-        <TrendCard title="Deals" series={[{ name: 'New opportunities', points: byMonth(leads.filter((l) => l.stage !== 'new'), (l) => l.last_touch_at || l.created_at) }, { name: 'Won', points: byMonth(leads.filter((l) => l.stage === 'signed'), (l) => l.won_at || l.last_touch_at) }, { name: 'Lost', points: byMonth(leads.filter((l) => l.stage === 'lost'), (l) => l.last_touch_at) }]} />
-      </div>
       {!rep && <OwnerTeamBlock />}
       <div className="card">
         <div className="cardhead"><h3>Funnel</h3><span className="sm">{rep ? 'your leads' : 'every lead, every channel'}</span></div>
@@ -212,10 +208,6 @@ function Pipeline({ me, rep, leads, sources, people, reload, say, openLead }) {
         <span className="sm">Open pipeline <b>{money(openVal)}/mo</b> · Won <b>{money(wonVal)}/mo</b></span>
         <button className="btn-sm primary" onClick={() => setAdding(true)}>+ Add opportunity</button>
       </div>
-      <div className="ownergrid">
-        <TrendCard title="Pipeline movement" series={[{ name: 'Booked', points: byMonth(pool.filter((l) => ['call_booked', 'quoted', 'signed'].includes(l.stage)), (l) => l.last_touch_at) }, { name: 'Quoted', points: byMonth(pool.filter((l) => ['quoted', 'signed'].includes(l.stage)), (l) => l.last_touch_at) }, { name: 'Won', points: byMonth(pool.filter((l) => l.stage === 'signed'), (l) => l.won_at || l.last_touch_at) }]} />
-        <TrendCard title="Won value per month" series={[{ name: 'Won $/mo', money: true, color: '#1E9E6F', points: byMonth(pool.filter((l) => l.stage === 'signed'), (l) => l.won_at || l.last_touch_at, 3, (l) => l.deal_value) }]} />
-      </div>
       <div className="kanban">
         {[...COLS, ['lost', 'Lost']].map(([k, label]) => { const items = col(k); const shown = items.slice(0, more[k] ? 1000 : 80); const val = items.reduce((a, l) => a + Number(l.deal_value || 0), 0); return (
           <div key={k} className={`kcol ${k} ${over === k ? 'over' : ''}`} onDragOver={(e) => { e.preventDefault(); setOver(k); }} onDragLeave={() => setOver(null)} onDrop={() => { setOver(null); move(drag, k); setDrag(null); }}>
@@ -243,7 +235,6 @@ function Pipeline({ me, rep, leads, sources, people, reload, say, openLead }) {
 
 /* =================== Master =================== */
 function Master({ me, rep, leads, sources, reload, say, openLead }) {
-  const contactsTrend = <TrendCard title="Contacts" series={[{ name: 'Added', points: byMonth(leads, (l) => l.created_at) }, { name: 'First touched', points: byMonth(leads.filter((l) => l.stage !== 'new'), (l) => l.last_touch_at) }, { name: 'Replied', points: byMonth(leads.filter((l) => ['replied', 'call_booked', 'quoted', 'signed'].includes(l.stage)), (l) => l.last_touch_at) }]} />;
   const [q, setQ] = useState(''); const [src, setSrc] = useState(''); const [stage, setStage] = useState(''); const [list, setList] = useState(''); const [phoneOnly, setPhoneOnly] = useState(false); const [showOut, setShowOut] = useState(false); const [pushing, setPushing] = useState(false);
   const [adding, setAdding] = useState(false); const [importing, setImporting] = useState(false);
   const rows = useMemo(() => leads.filter((l) => (!src || l.source === src) && (stage ? l.stage === stage : (showOut || (l.stage !== 'dnc' && l.stage !== 'lost'))) && (!list || l.filter_id === list) && (!phoneOnly || l.phone)
@@ -271,7 +262,6 @@ function Master({ me, rep, leads, sources, reload, say, openLead }) {
         {!rep && <button className="btn-sm" onClick={() => setImporting(true)}>Import CSV</button>}
         <button className="btn-sm primary" onClick={() => setAdding(true)}>+ Add lead</button>
       </div>
-      {contactsTrend}
       <div className="card">
         <div className="tablewrap"><table className="ordertable leads">
           <thead><tr><th>Company</th><th>Contact</th><th>Phone</th><th>Where</th><th className="n">Est. sales / mo</th><th>Channel · list</th><th>Stage</th><th className="n">Tries</th><th>Last touch</th></tr></thead>
@@ -452,7 +442,6 @@ function Conversations({ me, rep, leads, sends, status, people, reload, refreshS
         <div className="spacer" />
         {!rep && <button className="btn-sm" disabled={busy || !status?.smartlead_key_set} onClick={sync}>{busy ? 'Syncing…' : 'Sync'}</button>}
       </div>
-      <TrendCard title="Replies" series={[{ name: 'Replies', points: byMonth(replies, (r) => r.reply_at || r.sent_at) }, { name: 'Positive', color: '#1E9E6F', points: byMonth(replies.filter((r) => r.reply_type === 'Positive'), (r) => r.reply_at || r.sent_at) }, { name: 'Stopped / negative', color: '#B03A33', points: byMonth(replies.filter((r) => r.reply_type === 'Negative'), (r) => r.reply_at || r.sent_at) }]} />
       <div className="replies">
         {list.length === 0 && <div className="card"><div className="empty">{show === 'unread' ? 'Nothing unread.' : 'No replies here.'}</div></div>}
         {list.map((s) => { const l = leads.find((x) => x.id === s.lead_id); const unreadRow = !s.read_at; return (
@@ -703,16 +692,15 @@ function Calls({ me, rep, leads, people, reload, say, openLead }) {
         </div>
         <div className="scorecol">
           <div className="card"><h3>Today</h3><Board s={board.today} time={board.timeToday} /></div>
-          <TrendCard title="Dials & bookings" series={[{ name: 'Dials', points: byMonth(calls, (c) => c.started_at) }, { name: 'Connected', color: '#3B82F6', points: byMonth(calls.filter((c) => CONNECT.has(c.outcome)), (c) => c.started_at) }, { name: 'Booked', color: '#1E9E6F', points: byMonth(calls.filter((c) => c.outcome === 'booked'), (c) => c.started_at) }]} />
           <div className="card"><h3>All time</h3><Board s={board.all} time={board.timeAll} /></div>
         </div>
       </div>
       <div className="card">
         <h3>Lists</h3>
         <p className="hint">Grade = booked calls per 100 dials (A ≥ 3 · B 1.5–3 · C 0.5–1.5 · D below). Graded after 30 dials.</p>
-        <table className="ordertable fin"><thead><tr><th>List</th><th className="n">Dials</th><th className="n">Pick-up</th><th className="n">Connect</th><th className="n">Booked</th><th className="n">Booked / 100</th><th className="n">Bad numbers</th><th className="n">Min / connect</th><th>Grade</th><th>3-mo dials</th></tr></thead>
-          <tbody>{board.byList.map((r) => <tr key={r.k}><td><b className="mono">{r.k}</b>{LIST_NAMES[r.k] && <span className="sm"> {LIST_NAMES[r.k]}</span>}</td><td className="n">{r.dials}</td><td className="n">{pct(r.pickRate)}</td><td className="n">{pct(r.connRate)}</td><td className="n">{r.booked}</td><td className="n">{r.per100.toFixed(1)}</td><td className="n">{pct(r.dials ? r.bad / r.dials : 0)}</td><td className="n">{r.minPerConn.toFixed(1)}</td><td><b className={`grade g${r.grade}`}>{r.grade}</b></td><td><Spark points={byMonth(calls.filter((c) => (leads.find((l) => l.id === c.lead_id)?.filter_id || '—') === r.k), (c) => c.started_at)} /></td></tr>)}
-            {!board.byList.length && <tr><td colSpan={10} className="empty">No calls logged yet.</td></tr>}</tbody></table>
+        <table className="ordertable fin"><thead><tr><th>List</th><th className="n">Dials</th><th className="n">Pick-up</th><th className="n">Connect</th><th className="n">Booked</th><th className="n">Booked / 100</th><th className="n">Bad numbers</th><th className="n">Min / connect</th><th>Grade</th></tr></thead>
+          <tbody>{board.byList.map((r) => <tr key={r.k}><td><b className="mono">{r.k}</b>{LIST_NAMES[r.k] && <span className="sm"> {LIST_NAMES[r.k]}</span>}</td><td className="n">{r.dials}</td><td className="n">{pct(r.pickRate)}</td><td className="n">{pct(r.connRate)}</td><td className="n">{r.booked}</td><td className="n">{r.per100.toFixed(1)}</td><td className="n">{pct(r.dials ? r.bad / r.dials : 0)}</td><td className="n">{r.minPerConn.toFixed(1)}</td><td><b className={`grade g${r.grade}`}>{r.grade}</b></td></tr>)}
+            {!board.byList.length && <tr><td colSpan={9} className="empty">No calls logged yet.</td></tr>}</tbody></table>
       </div>
     </>
   );
@@ -789,7 +777,6 @@ export function Calendar({ me, leads, status, reload, say, refreshStatus, mineOn
           {status?.gcal_set ? <button className="btn-sm" disabled={!!busy} onClick={() => sync('google')}>{busy === 'google' ? '…' : 'Sync Google Calendar'}</button> : <span className="sm">· Google Calendar address → Settings</span>}
         </>}
       </div>
-      <TrendCard title="Calls booked per month" note="from the calendar" series={[{ name: 'Booked', color: '#1E9E6F', points: byMonth(visible.filter((m) => m.status !== 'canceled'), (m) => m.starts_at) }, { name: 'Canceled / no-show', color: '#B03A33', points: byMonth(visible.filter((m) => m.status === 'canceled' || m.outcome === 'no_show'), (m) => m.starts_at) }]} />
       <div className="calgrid-wrap">
         <div className="card calcard">
           <div className="calgrid">
