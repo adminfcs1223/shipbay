@@ -7,17 +7,41 @@ import { fetchAll, money, pct, num, ago, hhmm, stageLabel, stageClass } from './
 const CONNECT = new Set(['connected', 'booked', 'not_fit']); const PICKUP = new Set(['gatekeeper', 'connected', 'booked', 'not_fit']);
 const RANGES = [['today', 'Today'], ['week', '7 days'], ['month', '30 days'], ['all', 'All time']];
 export const DEFAULT_GOALS = { dials_day: 60, dials_week: 300, emails_day: 150, emails_week: 750, booked_day: 1, booked_week: 5 };
+export const DEFAULT_BONUS = { metric: 'booked', target: 10, payout: 500, period: 'month', message: "NO YOU'RE WEAK" };
+export const BONUS_METRICS = { booked: 'Calls booked', won: 'Deals won', won_value: 'Won $ / month', dials: 'Dials', answered: 'Replies answered' };
 export const GOAL_LABELS = { dials: 'Dials', emails: 'Emails sent', booked: 'Calls booked' };
 
 /** Goals: team defaults + per-rep overrides, stored in fin_settings.sales_goals. */
 export function useGoals() {
   const [g, setG] = useState(null);
-  const load = async () => { const { data } = await supabase.from('fin_settings').select('value').eq('key', 'sales_goals').maybeSingle(); setG({ team: { ...DEFAULT_GOALS, ...(data?.value?.team || {}) }, reps: data?.value?.reps || {} }); };
+  const load = async () => { const { data } = await supabase.from('fin_settings').select('value').eq('key', 'sales_goals').maybeSingle(); setG({ team: { ...DEFAULT_GOALS, ...(data?.value?.team || {}) }, reps: data?.value?.reps || {}, bonus: { ...DEFAULT_BONUS, ...(data?.value?.bonus || {}) }, bonus_reps: data?.value?.bonus_reps || {} }); };
   useEffect(() => { load(); }, []);
   const save = async (next) => { await supabase.from('fin_settings').upsert({ key: 'sales_goals', value: next }); setG(next); };
   return [g, save];
 }
 export const goalsFor = (g, uid) => ({ ...(g?.team || DEFAULT_GOALS), ...((uid && g?.reps?.[uid]) || {}) });
+export const bonusFor = (g, uid) => ({ ...DEFAULT_BONUS, ...(g?.bonus || {}), ...((uid && g?.bonus_reps?.[uid]) || {}) });
+/** this period's bonus progress for one rep from raw rows */
+export function bonusProgress(b, { calls = [], leads = [] }, uid) {
+  const now = new Date(); const start = b.period === 'week' ? new Date(now.getTime() - ((now.getDay() + 6) % 7) * 86400000).setHours(0, 0, 0, 0) : new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const end = b.period === 'week' ? start + 7 * 86400000 : new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
+  const C = calls.filter((c) => (!uid || c.by_user === uid) && new Date(c.started_at).getTime() >= start);
+  const L = leads.filter((l) => !uid || l.assigned_to === uid);
+  const won = L.filter((l) => l.stage === 'signed' && l.won_at && new Date(l.won_at).getTime() >= start);
+  const value = b.metric === 'booked' ? C.filter((c) => c.outcome === 'booked').length : b.metric === 'dials' ? C.length : b.metric === 'won' ? won.length : b.metric === 'won_value' ? won.reduce((a, l) => a + Number(l.deal_value || 0), 0) : L.filter((l) => l.answered_at && new Date(l.answered_at).getTime() >= start).length;
+  const daysLeft = Math.max(0, Math.ceil((end - Date.now()) / 86400000));
+  return { value, target: Number(b.target) || 0, pct: b.target ? Math.min(1, value / Number(b.target)) : 0, hit: value >= Number(b.target || 0) && Number(b.target) > 0, daysLeft, label: BONUS_METRICS[b.metric] || b.metric };
+}
+/** The bonus strip: progress toward the bonus for this period. */
+export function BonusBar({ b, p, name, compact }) {
+  return (
+    <div className={`bonusbar ${p.hit ? 'hit' : ''} ${compact ? 'compact' : ''}`}>
+      <div className="lbl"><b>{name ? `${name} · ` : ''}Bonus · {p.label}</b><span>{b.metric === 'won_value' ? money(p.value) : num(p.value)} / {b.metric === 'won_value' ? money(p.target) : num(p.target)}{b.payout ? ` · ${money(b.payout)}` : ''} · {p.daysLeft} day{p.daysLeft === 1 ? '' : 's'} left this {b.period}</span></div>
+      <div className="bar"><i style={{ width: `${p.pct * 100}%` }} /></div>
+      {!compact && <div className="verdict">{p.hit ? 'BONUS UNLOCKED' : (b.message || "NO YOU'RE WEAK")}</div>}
+    </div>
+  );
+}
 
 /** Progress bars: [{key:'dials', value, goal}] */
 export function GoalBars({ title, items }) {
@@ -26,7 +50,7 @@ export function GoalBars({ title, items }) {
       <div className="cardhead"><h3>{title}</h3></div>
       <div className="goalrows">{items.filter((i) => i.goal > 0).map((i) => { const p = Math.min(1, i.value / i.goal); const done = i.value >= i.goal; return (
         <div key={i.key} className={`goalrow ${done ? 'done' : ''}`}>
-          <div className="lbl"><span>{GOAL_LABELS[i.key] || i.key}</span><b>{num(i.value)} <span className="of">/ {num(i.goal)}</span></b></div>
+          <div className="lbl"><span>{GOAL_LABELS[i.key] || i.key}{!done && <em className="left"> · {num(i.goal - i.value)} {i.key === 'dials' ? 'calls' : i.key === 'emails' ? 'emails' : ''} left</em>}</span><b>{num(i.value)} <span className="of">/ {num(i.goal)}</span></b></div>
           <div className="bar"><i style={{ width: `${p * 100}%` }} /></div>
         </div>
       ); })}</div>
@@ -85,6 +109,33 @@ export function TeamTable({ rows, compact }) {
   );
 }
 
+function RepBars({ title, rows, get, color }) {
+  const max = Math.max(1, ...rows.map(get));
+  return (
+    <div className="card"><div className="cardhead"><h3>{title}</h3></div>
+      <div className="repbars">{rows.map((r) => <div key={r.p.id} className="rb"><span className="nm">{name(r.p)}</span><div className="trk"><i style={{ width: `${(get(r) / max) * 100}%`, background: color || 'var(--orange)' }} /></div><b>{num(get(r))}</b></div>)}{rows.length === 0 && <div className="empty">—</div>}</div>
+    </div>
+  );
+}
+function DailyLines({ d }) {
+  const reps = d.people.filter((p) => p.is_sales || p.is_owner); const days = [...Array(14)].map((_, i) => { const x = new Date(); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - (13 - i)); return x; });
+  const colors = ['var(--orange)', '#1E9E6F', '#3B82F6', '#A855F7', '#F59E0B'];
+  const series = reps.map((p, i) => ({ p, color: colors[i % colors.length], pts: days.map((day) => d.calls.filter((c) => c.by_user === p.id && new Date(c.started_at).toDateString() === day.toDateString()).length) }));
+  const max = Math.max(1, ...series.flatMap((s) => s.pts)); const W = 520, H = 140, px = 28, py = 12;
+  const x = (i) => px + (i / 13) * (W - px * 2); const y = (v) => H - py - (v / max) * (H - py * 2);
+  return (
+    <div className="dailylines">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+        {[0, 0.5, 1].map((f) => <line key={f} x1={px} x2={W - px} y1={y(max * f)} y2={y(max * f)} stroke="#EEF0F3" />)}
+        {series.map((s) => <polyline key={s.p.id} fill="none" stroke={s.color} strokeWidth="2.5" strokeLinejoin="round" points={s.pts.map((v, i) => `${x(i)},${y(v)}`).join(' ')} />)}
+        {series.map((s) => s.pts.map((v, i) => v ? <circle key={`${s.p.id}${i}`} cx={x(i)} cy={y(v)} r="3" fill={s.color} /> : null))}
+        <text x={px} y={H - 1} className="ax">{days[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</text><text x={W - px} y={H - 1} className="ax" textAnchor="end">today</text><text x={4} y={py + 4} className="ax">{max}</text>
+      </svg>
+      <div className="legend row">{series.map((s) => <span key={s.p.id} className="sm"><i className="sw" style={{ background: s.color }} /> {name(s.p)}</span>)}</div>
+    </div>
+  );
+}
+
 export default function Team() {
   const [d, reload] = useTeamData(); const [range, setRange] = useState('week'); const [msg, setMsg] = useState(null); const [goals, saveGoals] = useGoals(); const [gRep, setGRep] = useState('');
   const rows = useMemo(() => (d ? teamStats(d, range) : []), [d, range]);
@@ -109,6 +160,17 @@ export default function Team() {
       {msg && <div className={`msg ${msg.kind} flash`}>{msg.text}<button onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
       <div className="opsbar"><span className="seg tight">{RANGES.map(([k, l]) => <button key={k} className={range === k ? 'on' : ''} onClick={() => setRange(k)}>{l}</button>)}</span><div className="spacer" /><span className="sm">Team: <b>{num(tot.dials)}</b> dials · <b>{num(tot.booked)}</b> booked · <b>{num(tot.answered)}</b> replies answered · <b>{num(tot.won)}</b> won · close rate <b>{teamClose == null ? '—' : pct(teamClose)}</b></span></div>
       <div className="card"><div className="cardhead"><h3>Scoreboard</h3><span className="sm">{RANGES.find((r) => r[0] === range)[1].toLowerCase()}</span></div><TeamTable rows={rows} /></div>
+      <div className="ownergrid three">
+        <RepBars title="Dials" rows={rows} get={(r) => r.dials} />
+        <RepBars title="Calls booked" rows={rows} get={(r) => r.booked} color="#1E9E6F" />
+        <RepBars title="Replies answered" rows={rows} get={(r) => r.answered} color="#3B82F6" />
+      </div>
+      <div className="ownergrid">
+        <div className="card"><div className="cardhead"><h3>Dials per day · last 14 days</h3></div><DailyLines d={d} /></div>
+        <div className="card"><div className="cardhead"><h3>Bonus · this {goals?.bonus?.period || 'month'}</h3><span className="sm">{BONUS_METRICS[goals?.bonus?.metric] || ''}</span></div>
+          {goals && rows.map((r) => { const b = bonusFor(goals, r.p.id); const p = bonusProgress(b, d, r.p.id); return <BonusBar key={r.p.id} b={b} p={p} name={name(r.p)} compact />; })}
+        </div>
+      </div>
       <div className="ownergrid">
         <div className="card">
           <div className="cardhead"><h3>Activity</h3><span className="sm">latest first</span></div>
@@ -120,6 +182,18 @@ export default function Team() {
           <table className="ordertable fin goalsedit"><thead><tr><th /><th className="n">Per day</th><th className="n">Per week</th></tr></thead><tbody>
             {['dials', 'emails', 'booked'].map((k) => <tr key={k}><td>{GOAL_LABELS[k]}</td><td className="n"><input className="cellnum" type="number" min="0" value={cur[`${k}_day`] ?? ''} onChange={(e) => setGoal(`${k}_day`, e.target.value)} /></td><td className="n"><input className="cellnum" type="number" min="0" value={cur[`${k}_week`] ?? ''} onChange={(e) => setGoal(`${k}_week`, e.target.value)} /></td></tr>)}
           </tbody></table>
+        </div>
+        <div className="card">
+          <div className="cardhead"><h3>Bonus rules</h3><select className="statusselect" value={gRep} onChange={(e) => setGRep(e.target.value)}><option value="">Team</option>{d.people.filter((p) => p.is_sales || p.is_owner).map((p) => <option key={p.id} value={p.id}>{name(p)}</option>)}</select></div>
+          {goals && (() => { const b = gRep ? { ...goals.bonus, ...(goals.bonus_reps[gRep] || {}) } : goals.bonus; const setB = (k, v) => saveGoals(gRep ? { ...goals, bonus_reps: { ...goals.bonus_reps, [gRep]: { ...(goals.bonus_reps[gRep] || {}), [k]: v } } } : { ...goals, bonus: { ...goals.bonus, [k]: v } }); return (
+            <div className="addgrid two">
+              <label>Counts<select value={b.metric} onChange={(e) => setB('metric', e.target.value)}>{Object.entries(BONUS_METRICS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+              <label>Per<select value={b.period} onChange={(e) => setB('period', e.target.value)}><option value="month">Month</option><option value="week">Week</option></select></label>
+              <label>Target<input type="number" min="0" value={b.target} onChange={(e) => setB('target', Number(e.target.value) || 0)} /></label>
+              <label>Payout $<input type="number" min="0" value={b.payout} onChange={(e) => setB('payout', Number(e.target.value) || 0)} /></label>
+              <label className="wide2">Message until they hit it<input value={b.message} onChange={(e) => setB('message', e.target.value)} /></label>
+            </div>
+          ); })()}
         </div>
         <div className="card">
           <div className="cardhead"><h3>Who’s on the team</h3></div>

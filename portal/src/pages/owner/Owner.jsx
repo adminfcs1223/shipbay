@@ -1,6 +1,7 @@
 // Owner — Derek's private area. Normal login + a second passphrase (checked by the `owner` edge function; the unlock
 // token lives in sessionStorage so it goes away when the tab closes). Financials, Sales, Settings.
 import { useEffect, useState } from 'react';
+import { supabase } from '../../lib';
 import { ownerFn, getToken, setToken } from './util';
 import Financials from './Financials';
 import Sales from './Sales';
@@ -80,7 +81,8 @@ function Settings({ status, refreshStatus }) {
   const [msg, setMsg] = useState(null);
   const [cur, setCur] = useState(''); const [n1, setN1] = useState(''); const [n2, setN2] = useState('');
   const [qid, setQid] = useState(''); const [qsec, setQsec] = useState('');
-  const [slk, setSlk] = useState(''); const [slc, setSlc] = useState(status.smartlead_campaigns || ''); const [cal, setCal] = useState(''); const [gcal, setGcal] = useState('');
+  const [slk, setSlk] = useState(''); const [slc, setSlc] = useState(status.smartlead_campaigns || ''); const [cal, setCal] = useState(''); const [gcal, setGcal] = useState(''); const [booking, setBooking] = useState('');
+  useEffect(() => { supabase.from('fin_settings').select('value').eq('key', 'booking_link').maybeSingle().then(({ data }) => setBooking(data?.value?.url || '')); }, []);
   const [busy, setBusy] = useState(null);
 
   const say = (r, ok) => { if (r.error) setMsg({ kind: 'err', text: r.error }); else { setMsg({ kind: 'ok', text: ok }); refreshStatus(); } };
@@ -109,6 +111,12 @@ function Settings({ status, refreshStatus }) {
         <p className="hint">Personal access token from Calendly → Integrations → API & webhooks. Booked calls then show under Sales → Calendar. {status.calendly_set ? 'Token saved.' : 'Not set yet.'}</p>
         <div className="field"><label>Access token</label><input type="password" value={cal} onChange={(e) => setCal(e.target.value)} placeholder={status.calendly_set ? '•••••••• (saved — paste to replace)' : ''} autoComplete="off" /></div>
         <div className="row"><button className="btn-sm primary" disabled={!cal || !!busy} onClick={async () => { await saveSecret('CALENDLY_TOKEN', cal, 'Calendly token'); setCal(''); }}>Save</button></div>
+      </div>
+      <div className="card">
+        <h3>Booking link</h3>
+        <p className="hint">Your Calendly (or any) scheduling link. It goes into every Reply draft, the contact panel has a copy button, and the dialer shows it. New Calendly bookings are handed out round-robin unless the lead already has an owner.</p>
+        <div className="field"><label>Link</label><input value={booking} onChange={(e) => setBooking(e.target.value)} placeholder="https://calendly.com/shipbay/intro" /></div>
+        <div className="row"><button className="btn-sm primary" disabled={!!busy} onClick={async () => { const { error } = await supabase.from('fin_settings').upsert({ key: 'booking_link', value: { url: booking.trim() } }); say(error ? { error: error.message } : {}, 'Booking link saved.'); }}>Save</button></div>
       </div>
       <div className="card">
         <h3>Google Calendar</h3>

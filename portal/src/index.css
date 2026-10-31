@@ -1060,3 +1060,49 @@ select.statuspill.ok, select.statuspill.warn, select.statuspill.bad, select.stat
 .uplist li:hover { background: var(--bg-soft); }
 .ordertable h2.click, .dialer h2.click { cursor: pointer; } .dialer h2.click:hover { color: var(--orange-soft); }
 @media (max-width: 1000px) { .calgrid-wrap { grid-template-columns: 1fr; } .gsearch { max-width: 100%; width: 100%; } .inbox li { grid-template-columns: 14px 1fr auto; } .inbox .snip { display: none; } .panel { width: 100%; } }
+/* ---------- Sales v5: bonus, team charts, breathing room ---------- */
+/* one vertical rhythm for everything stacked on an owner / sales page */
+.owner > * + * { margin-top: 18px; }
+.owner > .pagehead { margin-bottom: 0; }
+.owner .kpis.fin { gap: 16px; margin-bottom: 0; }
+.owner .ownergrid { gap: 18px; margin-bottom: 0; }
+.owner .ownergrid.three { grid-template-columns: repeat(3, 1fr); }
+.owner .ownergrid > .card, .owner .callgrid > *, .owner .calgrid-wrap > * { margin-top: 0; }
+.owner .card { padding: 18px 20px; margin-bottom: 0; }
+.owner .tile { padding: 16px 18px; }
+.owner .tile b { margin: 6px 0 4px; }
+.owner > .opsbar, .owner .opsbar { margin-bottom: 0; }
+.owner .card .opsbar { margin: 0 0 12px; }
+.owner .ownertabs { margin-bottom: 0; }
+.owner .bonusbar { margin-bottom: 0; }
+.owner .seg { margin-bottom: 0; }
+.owner .replies { display: grid; gap: 12px; }
+.owner .kanban { margin-top: 18px; }
+.goalrow .left { font-style: normal; color: var(--orange-soft); font-weight: 600; font-size: 12px; }
+.btn-xs.bad { border-color: rgba(176,58,51,.5); color: #B03A33; }
+.bonusbar { background: var(--navy); color: #fff; border-radius: 14px; padding: 16px 20px; margin-bottom: 18px; }
+.bonusbar.compact { padding: 10px 14px; margin-bottom: 10px; border-radius: 10px; }
+.bonusbar .lbl { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; flex-wrap: wrap; }
+.bonusbar .lbl span { color: rgba(255,255,255,.7); }
+.bonusbar .bar { height: 12px; background: rgba(255,255,255,.15); margin: 8px 0 6px; }
+.bonusbar .bar i { background: var(--orange); border-radius: 99px; }
+.bonusbar.hit .bar i { background: #34C38F; }
+.bonusbar .verdict { font: 800 14px var(--font-display); letter-spacing: .06em; color: var(--orange); }
+.bonusbar.hit .verdict { color: #34C38F; }
+.bonushero { background: var(--navy); color: #fff; text-align: center; padding: 34px 24px !important; }
+.bonushero small { font: 600 11px var(--font-mono); letter-spacing: .14em; text-transform: uppercase; color: rgba(255,255,255,.6); }
+.bonushero h2 { font: 800 clamp(28px, 5vw, 48px)/1.05 var(--font-display); color: var(--orange); margin: 8px 0 14px; letter-spacing: .02em; }
+.bonushero.hit h2 { color: #34C38F; }
+.bonushero .big { font: 700 34px var(--font-display); } .bonushero .big span { font-size: 16px; color: rgba(255,255,255,.7); font-weight: 500; }
+.bonushero .bar { height: 16px; background: rgba(255,255,255,.15); margin: 16px auto 10px; max-width: 640px; }
+.bonushero .bar i { background: var(--orange); border-radius: 99px; } .bonushero.hit .bar i { background: #34C38F; }
+.bonushero .row { max-width: 640px; margin: 0 auto; color: rgba(255,255,255,.75); font-size: 13px; }
+.repbars { display: grid; gap: 8px; }
+.repbars .rb { display: grid; grid-template-columns: 70px 1fr 40px; gap: 10px; align-items: center; font-size: 13px; }
+.repbars .trk { height: 14px; background: #EEF0F3; border-radius: 99px; overflow: hidden; }
+.repbars .trk i { display: block; height: 100%; border-radius: 99px; }
+.repbars b { text-align: right; }
+.dailylines svg { width: 100%; height: 160px; }
+.dailylines .ax { font: 10px var(--font-mono); fill: var(--muted-2); }
+.dailylines .legend.row { display: flex; gap: 14px; margin-top: 6px; }
+@media (max-width: 1000px) { .owner .ownergrid.three { grid-template-columns: 1fr; } }

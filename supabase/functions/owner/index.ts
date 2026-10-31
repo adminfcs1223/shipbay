@@ -315,7 +315,14 @@ async function calendlySync(uid: string) {
     if (email) { const { data: l } = await admin.from('sales_leads').select('id, stage').ilike('email', email).maybeSingle(); if (l) { lead_id = l.id; if (ev.status === 'active' && ['new', 'contacted', 'replied'].includes(l.stage)) await admin.from('sales_leads').update({ stage: 'call_booked', last_touch_at: new Date().toISOString() }).eq('id', l.id); } }
     const { data: ex } = await admin.from('sales_meetings').select('id, assigned_to').eq('external_id', ev.uri).maybeSingle();
     const row: any = { external_id: ev.uri, source: 'calendly', name: ev.name, starts_at: ev.start_time, ends_at: ev.end_time, status: ev.status === 'canceled' ? 'canceled' : (ex ? undefined : 'active'), invitee_name: first.name || null, invitee_email: email, location: ev.location?.join_url || ev.location?.location || ev.location?.type || null, lead_id };
-    if (!ex) row.assigned_to = uid;
+    if (!ex) {
+      // new booking: the lead's owner takes it; otherwise the next rep in the round-robin
+      let owner: string | null = null;
+      if (lead_id) { const { data: l } = await admin.from('sales_leads').select('assigned_to').eq('id', lead_id).maybeSingle(); owner = l?.assigned_to || null; }
+      if (!owner) { const rr = (await getSetting('round_robin')) || { members: [], next: 0 }; const members: string[] = (rr.members || []).filter(Boolean); if (members.length) { owner = members[Number(rr.next || 0) % members.length]; await setSetting('round_robin', { ...rr, members, next: (Number(rr.next || 0) + 1) % members.length }); } }
+      row.assigned_to = owner || uid;
+      if (lead_id && owner) await admin.from('sales_leads').update({ assigned_to: owner }).eq('id', lead_id).is('assigned_to', null);
+    }
     Object.keys(row).forEach((k) => row[k] === undefined && delete row[k]);
     await admin.from('sales_meetings').upsert(row, { onConflict: 'external_id' }); n++;
   }
