@@ -124,12 +124,13 @@ async function smartleadSync(uid: string) {
     }
     const { data: existing } = await admin.from('sales_email_sends').select('external_id, reply_type').eq('campaign', label);
     const keep = new Map((existing || []).map((e: any) => [e.external_id, e.reply_type]));
+    const tags: Record<string, string> = (await getSetting('reply_tags')) || {};   // email → reply type, set from the Email tab; survives re-syncs and label changes
     const rows = stats.map((s) => {
       const sent = new Date(s.sent_time); const rt = s.reply_time ? new Date(s.reply_time) : null;
       const bounced = s.is_bounced === true || s.is_bounced === 'true';
       const bounceBack = !!rt && (bounced || rt.getTime() - sent.getTime() < 60000);
       const prev = keep.get(s.stats_id);
-      return { external_id: s.stats_id, lead_id: byEmail.get(String(s.lead_email).toLowerCase()) || null, lead_email: s.lead_email, lead_name: s.lead_name, campaign: label, step: s.sequence_number, variant: String(s.seq_variant_id), subject: s.email_subject, sent_at: sent.toISOString(), opened: !!s.open_time, open_count: Number(s.open_count || 0), replied: !!rt && !bounceBack, bounced, reply_type: prev ?? (bounceBack ? 'Bounce-back' : null) };
+      return { external_id: s.stats_id, lead_id: byEmail.get(String(s.lead_email).toLowerCase()) || null, lead_email: s.lead_email, lead_name: s.lead_name, campaign: label, step: s.sequence_number, variant: String(s.seq_variant_id), subject: s.email_subject, sent_at: sent.toISOString(), opened: !!s.open_time, open_count: Number(s.open_count || 0), replied: !!rt && !bounceBack, bounced, reply_type: prev ?? (rt && tags[String(s.lead_email).toLowerCase()]) ?? (bounceBack ? 'Bounce-back' : null) };
     });
     for (let i = 0; i < rows.length; i += 200) await admin.from('sales_email_sends').upsert(rows.slice(i, i + 200), { onConflict: 'external_id' });
     // stages: contacted if sent, replied if a real reply and not already further along

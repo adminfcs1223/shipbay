@@ -224,9 +224,12 @@ function ImportCsv({ sources, onClose, reload, say }) {
 function Email({ leads, status, reload, refreshStatus, say }) {
   const [sends, setSends] = useState(null); const [busy, setBusy] = useState(false); const [view, setView] = useState('replies');
   const load = async () => setSends(await fetchAll('sales_email_sends', '*', (q) => q.order('sent_at', { ascending: false })));
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); if (!status.smartlead_last_sync && status.smartlead_key_set) sync(); }, []);   // first visit: pull the campaign automatically
   const sync = async () => { setBusy(true); const r = await ownerFn({ action: 'smartlead_sync' }); setBusy(false); say(r, r.error ? null : `Smartlead synced: ${JSON.stringify(r.out || r).slice(0, 160)}`); load(); reload(); refreshStatus(); };
-  const setReply = async (s, reply_type) => { await supabase.from('sales_email_sends').update({ reply_type }).eq('id', s.id); if (s.lead_id && reply_type === 'Negative') await supabase.from('sales_leads').update({ stage: 'dnc' }).eq('id', s.lead_id).eq('stage', 'replied'); load(); reload(); };
+  const setReply = async (s, reply_type) => {
+    await supabase.from('sales_email_sends').update({ reply_type }).eq('id', s.id);
+    const { data: cur } = await supabase.from('fin_settings').select('value').eq('key', 'reply_tags').maybeSingle();   // remembered by email so a re-sync keeps the tag
+    await supabase.from('fin_settings').upsert({ key: 'reply_tags', value: { ...(cur?.value || {}), [s.lead_email.toLowerCase()]: reply_type } }); if (s.lead_id && reply_type === 'Negative') await supabase.from('sales_leads').update({ stage: 'dnc' }).eq('id', s.lead_id).eq('stage', 'replied'); load(); reload(); };
   const m = useMemo(() => {
     const S = sends || []; const emails = new Set(S.map((s) => s.lead_email));
     const replied = S.filter((s) => s.replied); const repliedLeads = new Set(replied.map((s) => s.lead_email));
