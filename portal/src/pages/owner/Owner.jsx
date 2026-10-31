@@ -10,7 +10,7 @@ import Team from './Team';
 
 const TABS = [['fin', 'Financials'], ['sales', 'Sales'], ['team', 'Team'], ['strat', 'Strategies'], ['settings', 'Settings']];
 
-export default function Owner({ me }) {
+export default function Owner({ me, go: nav }) {
   const [status, setStatus] = useState(null);     // from action:status
   const [tab, setTab] = useState('fin');
   const [flash, setFlash] = useState(() => {       // QuickBooks round-trip lands with #owner=qbo|ok|msg
@@ -42,7 +42,7 @@ export default function Owner({ me }) {
       {flash && <div className={`msg ${flash.kind} flash`}>{flash.text || (flash.kind === 'ok' ? 'QuickBooks connected.' : 'QuickBooks connection failed.')}<button onClick={() => setFlash(null)} aria-label="Dismiss">×</button></div>}
       <div className="card ownertabs"><div className="tabs">{TABS.map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}</div></div>
       {tab === 'fin' && <Financials status={status} refreshStatus={refresh} />}
-      {tab === 'sales' && <Sales me={me} status={status} refreshStatus={refresh} />}
+      {tab === 'sales' && <Sales me={me} status={status} refreshStatus={refresh} nav={nav} />}
       {tab === 'team' && <Team />}
       {tab === 'strat' && <Strategies status={status} />}
       {tab === 'settings' && <Settings status={status} refreshStatus={refresh} />}

@@ -2,12 +2,38 @@
 // Also where the owner decides who is on the sales team and who is in the email round-robin.
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib';
-import { fetchAll, money, pct, num, ago, hhmm, stageLabel, stageClass } from './util';
+import { fetchAll, money, pct, num, ago, hhmm, stageLabel, stageClass, byMonth, monthKeys } from './util';
 
 const CONNECT = new Set(['connected', 'booked', 'not_fit']); const PICKUP = new Set(['gatekeeper', 'connected', 'booked', 'not_fit']);
 const RANGES = [['today', 'Today'], ['week', '7 days'], ['month', '30 days'], ['all', 'All time']];
 export const DEFAULT_GOALS = { dials_day: 60, dials_week: 300, emails_day: 150, emails_week: 750, booked_day: 1, booked_week: 5 };
-export const DEFAULT_BONUS = { metric: 'booked', target: 10, payout: 500, period: 'month', message: "NO YOU'RE WEAK" };
+export const DEFAULT_BONUS = { rules: [{ metric: 'booked', target: 20 }, { metric: 'won', target: 3 }], payout: 500, period: 'month', message: "NO YOU'RE WEAK" };
+const PAL = ['var(--orange)', '#1E9E6F', '#3B82F6', '#A855F7', '#F59E0B', '#EF4444'];
+
+/** Tiny inline sparkline for a table cell: points = [{label, v}] */
+export function Spark({ points, color = 'var(--orange)', w = 72, h = 22 }) {
+  const max = Math.max(1, ...points.map((p) => p.v)); const n = points.length;
+  const x = (i) => (n === 1 ? w / 2 : (i / (n - 1)) * (w - 4) + 2); const y = (v) => h - 3 - (v / max) * (h - 6);
+  return <svg className="spark" width={w} height={h} viewBox={`0 0 ${w} ${h}`}><title>{points.map((p) => `${p.label}: ${num(p.v)}`).join(' · ')}</title><polyline fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" points={points.map((p, i) => `${x(i)},${y(p.v)}`).join(' ')} />{points.map((p, i) => <circle key={i} cx={x(i)} cy={y(p.v)} r="2.2" fill={color} />)}</svg>;
+}
+/** Card with a 3-month line chart. series = [{ name, points: [{label, v}], color?, money? }] */
+export function TrendCard({ title, series, note }) {
+  const pts = series[0]?.points || []; const W = 560, H = 170, px = 36, py = 16;
+  const max = Math.max(1, ...series.flatMap((s) => s.points.map((p) => p.v)));
+  const x = (i) => px + (pts.length === 1 ? (W - 2 * px) / 2 : (i / (pts.length - 1)) * (W - 2 * px)); const y = (v) => H - py - (v / max) * (H - 2 * py);
+  return (
+    <div className="card trend">
+      <div className="cardhead"><h3>{title}</h3><span className="sm">{note || 'last 3 months'}</span></div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="trendsvg">
+        {[0, 0.5, 1].map((f) => <line key={f} x1={px} x2={W - px} y1={y(max * f)} y2={y(max * f)} stroke="#EEF0F3" />)}
+        {series.map((s, si) => <polyline key={s.name} fill="none" stroke={s.color || PAL[si % PAL.length]} strokeWidth="2.5" strokeLinejoin="round" points={s.points.map((p, i) => `${x(i)},${y(p.v)}`).join(' ')} />)}
+        {series.map((s, si) => s.points.map((p, i) => <g key={`${s.name}${i}`}><circle cx={x(i)} cy={y(p.v)} r="3.5" fill={s.color || PAL[si % PAL.length]} /><text x={x(i)} y={y(p.v) - 7} textAnchor="middle" className="val">{s.money ? money(p.v) : num(p.v)}</text></g>))}
+        {pts.map((p, i) => <text key={p.label} x={x(i)} y={H - 2} textAnchor={i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle'} className="ax">{p.label}</text>)}
+      </svg>
+      <div className="legend row">{series.map((s, si) => <span key={s.name} className="sm"><i className="sw" style={{ background: s.color || PAL[si % PAL.length] }} /> {s.name}</span>)}</div>
+    </div>
+  );
+}
 export const BONUS_METRICS = { booked: 'Calls booked', won: 'Deals won', won_value: 'Won $ / month', dials: 'Dials', answered: 'Replies answered' };
 export const GOAL_LABELS = { dials: 'Dials', emails: 'Emails sent', booked: 'Calls booked' };
 
@@ -20,9 +46,14 @@ export function useGoals() {
   return [g, save];
 }
 export const goalsFor = (g, uid) => ({ ...(g?.team || DEFAULT_GOALS), ...((uid && g?.reps?.[uid]) || {}) });
-export const bonusFor = (g, uid) => ({ ...DEFAULT_BONUS, ...(g?.bonus || {}), ...((uid && g?.bonus_reps?.[uid]) || {}) });
+export const bonusFor = (g, uid) => { const b = { ...DEFAULT_BONUS, ...(g?.bonus || {}), ...((uid && g?.bonus_reps?.[uid]) || {}) }; if (!Array.isArray(b.rules) || !b.rules.length) b.rules = [{ metric: b.metric || 'booked', target: b.target || 10 }]; return b; };
 /** this period's bonus progress for one rep from raw rows */
-export function bonusProgress(b, { calls = [], leads = [] }, uid) {
+export function bonusProgress(b, data, uid) {
+  const rules = (b.rules || []).map((r) => ruleProgress({ ...b, ...r }, data, uid));
+  const hit = rules.some((r) => r.hit); const best = [...rules].sort((a, c) => c.pct - a.pct)[0] || rules[0];
+  return { ...best, rules, hit, pct: hit ? 1 : best?.pct || 0 };
+}
+function ruleProgress(b, { calls = [], leads = [] }, uid) {
   const now = new Date(); const start = b.period === 'week' ? new Date(now.getTime() - ((now.getDay() + 6) % 7) * 86400000).setHours(0, 0, 0, 0) : new Date(now.getFullYear(), now.getMonth(), 1).getTime();
   const end = b.period === 'week' ? start + 7 * 86400000 : new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
   const C = calls.filter((c) => (!uid || c.by_user === uid) && new Date(c.started_at).getTime() >= start);
@@ -30,14 +61,20 @@ export function bonusProgress(b, { calls = [], leads = [] }, uid) {
   const won = L.filter((l) => l.stage === 'signed' && l.won_at && new Date(l.won_at).getTime() >= start);
   const value = b.metric === 'booked' ? C.filter((c) => c.outcome === 'booked').length : b.metric === 'dials' ? C.length : b.metric === 'won' ? won.length : b.metric === 'won_value' ? won.reduce((a, l) => a + Number(l.deal_value || 0), 0) : L.filter((l) => l.answered_at && new Date(l.answered_at).getTime() >= start).length;
   const daysLeft = Math.max(0, Math.ceil((end - Date.now()) / 86400000));
-  return { value, target: Number(b.target) || 0, pct: b.target ? Math.min(1, value / Number(b.target)) : 0, hit: value >= Number(b.target || 0) && Number(b.target) > 0, daysLeft, label: BONUS_METRICS[b.metric] || b.metric };
+  return { metric: b.metric, value, target: Number(b.target) || 0, pct: b.target ? Math.min(1, value / Number(b.target)) : 0, hit: value >= Number(b.target || 0) && Number(b.target) > 0, daysLeft, label: BONUS_METRICS[b.metric] || b.metric };
 }
+const fmtMetric = (metric, v) => (metric === 'won_value' ? money(v) : num(v));
 /** The bonus strip: progress toward the bonus for this period. */
 export function BonusBar({ b, p, name, compact }) {
   return (
     <div className={`bonusbar ${p.hit ? 'hit' : ''} ${compact ? 'compact' : ''}`}>
-      <div className="lbl"><b>{name ? `${name} · ` : ''}Bonus · {p.label}</b><span>{b.metric === 'won_value' ? money(p.value) : num(p.value)} / {b.metric === 'won_value' ? money(p.target) : num(p.target)}{b.payout ? ` · ${money(b.payout)}` : ''} · {p.daysLeft} day{p.daysLeft === 1 ? '' : 's'} left this {b.period}</span></div>
-      <div className="bar"><i style={{ width: `${p.pct * 100}%` }} /></div>
+      <div className="lbl"><b>{name ? `${name} · ` : ''}Bonus{b.payout ? ` · ${money(b.payout)}` : ''}</b><span>{p.daysLeft} day{p.daysLeft === 1 ? '' : 's'} left this {b.period}</span></div>
+      {p.rules.map((r, i) => (
+        <div key={i} className="rule">
+          <div className="rl"><span>{i > 0 && <em>or </em>}{r.label}</span><b>{fmtMetric(r.metric, r.value)} / {fmtMetric(r.metric, r.target)}</b></div>
+          <div className="bar"><i style={{ width: `${r.pct * 100}%` }} className={r.hit ? 'hit' : ''} /></div>
+        </div>
+      ))}
       {!compact && <div className="verdict">{p.hit ? 'BONUS UNLOCKED' : (b.message || "NO YOU'RE WEAK")}</div>}
     </div>
   );
@@ -96,15 +133,15 @@ export function teamStats(d, range) {
 
 const name = (p) => (p.full_name || p.email).split(' ')[0];
 
-export function TeamTable({ rows, compact }) {
+export function TeamTable({ rows, compact, calls }) {
   return (
     <div className="tablewrap"><table className="ordertable fin">
-      <thead><tr><th>Rep</th><th className="n">Dials</th><th className="n">Pick-up</th><th className="n">Booked</th><th className="n">Replies answered</th>{!compact && <th className="n">Waiting</th>}<th className="n">Won</th><th className="n">Close rate</th>{!compact && <th className="n">Phone time</th>}<th>Last active</th></tr></thead>
+      <thead><tr><th>Rep</th><th className="n">Dials</th><th className="n">Pick-up</th><th className="n">Booked</th><th className="n">Replies answered</th>{!compact && <th className="n">Waiting</th>}<th className="n">Won</th><th className="n">Close rate</th>{!compact && <th className="n">Phone time</th>}{calls && <th>3-mo dials</th>}<th>Last active</th></tr></thead>
       <tbody>{rows.map((r) => (
         <tr key={r.p.id}><td><b>{name(r.p)}</b>{r.p.is_owner && <span className="sm"> (you)</span>}<div className="sm">{num(r.leads)} leads · {num(r.meetings)} calls on the books</div></td>
           <td className="n">{num(r.dials)}</td><td className="n">{pct(r.pickRate)}</td><td className="n"><b>{num(r.booked)}</b></td><td className="n">{num(r.answered)}</td>{!compact && <td className={`n ${r.waiting ? 'neg' : ''}`}>{num(r.waiting)}</td>}
-          <td className="n">{num(r.won)}{r.wonValue ? <div className="sm">{money(r.wonValue)}/mo</div> : null}</td><td className="n">{r.closeRate == null ? '—' : pct(r.closeRate)}{r.lost ? <div className="sm">{num(r.lost)} lost</div> : null}</td>{!compact && <td className="n">{hhmm(r.time)}</td>}<td className="sm">{ago(r.lastActive)}</td></tr>
-      ))}{rows.length === 0 && <tr><td colSpan={10} className="empty">No salespeople yet — add them below.</td></tr>}</tbody>
+          <td className="n">{num(r.won)}{r.wonValue ? <div className="sm">{money(r.wonValue)}/mo</div> : null}</td><td className="n">{r.closeRate == null ? '—' : pct(r.closeRate)}{r.lost ? <div className="sm">{num(r.lost)} lost</div> : null}</td>{!compact && <td className="n">{hhmm(r.time)}</td>}{calls && <td><Spark points={byMonth(calls.filter((c) => c.by_user === r.p.id), (c) => c.started_at)} /></td>}<td className="sm">{ago(r.lastActive)}</td></tr>
+      ))}{rows.length === 0 && <tr><td colSpan={11} className="empty">No salespeople yet — add them below.</td></tr>}</tbody>
     </table></div>
   );
 }
@@ -159,7 +196,11 @@ export default function Team() {
     <>
       {msg && <div className={`msg ${msg.kind} flash`}>{msg.text}<button onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
       <div className="opsbar"><span className="seg tight">{RANGES.map(([k, l]) => <button key={k} className={range === k ? 'on' : ''} onClick={() => setRange(k)}>{l}</button>)}</span><div className="spacer" /><span className="sm">Team: <b>{num(tot.dials)}</b> dials · <b>{num(tot.booked)}</b> booked · <b>{num(tot.answered)}</b> replies answered · <b>{num(tot.won)}</b> won · close rate <b>{teamClose == null ? '—' : pct(teamClose)}</b></span></div>
-      <div className="card"><div className="cardhead"><h3>Scoreboard</h3><span className="sm">{RANGES.find((r) => r[0] === range)[1].toLowerCase()}</span></div><TeamTable rows={rows} /></div>
+      <div className="card"><div className="cardhead"><h3>Scoreboard</h3><span className="sm">{RANGES.find((r) => r[0] === range)[1].toLowerCase()}</span></div><TeamTable rows={rows} calls={d.calls} /></div>
+      <div className="ownergrid">
+        <TrendCard title="Dials per month" series={d.people.filter((p) => p.is_sales || p.is_owner).map((p) => ({ name: name(p), points: byMonth(d.calls.filter((c) => c.by_user === p.id), (c) => c.started_at) }))} />
+        <TrendCard title="Calls booked per month" series={d.people.filter((p) => p.is_sales || p.is_owner).map((p) => ({ name: name(p), points: byMonth(d.calls.filter((c) => c.by_user === p.id && c.outcome === 'booked'), (c) => c.started_at) }))} />
+      </div>
       <div className="ownergrid three">
         <RepBars title="Dials" rows={rows} get={(r) => r.dials} />
         <RepBars title="Calls booked" rows={rows} get={(r) => r.booked} color="#1E9E6F" />
@@ -167,7 +208,7 @@ export default function Team() {
       </div>
       <div className="ownergrid">
         <div className="card"><div className="cardhead"><h3>Dials per day · last 14 days</h3></div><DailyLines d={d} /></div>
-        <div className="card"><div className="cardhead"><h3>Bonus · this {goals?.bonus?.period || 'month'}</h3><span className="sm">{BONUS_METRICS[goals?.bonus?.metric] || ''}</span></div>
+        <div className="card"><div className="cardhead"><h3>Bonus · this {goals?.bonus?.period || 'month'}</h3></div>
           {goals && rows.map((r) => { const b = bonusFor(goals, r.p.id); const p = bonusProgress(b, d, r.p.id); return <BonusBar key={r.p.id} b={b} p={p} name={name(r.p)} compact />; })}
         </div>
       </div>
@@ -187,9 +228,9 @@ export default function Team() {
           <div className="cardhead"><h3>Bonus rules</h3><select className="statusselect" value={gRep} onChange={(e) => setGRep(e.target.value)}><option value="">Team</option>{d.people.filter((p) => p.is_sales || p.is_owner).map((p) => <option key={p.id} value={p.id}>{name(p)}</option>)}</select></div>
           {goals && (() => { const b = gRep ? { ...goals.bonus, ...(goals.bonus_reps[gRep] || {}) } : goals.bonus; const setB = (k, v) => saveGoals(gRep ? { ...goals, bonus_reps: { ...goals.bonus_reps, [gRep]: { ...(goals.bonus_reps[gRep] || {}), [k]: v } } } : { ...goals, bonus: { ...goals.bonus, [k]: v } }); return (
             <div className="addgrid two">
-              <label>Counts<select value={b.metric} onChange={(e) => setB('metric', e.target.value)}>{Object.entries(BONUS_METRICS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+              {(b.rules?.length ? b.rules : DEFAULT_BONUS.rules).map((r, i) => <div key={i} className="wide2 rulerow"><span className="sm">{i === 0 ? 'Hit this' : 'OR this'}</span><select value={r.metric} onChange={(e) => { const rules = [...(b.rules || DEFAULT_BONUS.rules)]; rules[i] = { ...rules[i], metric: e.target.value }; setB('rules', rules); }}>{Object.entries(BONUS_METRICS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select><input className="cellnum" type="number" min="0" value={r.target} onChange={(e) => { const rules = [...(b.rules || DEFAULT_BONUS.rules)]; rules[i] = { ...rules[i], target: Number(e.target.value) || 0 }; setB('rules', rules); }} />{i > 0 && <button className="btn-xs" onClick={() => setB('rules', (b.rules || []).filter((_, j) => j !== i))}>×</button>}</div>)}
+              {(b.rules?.length || 0) < 3 && <div className="wide2"><button className="btn-xs" onClick={() => setB('rules', [...(b.rules || DEFAULT_BONUS.rules), { metric: 'won', target: 3 }])}>+ or another way to hit it</button></div>}
               <label>Per<select value={b.period} onChange={(e) => setB('period', e.target.value)}><option value="month">Month</option><option value="week">Week</option></select></label>
-              <label>Target<input type="number" min="0" value={b.target} onChange={(e) => setB('target', Number(e.target.value) || 0)} /></label>
               <label>Payout $<input type="number" min="0" value={b.payout} onChange={(e) => setB('payout', Number(e.target.value) || 0)} /></label>
               <label className="wide2">Message until they hit it<input value={b.message} onChange={(e) => setB('message', e.target.value)} /></label>
             </div>

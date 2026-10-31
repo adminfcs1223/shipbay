@@ -55,7 +55,7 @@ export const PhaseIcon = ({ kind }) => {
   }
 };
 
-export default function Onboarding({ me }) {
+export default function Onboarding({ me, params }) {
   const [accounts, setAccounts] = useState(null);
   const [selected, setSelected] = useState(null);
   const [adding, setAdding] = useState(false);
@@ -64,10 +64,11 @@ export default function Onboarding({ me }) {
     const { data } = await supabase.from('v_onboarding_progress').select('*').in('status', ['onboarding', 'active']).order('created_at', { ascending: false });
     setAccounts(data || []);
     // coming back from a provider's OAuth screen: ?org=<id> lands on that account
-    const back = new URLSearchParams(window.location.search).get('org');
+    const back = params?.org || new URLSearchParams(window.location.search).get('org');
     setSelected((s) => s ?? (back && data?.some((a) => a.org_id === back) ? back : null) ?? data?.[0]?.org_id ?? null);
   };
   useEffect(() => { load(); }, []);
+  useEffect(() => { if (params?.org) setSelected(params.org); }, [params?.org]);
 
   const onboarding = (accounts || []).filter((a) => a.status === 'onboarding');
   const current = (accounts || []).find((a) => a.org_id === selected);

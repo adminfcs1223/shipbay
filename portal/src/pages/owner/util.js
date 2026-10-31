@@ -74,3 +74,12 @@ export function guessColumns(headers) {
     notes: find('notes', 'comment'),
   };
 }
+
+/* ---------- trends: the last N months of anything ---------- */
+export function monthKeys(n = 3) { const out = []; const d = new Date(); for (let i = n - 1; i >= 0; i--) out.push(monthKey(new Date(d.getFullYear(), d.getMonth() - i, 1))); return out; }
+/** rows → [{m, label, v}] counting (or summing `sum(row)`) rows whose `dateOf(row)` falls in each of the last n months */
+export function byMonth(rows, dateOf, n = 3, sum) {
+  const keys = monthKeys(n); const g = Object.fromEntries(keys.map((k) => [k, 0]));
+  for (const r of rows) { const d = dateOf(r); if (!d) continue; const k = String(d).slice(0, 7); if (k in g) g[k] += sum ? Number(sum(r)) || 0 : 1; }
+  return keys.map((k) => ({ m: k, label: monthLabel(k), v: g[k] }));
+}
