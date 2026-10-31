@@ -11,8 +11,8 @@ import { compute, phases } from '../../quote';
 /** the quotes that belong to an account (by the account row, or its client org) — best first */
 const QRANK = { accepted: 0, sent: 1, draft: 2, declined: 3, superseded: 4 };
 export const quotesFor = (lead, quotes) => (quotes || []).filter((q) => q.lead_id === lead?.id || (lead?.org_id && q.org_id === lead.org_id)).sort((a, b) => (a.internal_only - b.internal_only) || (QRANK[a.status] ?? 9) - (QRANK[b.status] ?? 9) || (b.updated_at || '').localeCompare(a.updated_at || ''));
-/** what a quote bills per month in services (first phase: what they pay from day one) */
-export const quoteMonthly = (q) => { try { const m = compute(q, undefined, phases(q)[0]?.key || 'standard'); return m.oneTime ? null : Math.round(m.services || 0); } catch { return null; } };
+/** what a quote bills per month in services — the first phase after any waived-fees months (what a normal month looks like) */
+export const quoteMonthly = (q) => { try { const ph = phases(q); const p = ph.find((x) => x.key !== 'waived') || ph[0]; const m = compute(q, undefined, p?.key || 'standard'); return m.oneTime ? null : Math.round(m.services || 0); } catch { return null; } };
 /** expected services $/month for an account: its quote if it has one, else the hand-typed deal value */
 export const expectedMonthly = (lead, quotes) => { const q = quotesFor(lead, quotes).find((x) => !x.internal_only && x.status !== 'declined' && x.status !== 'superseded'); const v = q ? quoteMonthly(q) : null; return v != null ? { value: v, from: q } : { value: lead?.deal_value ? Number(lead.deal_value) : null, from: null }; };
 

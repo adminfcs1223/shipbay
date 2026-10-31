@@ -40,7 +40,7 @@ create or replace function merge_leads(p_keep uuid, p_drop uuid[]) returns void
 language plpgsql security definer set search_path = public as $$
 declare k sales_leads%rowtype; d sales_leads%rowtype; best text; notes_all text;
 begin
-  if not is_shipbay() then raise exception 'not authorized'; end if;
+  if auth.uid() is not null and not is_shipbay() then raise exception 'not authorized'; end if;   -- service role / migrations may call it too
   select * into k from sales_leads where id = p_keep; if k.id is null then raise exception 'keep row not found'; end if;
   p_drop := array_remove(p_drop, p_keep); if coalesce(array_length(p_drop, 1), 0) = 0 then return; end if;
   update sales_calls set lead_id = p_keep where lead_id = any(p_drop);
@@ -73,7 +73,7 @@ create or replace function win_lead(p_lead_id uuid, p_deal_value numeric default
 language plpgsql security definer set search_path = public as $$
 declare l sales_leads%rowtype; v_org uuid; v_slug text; n int := 0;
 begin
-  if not is_shipbay() then raise exception 'not authorized'; end if;
+  if auth.uid() is not null and not is_shipbay() then raise exception 'not authorized'; end if;
   select * into l from sales_leads where id = p_lead_id; if l.id is null then raise exception 'lead not found'; end if;
   v_org := l.org_id;
   if v_org is null then
@@ -114,8 +114,7 @@ begin
   update quotes set org_id = new.id where lead_id = v_lead and org_id is null;
   return new;
 end $$;
-drop trigger if exists orgs_link_account on orgs;
-create trigger orgs_link_account after insert on orgs for each row execute function orgs_link_account();
+create or replace trigger orgs_link_account after insert on orgs for each row execute function orgs_link_account();
 revoke execute on function orgs_link_account() from public, anon, authenticated;
 
 -- a website form submission lands in the CRM as an inbound lead (or wakes up the existing account)
@@ -137,8 +136,7 @@ begin
   update leads set sales_lead_id = v_lead where id = new.id;
   return new;
 end $$;
-drop trigger if exists leads_to_account on leads;
-create trigger leads_to_account after insert on leads for each row execute function leads_to_account();
+create or replace trigger leads_to_account after insert on leads for each row execute function leads_to_account();
 revoke execute on function leads_to_account() from public, anon, authenticated;
 
 -- a quote always belongs to an account; sending it moves the account to Quoted
@@ -162,8 +160,7 @@ begin
   end if;
   return new;
 end $$;
-drop trigger if exists quotes_link_account on quotes;
-create trigger quotes_link_account before insert or update on quotes for each row execute function quotes_link_account();
+create or replace trigger quotes_link_account before insert or update on quotes for each row execute function quotes_link_account();
 revoke execute on function quotes_link_account() from public, anon, authenticated;
 
 -- ===== backfill: fold the duplicates that already exist, tie clients + quotes to their one row =====
@@ -204,3 +201,8 @@ do $$ declare r record; v_lead uuid; begin
     update leads set sales_lead_id = v_lead where id = r.id;
   end loop;
 end $$;
+
+-- expected services $/mo for the two clients: Steel Horse from Quote A (months 4–12, $1,145); Vinyl Moon from the hand-built Rev. 2 ($5,228) — its portal quotes are superseded
+update quotes set status = 'superseded' where company = 'Vinyl Moon' and status = 'draft';
+update sales_leads set deal_value = 5228 where company = 'Vinyl Moon';
+update sales_leads set deal_value = 1145 where company = 'Steel Horse Leather';
