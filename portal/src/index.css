@@ -982,3 +982,14 @@ select.statuspill.ok, select.statuspill.warn, select.statuspill.bad, select.stat
 .kmeta { min-width: 0; } .kmeta .sm { white-space: nowrap; }
 .kcards { grid-template-columns: minmax(0, 1fr); }
 .kcard { grid-template-columns: minmax(0, 1fr); }
+/* goals */
+.goalrows { display: grid; gap: 12px; }
+.goalrow .lbl { display: flex; justify-content: space-between; font-size: 13.5px; margin-bottom: 5px; }
+.goalrow .lbl .of { color: var(--muted-2); font-weight: 500; }
+.goalrow .bar { height: 12px; margin: 0; background: #EEF0F3; }
+.goalrow .bar i { background: var(--orange); border-radius: 99px; transition: width .3s; }
+.goalrow.done .bar i { background: #1E9E6F; }
+.goalsedit .cellnum { width: 84px; }
+.feed { list-style: none; margin: 0; padding: 0; max-height: 480px; overflow: auto; }
+.feed li { display: grid; grid-template-columns: 64px 70px 1fr; gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; align-items: baseline; }
+.feed li.ok span:last-child { color: #177A56; } .feed li.win span:last-child { color: #177A56; font-weight: 700; }

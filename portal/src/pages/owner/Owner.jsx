@@ -5,8 +5,9 @@ import { ownerFn, getToken, setToken } from './util';
 import Financials from './Financials';
 import Sales from './Sales';
 import Strategies from './Strategies';
+import Team from './Team';
 
-const TABS = [['fin', 'Financials'], ['sales', 'Sales'], ['strat', 'Strategies'], ['settings', 'Settings']];
+const TABS = [['fin', 'Financials'], ['sales', 'Sales'], ['team', 'Team'], ['strat', 'Strategies'], ['settings', 'Settings']];
 
 export default function Owner({ me }) {
   const [status, setStatus] = useState(null);     // from action:status
@@ -41,6 +42,7 @@ export default function Owner({ me }) {
       <div className="card ownertabs"><div className="tabs">{TABS.map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}</div></div>
       {tab === 'fin' && <Financials status={status} refreshStatus={refresh} />}
       {tab === 'sales' && <Sales me={me} status={status} refreshStatus={refresh} />}
+      {tab === 'team' && <Team />}
       {tab === 'strat' && <Strategies />}
       {tab === 'settings' && <Settings status={status} refreshStatus={refresh} />}
     </div>

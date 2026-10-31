@@ -161,6 +161,17 @@ async function smartleadSync(uid: string) {
     for (let i = 0; i < touched.length; i += 200) await admin.from('sales_leads').update({ stage: 'contacted', last_touch_at: new Date().toISOString() }).in('id', touched.slice(i, i + 200)).eq('stage', 'new');
     const replied = [...new Set(rows.filter((r) => r.replied).map((r) => r.lead_id).filter(Boolean))] as string[];
     if (replied.length) await admin.from('sales_leads').update({ stage: 'replied' }).in('id', replied).in('stage', ['new', 'contacted']);
+    // round-robin: every reply that nobody owns yet goes to the next rep in the rotation
+    if (replied.length) {
+      const rr = (await getSetting('round_robin')) || { members: [], next: 0 };
+      const members: string[] = (rr.members || []).filter(Boolean);
+      if (members.length) {
+        const { data: unowned } = await admin.from('sales_leads').select('id').in('id', replied).is('assigned_to', null);
+        let n = Number(rr.next || 0);
+        for (const l of unowned || []) { await admin.from('sales_leads').update({ assigned_to: members[n % members.length] }).eq('id', l.id); n++; }
+        if ((unowned || []).length) await setSetting('round_robin', { ...rr, members, next: n % members.length });
+      }
+    }
     const neg = [...new Set(rows.filter((r) => r.reply_type === 'Negative').map((r) => r.lead_id).filter(Boolean))] as string[];
     if (neg.length) await admin.from('sales_leads').update({ stage: 'dnc' }).in('id', neg);
     out[label] = { leads: leads.length, sends: rows.length, reply_bodies: bodies, analytics: await (await fetch(`${base}/campaigns/${cid}/analytics?api_key=${key}`)).json().catch(() => null) };
@@ -309,9 +320,15 @@ Deno.serve(async (req) => {
   const userClient = createClient(SB_URL, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: auth } }, auth: { persistSession: false } });
   const { data: { user: me } } = await userClient.auth.getUser();
   if (!me) return json({ error: 'not signed in' }, 401);
-  const { data: prof } = await admin.from('profiles').select('is_owner, role').eq('id', me.id).single();
-  if (!prof?.is_owner) return json({ error: 'This area is for the owner only.' }, 403);
+  const { data: prof } = await admin.from('profiles').select('is_owner, is_sales, role').eq('id', me.id).single();
   const b = await req.json().catch(() => ({}));
+  const REP_ACTIONS = new Set(['smartlead_stop_lead']);   // sales reps may do these without the owner passphrase
+  if (!prof?.is_owner) {
+    if (prof?.is_sales && REP_ACTIONS.has(b.action)) {
+      if (b.action === 'smartlead_stop_lead') { try { return json(await smartleadStopLead(String(b.email || ''))); } catch (e) { return json({ error: String(e) }, 500); } }
+    }
+    return json({ error: 'This area is for the owner only.' }, 403);
+  }
   const stored = await secret('OWNER_PASSPHRASE');
   const unlocked = await tokenOk(me.id, req.headers.get('x-owner-token'));
 
