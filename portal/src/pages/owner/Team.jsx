@@ -7,7 +7,7 @@ import { fetchAll, money, pct, num, ago, hhmm, stageLabel, stageClass, byMonth, 
 const CONNECT = new Set(['connected', 'booked', 'not_fit']); const PICKUP = new Set(['gatekeeper', 'connected', 'booked', 'not_fit']);
 const RANGES = [['today', 'Today'], ['week', '7 days'], ['month', '30 days'], ['all', 'All time']];
 export const DEFAULT_GOALS = { dials_day: 60, dials_week: 300, emails_day: 150, emails_week: 750, booked_day: 1, booked_week: 5 };
-export const DEFAULT_BONUS = { rules: [{ metric: 'booked', target: 20 }, { metric: 'won', target: 3 }], payout: 500, period: 'month', message: "NO YOU'RE WEAK" };
+export const DEFAULT_BONUS = { rules: [{ metric: 'booked', target: 20 }, { metric: 'won', target: 3 }], payout: 500, period: 'month', message: "NO YOU'RE WEAK", hit_message: 'SO STRONG' };
 const PAL = ['var(--orange)', '#1E9E6F', '#3B82F6', '#A855F7', '#F59E0B', '#EF4444'];
 
 /** Tiny inline sparkline for a table cell: points = [{label, v}] */
@@ -75,7 +75,7 @@ export function BonusBar({ b, p, name, compact }) {
           <div className="bar"><i style={{ width: `${r.pct * 100}%` }} className={r.hit ? 'hit' : ''} /></div>
         </div>
       ))}
-      {!compact && <div className="verdict">{p.hit ? 'BONUS UNLOCKED' : (b.message || "NO YOU'RE WEAK")}</div>}
+      {!compact && <div className="verdict">{p.hit ? (b.hit_message || 'SO STRONG') : (b.message || "NO YOU'RE WEAK")}</div>}
     </div>
   );
 }
@@ -228,7 +228,8 @@ export default function Team() {
               {(b.rules?.length || 0) < 3 && <div className="wide2"><button className="btn-xs" onClick={() => setB('rules', [...(b.rules || DEFAULT_BONUS.rules), { metric: 'won', target: 3 }])}>+ or another way to hit it</button></div>}
               <label>Per<select value={b.period} onChange={(e) => setB('period', e.target.value)}><option value="month">Month</option><option value="week">Week</option></select></label>
               <label>Payout $<input type="number" min="0" value={b.payout} onChange={(e) => setB('payout', Number(e.target.value) || 0)} /></label>
-              <label className="wide2">Message until they hit it<input value={b.message} onChange={(e) => setB('message', e.target.value)} /></label>
+              <label>Message until they hit it<input value={b.message || ''} onChange={(e) => setB('message', e.target.value)} /></label>
+              <label>Message when they hit it<input value={b.hit_message || ''} placeholder="SO STRONG" onChange={(e) => setB('hit_message', e.target.value)} /></label>
             </div>
           ); })()}
         </div>

@@ -19,7 +19,9 @@ const json = (b: unknown, status = 200) => Response.json(b, { status, headers: c
 const DASH = 'https://dashboard.shipbay3pl.com/';
 const QBO_REDIRECT = 'https://dashboard.shipbay3pl.com/oauth/qbo';
 const QBO_API = 'https://quickbooks.api.intuit.com';
-const SECRET_KEYS = new Set(['QBO_CLIENT_ID', 'QBO_CLIENT_SECRET', 'SMARTLEAD_API_KEY', 'SMARTLEAD_CAMPAIGNS', 'CALENDLY_TOKEN', 'GCAL_ICS_URL']);
+const SECRET_KEYS = new Set(['QBO_CLIENT_ID', 'QBO_CLIENT_SECRET', 'SMARTLEAD_API_KEY', 'SMARTLEAD_CAMPAIGNS', 'CALENDLY_TOKEN', 'GCAL_ICS_URL', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']);
+const GOOGLE_REDIRECT = 'https://dashboard.shipbay3pl.com/oauth/google';
+const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.email';
 const SL = 'https://server.smartlead.ai/api/v1';
 const enc = new TextEncoder();
 
@@ -293,6 +295,62 @@ async function gcalSync(uid: string) {
   return { ok: true, events: n };
 }
 
+// ---------- Gmail (per staff user) ----------
+async function googleAccess(uid: string) {
+  const { data } = await admin.from('gmail_accounts').select('*').eq('user_id', uid).maybeSingle(); if (!data) return null;
+  if (new Date(data.expires_at).getTime() - Date.now() > 60000) return data;
+  const [id, sec] = [await secret('GOOGLE_CLIENT_ID'), await secret('GOOGLE_CLIENT_SECRET')];
+  const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: id, client_secret: sec, grant_type: 'refresh_token', refresh_token: data.refresh_token || '' }) });
+  const j = await r.json(); if (!r.ok || !j.access_token) { await admin.from('gmail_accounts').update({ last_error: `Token refresh failed: ${JSON.stringify(j).slice(0, 160)}` }).eq('user_id', uid); return null; }
+  const upd = { access_token: j.access_token, expires_at: new Date(Date.now() + (j.expires_in || 3600) * 1000).toISOString(), last_error: null };
+  await admin.from('gmail_accounts').update(upd).eq('user_id', uid); return { ...data, ...upd };
+}
+const b64url = (s: string) => { try { return new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))); } catch { return ''; } };
+function gmailBody(payload: any): string {
+  const parts: any[] = []; const walk = (p: any) => { if (!p) return; parts.push(p); (p.parts || []).forEach(walk); }; walk(payload);
+  const plain = parts.find((p) => p.mimeType === 'text/plain' && p.body?.data); if (plain) return replyText(b64url(plain.body.data).replace(/\n/g, '<br>'));
+  const html = parts.find((p) => p.mimeType === 'text/html' && p.body?.data); if (html) return replyText(b64url(html.body.data));
+  return '';
+}
+const addr = (h: string) => (h || '').toLowerCase().match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/g) || [];
+async function gmailSync(uid: string, all: boolean) {
+  const { data: accts } = all ? await admin.from('gmail_accounts').select('user_id, email') : await admin.from('gmail_accounts').select('user_id, email').eq('user_id', uid);
+  if (!accts?.length) return { error: 'No Gmail connected yet.' };
+  // every lead with an email → id
+  const byMail = new Map<string, any>();
+  for (let off = 0; ; off += 1000) { const { data: page } = await admin.from('sales_leads').select('id, email, stage, assigned_to, company').not('email', 'is', null).range(off, off + 999); for (const l of page || []) byMail.set(String(l.email).toLowerCase(), l); if (!page || page.length < 1000) break; }
+  const out: Record<string, unknown> = {};
+  for (const a of accts) {
+    const tok = await googleAccess(a.user_id); if (!tok) { out[a.email] = 'token problem'; continue; }
+    const H = { Authorization: `Bearer ${tok.access_token}` }; const G = 'https://gmail.googleapis.com/gmail/v1/users/me';
+    const { data: have } = await admin.from('sales_email_sends').select('external_id').eq('mailbox', a.email); const seen = new Set((have || []).map((h: any) => h.external_id));
+    let ids: string[] = []; let pageToken = '';
+    for (let n = 0; n < 4; n++) { const j = await (await fetch(`${G}/messages?${new URLSearchParams({ q: 'newer_than:21d -in:spam -in:trash -category:promotions', maxResults: '100', ...(pageToken ? { pageToken } : {}) })}`, { headers: H })).json(); ids.push(...(j.messages || []).map((m: any) => m.id)); pageToken = j.nextPageToken || ''; if (!pageToken) break; }
+    let replies = 0, sent = 0;
+    for (const id of ids) {
+      if (seen.has(`gmail:${id}`)) continue;
+      const m = await (await fetch(`${G}/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`, { headers: H })).json();
+      const hd = Object.fromEntries((m.payload?.headers || []).map((h: any) => [h.name.toLowerCase(), h.value]));
+      const from = addr(hd.from)[0]; const tos = addr(hd.to); const when = new Date(Number(m.internalDate || Date.now())).toISOString(); const labels: string[] = m.labelIds || [];
+      if (labels.includes('SENT')) {
+        const l = tos.map((t) => byMail.get(t)).find(Boolean); if (!l) continue;
+        const { data: dup } = await admin.from('sales_touches').select('id').eq('lead_id', l.id).eq('note', `gmail:${id}`).maybeSingle(); if (dup) continue;
+        await admin.from('sales_touches').insert({ lead_id: l.id, kind: 'email_sent', note: `gmail:${id}`, at: when, by_user: a.user_id });
+        await admin.from('sales_leads').update({ last_touch_at: when, last_outcome: 'email_sent', ...(l.stage === 'new' ? { stage: 'contacted' } : {}), ...(l.assigned_to ? {} : { assigned_to: a.user_id }) }).eq('id', l.id); sent++;
+        continue;
+      }
+      const l = from ? byMail.get(from) : null; if (!l) continue;
+      const full = await (await fetch(`${G}/messages/${id}?format=full`, { headers: H })).json();
+      const body = gmailBody(full.payload) || m.snippet || '';
+      await admin.from('sales_email_sends').upsert({ external_id: `gmail:${id}`, lead_id: l.id, lead_email: from, lead_name: (hd.from || '').replace(/<.*$/, '').replace(/"/g, '').trim() || null, campaign: `Gmail · ${a.email}`, mailbox: a.email, step: 0, subject: hd.subject || '(no subject)', sent_at: when, replied: true, reply_at: when, reply_body: body.slice(0, 4000), reply_subject: hd.subject || null, bounced: false }, { onConflict: 'external_id' });
+      await admin.from('sales_leads').update({ ...(['new', 'contacted'].includes(l.stage) ? { stage: 'replied' } : {}), last_touch_at: when, ...(l.assigned_to ? {} : { assigned_to: a.user_id }) }).eq('id', l.id); replies++;
+    }
+    await admin.from('gmail_accounts').update({ last_sync_at: new Date().toISOString(), last_error: null }).eq('user_id', a.user_id);
+    out[a.email] = { scanned: ids.length, replies, sent };
+  }
+  return { ok: true, accounts: out };
+}
+
 // ---------- Calendly ----------
 async function calendlySync(uid: string) {
   const tok = await secret('CALENDLY_TOKEN'); if (!tok) return { error: 'Paste a Calendly personal access token under Settings first.' };
@@ -381,6 +439,22 @@ Deno.serve(async (req) => {
     return back(true, company ? `Connected to ${company}` : 'Connected');
   }
 
+  // ----- Google OAuth return leg (no JWT) -----
+  if (req.method === 'GET' && u.pathname.endsWith('/google-callback')) {
+    const q = u.searchParams; const back = (ok: boolean, msg: string) => Response.redirect(`${DASH}#sales=gmail|${ok ? 'ok' : 'error'}|${encodeURIComponent(msg)}`, 302);
+    const st = await getSetting(`google_state:${q.get('state')}`);
+    if (!st || Date.now() - new Date(st.at).getTime() > 15 * 60 * 1000) return back(false, 'That connect link expired — start again from Sales → Settings.');
+    if (q.get('error')) return back(false, q.get('error') || 'Google declined');
+    const [id, sec] = [await secret('GOOGLE_CLIENT_ID'), await secret('GOOGLE_CLIENT_SECRET')];
+    const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ code: q.get('code') || '', client_id: id, client_secret: sec, redirect_uri: GOOGLE_REDIRECT, grant_type: 'authorization_code' }) });
+    const j = await r.json(); if (!r.ok || !j.access_token) return back(false, `Token exchange failed: ${JSON.stringify(j).slice(0, 160)}`);
+    const info = await (await fetch('https://www.googleapis.com/oauth2/v2/userinfo', { headers: { Authorization: `Bearer ${j.access_token}` } })).json().catch(() => ({}));
+    const { data: prev } = await admin.from('gmail_accounts').select('refresh_token').eq('user_id', st.uid).maybeSingle();
+    await admin.from('gmail_accounts').upsert({ user_id: st.uid, email: info.email || null, access_token: j.access_token, refresh_token: j.refresh_token || prev?.refresh_token || null, expires_at: new Date(Date.now() + (j.expires_in || 3600) * 1000).toISOString(), connected_at: new Date().toISOString(), last_error: null }, { onConflict: 'user_id' });
+    await setSetting(`google_state:${q.get('state')}`, null);
+    return back(true, info.email ? `Gmail connected: ${info.email}` : 'Gmail connected');
+  }
+
   // ----- everything else: signed-in owner -----
   const auth = req.headers.get('Authorization') ?? '';
   const userClient = createClient(SB_URL, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: auth } }, auth: { persistSession: false } });
@@ -388,19 +462,26 @@ Deno.serve(async (req) => {
   if (!me) return json({ error: 'not signed in' }, 401);
   const { data: prof } = await admin.from('profiles').select('is_owner, is_sales, role').eq('id', me.id).single();
   const b = await req.json().catch(() => ({}));
-  const REP_ACTIONS = new Set(['smartlead_stop_lead']);   // sales reps may do these without the owner passphrase
+  const REP_ACTIONS = new Set(['smartlead_stop_lead', 'gmail_connect', 'gmail_sync', 'gmail_disconnect']);   // sales reps may do these without the owner passphrase
+  const gmailConnect = async () => { const id = await secret('GOOGLE_CLIENT_ID'); if (!id) return json({ error: 'Google app keys are missing.' }, 400); const state = crypto.randomUUID(); await setSetting(`google_state:${state}`, { uid: me.id, at: new Date().toISOString() }); return json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({ client_id: id, redirect_uri: GOOGLE_REDIRECT, response_type: 'code', scope: GOOGLE_SCOPES, access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state })}` }); };
+  const repAction = async () => {
+    if (b.action === 'smartlead_stop_lead') return json(await smartleadStopLead(String(b.email || '')));
+    if (b.action === 'gmail_connect') return gmailConnect();
+    if (b.action === 'gmail_sync') return json(await gmailSync(me.id, !!prof?.is_owner && !!b.all));
+    if (b.action === 'gmail_disconnect') { await admin.from('gmail_accounts').delete().eq('user_id', me.id); return json({ ok: true }); }
+    return null;
+  };
   if (!prof?.is_owner) {
-    if (prof?.is_sales && REP_ACTIONS.has(b.action)) {
-      if (b.action === 'smartlead_stop_lead') { try { return json(await smartleadStopLead(String(b.email || ''))); } catch (e) { return json({ error: String(e) }, 500); } }
-    }
+    if (prof?.is_sales && REP_ACTIONS.has(b.action)) { try { const r = await repAction(); if (r) return r; } catch (e) { return json({ error: String(e) }, 500); } }
     return json({ error: 'This area is for the owner only.' }, 403);
   }
+  if (REP_ACTIONS.has(b.action) && b.action !== 'smartlead_stop_lead') { try { const r = await repAction(); if (r) return r; } catch (e) { return json({ error: String(e) }, 500); } }
   const stored = await secret('OWNER_PASSPHRASE');
   const unlocked = await tokenOk(me.id, req.headers.get('x-owner-token'));
 
   if (b.action === 'status') {
     const { data: qbo } = await admin.from('fin_qbo_status').select('*').eq('id', 1).maybeSingle();
-    return json({ passphrase_set: !!stored, unlocked, qbo, smartlead_key_set: !!(await secret('SMARTLEAD_API_KEY')), smartlead_campaigns: await secret('SMARTLEAD_CAMPAIGNS'), qbo_keys_set: !!(await secret('QBO_CLIENT_ID')) && !!(await secret('QBO_CLIENT_SECRET')), smartlead_last_sync: await getSetting('smartlead_last_sync'), calendly_set: !!(await secret('CALENDLY_TOKEN')), calendly_last_sync: await getSetting('calendly_last_sync'), gcal_set: !!(await secret('GCAL_ICS_URL')), gcal_last_sync: await getSetting('gcal_last_sync') });
+    return json({ passphrase_set: !!stored, unlocked, qbo, smartlead_key_set: !!(await secret('SMARTLEAD_API_KEY')), smartlead_campaigns: await secret('SMARTLEAD_CAMPAIGNS'), qbo_keys_set: !!(await secret('QBO_CLIENT_ID')) && !!(await secret('QBO_CLIENT_SECRET')), smartlead_last_sync: await getSetting('smartlead_last_sync'), calendly_set: !!(await secret('CALENDLY_TOKEN')), calendly_last_sync: await getSetting('calendly_last_sync'), gcal_set: !!(await secret('GCAL_ICS_URL')), gcal_last_sync: await getSetting('gcal_last_sync'), google_keys_set: !!(await secret('GOOGLE_CLIENT_ID')) && !!(await secret('GOOGLE_CLIENT_SECRET')) });
   }
 
   if (b.action === 'set_passphrase') {

@@ -7,22 +7,42 @@ import { supabase } from '../../lib';
 import { useTeamData, teamStats, TeamTable, useGoals, goalsFor, GoalBars, bonusFor, bonusProgress, BonusBar, BONUS_METRICS } from './Team';
 import { ownerFn, fetchAll, money, pct, num, ago, mmss, hhmm, STAGES, stageLabel, stageClass, parseCsv, guessColumns } from './util';
 
-const SUB = [['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['calendar', 'Calendar'], ['bonus', 'Bonus']];
+const SUB = [['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['calendar', 'Calendar'], ['bonus', 'Bonus'], ['settings', 'Settings']];
 export const LIST_NAMES = { A1: 'Self-ship brands · NJ metro', A2: 'Already on a 3PL · NJ metro', A3: 'Self-ship brands · Northeast', A4: 'Shopify Plus upgrades', B1: 'Founder-run · NJ metro', C1: 'Amazon sellers · Northeast', C2: 'Q4 overflow', X0: 'Control group' };
 export const listName = (code) => (code && LIST_NAMES[code] ? `${code} · ${LIST_NAMES[code]}` : code || '—');
 export const srcLabel = (sources, k) => sources.find((s) => s.key === k)?.label || k;
 export const srcLabelPlain = (k) => ({ cold_call: 'Cold call list', cold_email: 'Cold email', fulfill_com: 'Fulfill.com', fulfilment_com: 'fulfilment.com', agency: 'Agency', referral: 'Referral', inbound: 'Inbound', linkedin: 'LinkedIn' }[k] || 'Other');
 const lists = (leads) => [...new Set(leads.map((l) => l.filter_id).filter(Boolean))].sort();
-/** Gmail compose link for a reply to a prospect. */
-export const gmailReply = (email, subject, first, booking) => { const body = booking ? `Hi ${first || 'there'},\n\n\n\nEasiest is to grab 15 minutes here: ${booking}\n\nDerek` : ''; return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email || '')}&su=${encodeURIComponent(subject ? (subject.startsWith('Re:') ? subject : `Re: ${subject}`) : 'Following up')}${body ? `&body=${encodeURIComponent(body)}` : ''}`; };
+/** Gmail compose link */
+const gmailUrl = (email, subject, body) => `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email || '')}&su=${encodeURIComponent(subject || '')}${body ? `&body=${encodeURIComponent(body)}` : ''}`;
 /** the team's Calendly booking link (fin_settings.booking_link) */
 export function useBookingLink() { const [u, setU] = useState(''); useEffect(() => { supabase.from('fin_settings').select('value').eq('key', 'booking_link').maybeSingle().then(({ data }) => setU(data?.value?.url || '')); }, []); return u; }
+export const DEFAULT_TPL = { reply_subject: 'Quick one, {first}', reply_body: 'Hi {first},\n\n\n\nEasiest is to grab 15 minutes here: {booking}\n\n{me}', signature: '' };
+export const TPL_VARS = [['{first}', "prospect's first name"], ['{company}', 'their brand'], ['{booking}', 'your booking link'], ['{me}', 'your first name']];
+/** fill a template with a lead's details */
+export const fillTpl = (t, lead, me, booking) => (t || '').replace(/\{first\}/g, firstName(lead) || 'there').replace(/\{company\}/g, lead?.company || lead?.domain || 'your brand').replace(/\{booking\}/g, booking || '').replace(/\{me\}/g, (me?.full_name || '').split(' ')[0] || '');
+/** everything needed to open a pre-filled Gmail reply: the rep's own template (Sales → Settings) + the booking link */
+export function useReplyKit(me) {
+  const booking = useBookingLink(); const [tpl, setTpl] = useState(null);
+  useEffect(() => { if (!me?.id) return; supabase.from('sales_rep_settings').select('*').eq('user_id', me.id).maybeSingle().then(({ data }) => setTpl(data || {})); }, [me?.id]);
+  const t = { ...DEFAULT_TPL, ...Object.fromEntries(Object.entries(tpl || {}).filter(([, v]) => v)) };
+  const link = (email, replyToSubject, lead) => {
+    const body = fillTpl(t.reply_body, lead, me, booking) + (t.signature ? `\n${fillTpl(t.signature, lead, me, booking)}` : '');
+    const su = replyToSubject ? (/^re:/i.test(replyToSubject) ? replyToSubject : `Re: ${replyToSubject}`) : (fillTpl(t.reply_subject, lead, me, booking) || 'Following up');
+    return gmailUrl(email, su, body);
+  };
+  return { booking, tpl: t, link };
+}
 const firstName = (l) => (l?.contact_name || '').split(' ')[0] || '';
 
 export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
-  const [sub, setSub] = useState('overview');
+  const [sub, setSub] = useState(() => (window.location.hash.startsWith('#sales=gmail') ? 'settings' : 'overview'));
   const [leads, setLeads] = useState(null); const [sources, setSources] = useState([]); const [sends, setSends] = useState([]);
-  const [msg, setMsg] = useState(null); const [panel, setPanel] = useState(null); const [focus, setFocus] = useState(null); const [q, setQ] = useState(''); const [people, setPeople] = useState([]);
+  const [msg, setMsg] = useState(() => {       // Gmail connect round-trip lands with #sales=gmail|ok|msg
+    const h = window.location.hash; if (!h.startsWith('#sales=gmail')) return null;
+    const [, ok, m] = h.slice(7).split('|'); history.replaceState(null, '', window.location.pathname);
+    return { kind: ok === 'ok' ? 'ok' : 'err', text: decodeURIComponent(m || '') };
+  }); const [panel, setPanel] = useState(null); const [focus, setFocus] = useState(null); const [q, setQ] = useState(''); const [people, setPeople] = useState([]);
   useEffect(() => { supabase.from('profiles').select('id, full_name, email, is_sales, is_owner').like('role', 'shipbay%').eq('active', true).then(({ data }) => setPeople((data || []).filter((p) => p.is_sales || p.is_owner))); }, []);
   const load = async () => {
     const [l, s, e] = await Promise.all([fetchAll('sales_leads', '*', (qq) => qq.order('created_at', { ascending: false })), fetchAll('sales_sources'), fetchAll('sales_email_sends', '*', (qq) => qq.order('sent_at', { ascending: false }))]);
@@ -54,6 +74,7 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
           {hits.length > 0 && <div className="hits">{hits.map((l) => <button key={l.id} onClick={() => { openLead(l); setQ(''); }}><b>{l.company || l.domain || l.email}</b><span className="sm">{[l.contact_name, l.email, l.city].filter(Boolean).join(' · ')}</span><span className={`statuspill ${stageClass(l.stage)}`}>{stageLabel(l.stage)}</span></button>)}</div>}
         </div>
       </div>
+      {sub === 'settings' && <RepSettings {...ctx} status={status} />}
       {sub === 'overview' && <Overview {...ctx} leads={mine} pool={leads} sends={mySends} counts={counts} />}
       {sub === 'pipeline' && <Pipeline {...ctx} leads={mine} />}
       {sub === 'master' && <Master {...ctx} leads={mine} />}
@@ -292,7 +313,7 @@ function Master({ me, rep, leads, sources, reload, say, openLead }) {
 /* =================== Contact panel: slides in from the right; everything about one lead =================== */
 const PANEL_OUT = [['connected', 'Connected', 'ok'], ['voicemail', 'Voicemail', ''], ['no_answer', 'No answer', ''], ['gatekeeper', 'Gatekeeper', 'warn'], ['booked', 'Booked a call', 'ok solid'], ['not_fit', 'Not a fit', 'bad'], ['wrong_number', 'Wrong number', 'bad']];
 export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say, go }) {
-  const [tab, setTab] = useState('activity'); const booking = useBookingLink(); const [touches, setTouches] = useState([]); const [f, setF] = useState(lead); const [calls, setCalls] = useState([]); const [people, setPeople] = useState([]); const [meetings, setMeetings] = useState([]);
+  const [tab, setTab] = useState('activity'); const kit = useReplyKit(me); const booking = kit.booking; const [touches, setTouches] = useState([]); const [f, setF] = useState(lead); const [calls, setCalls] = useState([]); const [people, setPeople] = useState([]); const [meetings, setMeetings] = useState([]);
   const [note, setNote] = useState(''); const [busy, setBusy] = useState(false); const [logging, setLogging] = useState(false);
   const claimAs = rep ? me.id : null;
   useEffect(() => { setF(lead); }, [lead.id, lead.updated_at]);
@@ -355,7 +376,7 @@ export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say,
           <button className="btn-sm" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="pactions">
-          {lead.email && <a className="btn-sm primary" href={gmailReply(lead.email, lastReply?.subject, firstName(lead), booking)} target="_blank" rel="noreferrer">{lastReply ? 'Reply in Gmail' : 'Email in Gmail'}</a>}
+          {lead.email && <a className="btn-sm primary" href={kit.link(lead.email, lastReply?.subject, lead)} target="_blank" rel="noreferrer">{lastReply ? 'Reply in Gmail' : 'Email in Gmail'}</a>}
           {lead.email && <button className="btn-sm" onClick={async () => { await supabase.from('sales_touches').insert({ lead_id: lead.id, kind: 'email_sent', note: note || null, by_user: me.id }); await upd({ last_touch_at: new Date().toISOString(), last_outcome: 'email_sent', ...(lead.stage === 'new' ? { stage: 'contacted' } : {}) }, 'Email logged.'); const { data } = await supabase.from('sales_touches').select('*').eq('lead_id', lead.id).order('at', { ascending: false }); setTouches(data || []); }}>Mark email sent</button>}
           {booking && <button className="btn-sm" onClick={() => { navigator.clipboard?.writeText(booking); say(null, 'Booking link copied.'); }}>Copy booking link</button>}
           {lead.phone && <a className="btn-sm" href={`tel:${lead.phone.replace(/[^+\d]/g, '')}`}>Call {lead.phone}</a>}
@@ -417,7 +438,7 @@ export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say,
 
 /* =================== Conversations: the reply inbox =================== */
 function Conversations({ me, rep, leads, sends, status, people, reload, refreshStatus, say, openLead, focus, clearFocus }) {
-  const [busy, setBusy] = useState(false); const [show, setShow] = useState('all'); const [who, setWho] = useState(''); const refs = useRef({}); const booking = useBookingLink();
+  const [busy, setBusy] = useState(false); const [show, setShow] = useState('all'); const [who, setWho] = useState(''); const refs = useRef({}); const kit = useReplyKit(me);
   const sync = async () => { setBusy(true); const r = await ownerFn({ action: 'smartlead_sync' }); setBusy(false); say(r, r.error ? null : 'Smartlead synced.'); reload(); refreshStatus?.(); };
   const replies = useMemo(() => sends.filter((s) => s.replied && !s.bounced).sort((a, b) => (b.reply_at || b.sent_at).localeCompare(a.reply_at || a.sent_at)), [sends]);
   const unread = replies.filter((s) => !s.read_at && leads.find((x) => x.id === s.lead_id)?.stage !== 'dnc').length;
@@ -449,7 +470,7 @@ function Conversations({ me, rep, leads, sends, status, people, reload, refreshS
             <div className="cardhead">
               <div className="rwho">{unreadRow && <i className="dot" />}<div><b>{s.lead_name || l?.company || s.lead_email}</b>{l?.company && s.lead_name && <span className="sm"> · {l.company}</span>}<div className="sm">{s.lead_email}{l?.filter_id ? ` · list ${l.filter_id}` : ''} · step {s.step}{s.reply_at ? ` · ${ago(s.reply_at)}` : ''}</div></div></div>
               <div className="replyacts">
-                <a className="btn-xs primary" href={gmailReply(s.lead_email, s.subject, firstName(l) || (s.lead_name || '').split(' ')[0], booking)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Reply</a>
+                <a className="btn-xs primary" href={kit.link(s.lead_email, s.subject, l || { contact_name: s.lead_name })} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Reply</a>
                 {l && l.stage !== 'dnc' && (l.answered_at ? <button className="btn-xs ok" title="Click to undo" onClick={(e) => { e.stopPropagation(); markAnswered(l, false); }}>✓ Answered {new Date(l.answered_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</button> : <button className="btn-xs" onClick={(e) => { e.stopPropagation(); markAnswered(l, true); }}>Mark answered</button>)}
                 {rep ? (s.reply_type && <span className="pill">{s.reply_type}</span>) : <select className="statusselect" value={s.reply_type || ''} onClick={(e) => e.stopPropagation()} onChange={(e) => setReply(s, e.target.value)}><option value="">tag it</option>{['Positive', 'Neutral', 'Negative', 'Auto-reply', 'Bounce-back'].map((t) => <option key={t}>{t}</option>)}</select>}
                 {l && <span className={`statuspill ${stageClass(l.stage)}`}>{stageLabel(l.stage)}</span>}
@@ -607,7 +628,7 @@ const PICKUP = new Set(['gatekeeper', 'connected', 'booked', 'not_fit']); const 
 const grade = (bookedPer100, dials) => (dials < 30 ? '—' : bookedPer100 >= 3 ? 'A' : bookedPer100 >= 1.5 ? 'B' : bookedPer100 >= 0.5 ? 'C' : 'D');
 
 function Calls({ me, rep, leads, people, reload, say, openLead }) {
-  const [list, setList] = useState(''); const [who, setWho] = useState(''); const booking = useBookingLink(); const [calls, setCalls] = useState([]); const [sessions, setSessions] = useState([]);
+  const [list, setList] = useState(''); const [who, setWho] = useState(''); const kit = useReplyKit(me); const booking = kit.booking; const [calls, setCalls] = useState([]); const [sessions, setSessions] = useState([]);
   const [session, setSession] = useState(() => { try { return JSON.parse(sessionStorage.getItem('shipbay-call-session') || 'null'); } catch { return null; } });
   const [cur, setCur] = useState(null); const [callStart, setCallStart] = useState(null); const [note, setNote] = useState(''); const [tick, setTick] = useState(0); const [skipped, setSkipped] = useState([]);
   useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t); }, []);
@@ -682,7 +703,7 @@ function Calls({ me, rep, leads, people, reload, say, openLead }) {
                 {lead.notes && <pre className="notes">{lead.notes}</pre>}
               </div>
               <div className="timer">{callStart ? <><b>{mmss(callSecs)}</b><span>on the call</span></> : <button className="btn primary big" onClick={startCall}>Start call</button>}
-                {lead.email && <span className="emailacts"><a className="btn-sm" href={gmailReply(lead.email, null, firstName(lead), booking)} target="_blank" rel="noreferrer" onClick={() => setEmailed(lead.id)}>Compose email</a><button className="btn-sm" disabled={emailLogging} onClick={() => logEmail(lead)}>{emailed === lead.id ? '✓ Mark email sent' : 'Mark email sent'}</button></span>}
+                {lead.email && <span className="emailacts"><a className="btn-sm" href={kit.link(lead.email, null, lead)} target="_blank" rel="noreferrer" onClick={() => setEmailed(lead.id)}>Compose email</a><button className="btn-sm" disabled={emailLogging} onClick={() => logEmail(lead)}>{emailed === lead.id ? '✓ Mark email sent' : 'Mark email sent'}</button></span>}
               </div>
               <textarea className="callnote" rows={2} placeholder="One line: who you spoke to, what they said, when to call back…" value={note} onChange={(e) => setNote(e.target.value)} />
               <div className="outcomes">{OUTCOMES.map(([k, l, cls]) => <button key={k} className={`oc ${cls}`} onClick={() => finish(k)}>{l}</button>)}</div>
@@ -734,7 +755,7 @@ function Bonus({ me, rep, leads, people, go }) {
       {rep && (() => { const b = bonusFor(goals, me.id); const p = bonusProgress(b, { calls, leads }, me.id); return (
         <div className={`card bonushero ${p.hit ? 'hit' : ''}`}>
           <small>Your bonus this {b.period}</small>
-          <h2>{p.hit ? 'BONUS UNLOCKED' : (b.message || "NO YOU'RE WEAK")}</h2>
+          <h2>{p.hit ? (b.hit_message || 'SO STRONG') : (b.message || "NO YOU'RE WEAK")}</h2>
           {p.rules.map((r, i) => <div key={i} className="herorule"><div className="big">{i > 0 && <small>or </small>}{r.metric === 'won_value' ? money(r.value) : num(r.value)} <span>/ {r.metric === 'won_value' ? money(r.target) : num(r.target)} {r.label.toLowerCase()}</span></div><div className="bar"><i style={{ width: `${r.pct * 100}%` }} /></div></div>)}
           <div className="row"><span>{b.payout ? `${money(b.payout)} when you hit either` : ''}</span><div className="spacer" /><span>{p.daysLeft} day{p.daysLeft === 1 ? '' : 's'} left this {b.period}</span></div>
         </div>
@@ -742,6 +763,63 @@ function Bonus({ me, rep, leads, people, go }) {
       {!rep && <div className="card"><div className="cardhead"><h3>Bonus · this {goals.bonus.period}</h3><span className="sm">{(bonusFor(goals).rules || []).map((r) => `${num(r.target)} ${(BONUS_METRICS[r.metric] || r.metric).toLowerCase()}`).join(' or ')} · {money(goals.bonus.payout)}</span><div className="spacer" /><span className="sm">Rules live under Team.</span></div>
         {reps.map((p) => { const b = bonusFor(goals, p.id); const pr = bonusProgress(b, { calls, leads }, p.id); return <BonusBar key={p.id} b={b} p={pr} name={(p.full_name || p.email).split(' ')[0]} />; })}
       </div>}
+    </>
+  );
+}
+
+
+/* =================== Settings: my reply template + my Gmail =================== */
+function RepSettings({ me, rep, people, say, status }) {
+  const booking = useBookingLink();
+  const [t, setT] = useState(null); const [saving, setSaving] = useState(false); const [accts, setAccts] = useState([]); const [busy, setBusy] = useState(false);
+  const load = async () => {
+    const [{ data: row }, { data: ga }] = await Promise.all([supabase.from('sales_rep_settings').select('*').eq('user_id', me.id).maybeSingle(), supabase.from('v_gmail_accounts').select('*')]);
+    setT({ reply_subject: row?.reply_subject ?? '', reply_body: row?.reply_body ?? '', signature: row?.signature ?? '' }); setAccts(ga || []);
+  };
+  useEffect(() => { load(); }, [me.id]);
+  if (!t) return <div className="card"><div className="empty">Loading…</div></div>;
+  const eff = { ...DEFAULT_TPL, ...Object.fromEntries(Object.entries(t).filter(([, v]) => v)) };
+  const sample = { contact_name: 'Jordan Lee', company: 'Vinyl Moons' };
+  const save = async () => { setSaving(true); const { error } = await supabase.from('sales_rep_settings').upsert({ user_id: me.id, ...t, updated_at: new Date().toISOString() }); setSaving(false); say(error ? { error: error.message } : null, 'Saved. Reply and Compose email now use this.'); };
+  const reset = () => setT({ reply_subject: '', reply_body: '', signature: '' });
+  const mine = accts.find((a) => a.user_id === me.id);
+  const connect = async () => { setBusy(true); const r = await ownerFn({ action: 'gmail_connect' }); setBusy(false); if (r.url) window.location.href = r.url; else say(r); };
+  const sync = async (all) => { setBusy(true); const r = await ownerFn({ action: 'gmail_sync', all }); setBusy(false); say(r, r.ok ? `Checked ${Object.entries(r.accounts || {}).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : `${v.replies} repl${v.replies === 1 ? 'y' : 'ies'}, ${v.sent} sent`}`).join(' · ')}` : null); load(); };
+  const disconnect = async () => { if (!confirm('Disconnect your Gmail? Replies will stop flowing in until you reconnect.')) return; setBusy(true); const r = await ownerFn({ action: 'gmail_disconnect' }); setBusy(false); say(r, 'Gmail disconnected.'); load(); };
+  const insert = (k, v) => setT({ ...t, [k]: (t[k] || (k === 'reply_body' ? DEFAULT_TPL.reply_body : k === 'reply_subject' ? DEFAULT_TPL.reply_subject : '')) + v });
+  return (
+    <>
+      <div className="card">
+        <div className="cardhead"><h3>My auto email</h3><span className="sm">What Reply / Compose email pre-fills in Gmail. You can still edit before sending.</span><div className="spacer" /><button className="btn-sm" onClick={reset}>Use default</button><button className="btn-sm primary" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</button></div>
+        <div className="tplgrid">
+          <div>
+            <label>Subject <span className="sm">(used when it is not a reply)</span><input value={t.reply_subject} placeholder={DEFAULT_TPL.reply_subject} onChange={(e) => setT({ ...t, reply_subject: e.target.value })} /></label>
+            <label>Body<textarea rows={9} value={t.reply_body} placeholder={DEFAULT_TPL.reply_body} onChange={(e) => setT({ ...t, reply_body: e.target.value })} /></label>
+            <label>Signature <span className="sm">(optional, goes under the body)</span><textarea rows={3} value={t.signature} placeholder={`${(me.full_name || '').split(' ')[0]}\nShipBay 3PL`} onChange={(e) => setT({ ...t, signature: e.target.value })} /></label>
+            <div className="tplvars">{TPL_VARS.map(([v, d]) => <button key={v} className="btn-xs" title={`Insert ${v} into the body — ${d}`} onClick={() => insert('reply_body', v)}><code>{v}</code> {d}</button>)}</div>
+          </div>
+          <div className="tplpreview">
+            <small>Preview · to Jordan Lee at Vinyl Moons</small>
+            <div className="pv-subject">{fillTpl(eff.reply_subject, sample, me, booking)}</div>
+            <pre>{fillTpl(eff.reply_body, sample, me, booking)}{eff.signature ? `\n${fillTpl(eff.signature, sample, me, booking)}` : ''}</pre>
+            {!booking && <div className="sm warn">No booking link set yet{rep ? ' — ask Derek (Owner → Settings).' : ' — add it under Owner → Settings.'}</div>}
+          </div>
+        </div>
+      </div>
+      <div className="card">
+        <div className="cardhead"><h3>My Gmail</h3><span className="sm">Replies from prospects land in Conversations; emails you send them count as touches.</span><div className="spacer" />
+          {mine ? <><button className="btn-sm" disabled={busy} onClick={() => sync(false)}>Check now</button><button className="btn-sm danger" disabled={busy} onClick={disconnect}>Disconnect</button></> : <button className="btn-sm primary" disabled={busy || status?.google_keys_set === false} onClick={connect}>{busy ? 'Opening Google…' : 'Connect Gmail'}</button>}
+        </div>
+        {mine
+          ? <div className="kv"><div><span>Mailbox</span><b>{mine.email}</b></div><div><span>Connected</span><b>{new Date(mine.connected_at).toLocaleDateString()}</b></div><div><span>Last check</span><b>{ago(mine.last_sync_at)}</b></div>{mine.last_error && <div><span>Problem</span><b className="bad">{mine.last_error}</b></div>}</div>
+          : <div className="empty">Not connected. Google will ask you to allow read access to your mailbox — nothing is ever sent from here; sending stays in Gmail.</div>}
+        {!rep && (people || []).length > 1 && (
+          <div className="tbl-wrap" style={{ marginTop: 12 }}><table className="tbl"><thead><tr><th>Teammate</th><th>Gmail</th><th>Last check</th><th>Problem</th></tr></thead><tbody>
+            {(people || []).map((p) => { const a = accts.find((x) => x.user_id === p.id); return <tr key={p.id}><td>{p.full_name || p.email}</td><td>{a ? a.email : <span className="sm">not connected — they connect it from their Sales → Settings</span>}</td><td>{a ? ago(a.last_sync_at) : '—'}</td><td className="bad">{a?.last_error || ''}</td></tr>; })}
+          </tbody></table>
+          <div className="row" style={{ marginTop: 8 }}><button className="btn-sm" disabled={busy || !accts.length} onClick={() => sync(true)}>Check everyone's inbox now</button></div></div>
+        )}
+      </div>
     </>
   );
 }
