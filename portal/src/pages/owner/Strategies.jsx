@@ -3,15 +3,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib';
 import { fetchAll, money, pct, num, ago } from './util';
+import { CampaignCards, Score, Third, ChannelTable, byListRows } from './Sales';
 
 const STATUS = [['active', 'Active', 'ok'], ['idea', 'Idea', 'muted'], ['paused', 'Paused', 'warn'], ['done', 'Done', 'navy']];
 
-export default function Strategies({ sources: srcProp }) {
-  const [strats, setStrats] = useState(null); const [leads, setLeads] = useState([]); const [sources, setSources] = useState(srcProp || []); const [calls, setCalls] = useState([]);
+export default function Strategies({ sources: srcProp, status }) {
+  const [strats, setStrats] = useState(null); const [leads, setLeads] = useState([]); const [sources, setSources] = useState(srcProp || []); const [calls, setCalls] = useState([]); const [sends, setSends] = useState([]); const [view, setView] = useState('plays');
   const [editing, setEditing] = useState(null); const [noteFor, setNoteFor] = useState(null); const [msg, setMsg] = useState(null);
   const load = async () => {
-    const [s, l, so, c] = await Promise.all([fetchAll('sales_strategies', '*', (q) => q.order('created_at')), fetchAll('sales_leads', 'id, source, filter_id, stage, created_at, last_touch_at'), fetchAll('sales_sources'), fetchAll('sales_calls', 'id, lead_id, outcome, started_at')]);
-    setStrats(s); setLeads(l); setSources(so); setCalls(c);
+    const [s, l, so, c, e] = await Promise.all([fetchAll('sales_strategies', '*', (q) => q.order('created_at')), fetchAll('sales_leads', '*'), fetchAll('sales_sources'), fetchAll('sales_calls', 'id, lead_id, outcome, started_at'), fetchAll('sales_email_sends', 'id, lead_id, lead_email, step, variant, sent_at, replied, reply_type, bounced')]);
+    setStrats(s); setLeads(l); setSources(so); setCalls(c); setSends(e);
   };
   useEffect(() => { load(); }, []);
   const say = (r, ok) => { if (r?.error) setMsg({ kind: 'err', text: r.error }); else if (ok) setMsg({ kind: 'ok', text: ok }); };
@@ -30,6 +31,7 @@ export default function Strategies({ sources: srcProp }) {
     return out;
   }, [strats, leads, sources, calls]);
 
+  const emailBy = (key) => { const g = {}; for (const x of sends) { const k = key(x) || '—'; g[k] = g[k] || { k, sent: 0, leads: new Set(), replied: 0, pos: 0, bounced: 0 }; g[k].sent++; g[k].leads.add(x.lead_email); if (x.replied) g[k].replied++; if (x.reply_type === 'Positive') g[k].pos++; if (x.bounced) g[k].bounced++; } return Object.values(g).map((v) => ({ ...v, leads: v.leads.size })).sort((a, b) => a.k.localeCompare(b.k)); };
   const setStatus = async (s, status) => { await supabase.from('sales_strategies').update({ status }).eq('id', s.id); load(); };
   const addNote = async (s, note) => { if (!note.trim()) return; await supabase.from('sales_strategies').update({ log: [{ at: new Date().toISOString(), note: note.trim() }, ...(s.log || [])] }).eq('id', s.id); setNoteFor(null); load(); };
 
@@ -46,8 +48,21 @@ export default function Strategies({ sources: srcProp }) {
         <div className="tile ok"><small>Calls booked</small><b className="hot">{num(tot.booked)}</b><span>{num(tot.signed)} signed</span></div>
         <div className="tile"><small>Spent on sales</small><b>{money(tot.spent)}</b><span>{tot.booked ? `${money(tot.spent / tot.booked)} per booked call` : 'no booked calls yet'}</span></div>
       </div>
-      <div className="opsbar"><div className="spacer" /><button className="btn-sm primary" onClick={() => setEditing({})}>+ New strategy</button></div>
-      <div className="stratgrid">
+      <div className="opsbar wrap">
+        <span className="seg tight">{[['plays', 'Plays'], ['email', 'Email campaign'], ['lists', 'Lists'], ['partners', 'Partners']].map(([k, l]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{l}</button>)}</span>
+        <div className="spacer" />
+        {view === 'plays' && <button className="btn-sm primary" onClick={() => setEditing({})}>+ New strategy</button>}
+      </div>
+      {view === 'email' && <>
+        <CampaignCards status={status} say={say} reload={load} />
+        <div className="ownergrid">
+          <Score title="By step and variant" rows={emailBy((x) => `Step ${x.step}${x.variant ? ' · ' + x.variant : ''}`)} />
+          <Score title="By list" rows={emailBy((x) => leads.find((l) => l.id === x.lead_id)?.filter_id)} />
+        </div>
+      </>}
+      {view === 'lists' && <div className="card"><div className="cardhead"><h3>Lists</h3><span className="sm">every lead by the Storeleads filter it came from</span></div><ChannelTable rows={byListRows(leads)} mono /></div>}
+      {view === 'partners' && <Third leads={leads} sources={sources} reload={load} say={say} />}
+      {view === 'plays' && <div className="stratgrid">
         {list.map((s) => { const st = stats[s.id]; const S = STATUS.find((x) => x[0] === s.status); return (
           <div key={s.id} className={`card strat ${s.status}`}>
             <div className="cardhead">
@@ -75,7 +90,7 @@ export default function Strategies({ sources: srcProp }) {
             </div>
           </div>
         ); })}
-      </div>
+      </div>}
       {editing && <StratModal s={editing} sources={sources} lists={[...new Set(leads.map((l) => l.filter_id).filter(Boolean))].sort()} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} say={say} />}
     </>
   );

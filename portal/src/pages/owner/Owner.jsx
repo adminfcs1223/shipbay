@@ -43,7 +43,7 @@ export default function Owner({ me }) {
       {tab === 'fin' && <Financials status={status} refreshStatus={refresh} />}
       {tab === 'sales' && <Sales me={me} status={status} refreshStatus={refresh} />}
       {tab === 'team' && <Team />}
-      {tab === 'strat' && <Strategies />}
+      {tab === 'strat' && <Strategies status={status} />}
       {tab === 'settings' && <Settings status={status} refreshStatus={refresh} />}
     </div>
   );
@@ -80,7 +80,7 @@ function Settings({ status, refreshStatus }) {
   const [msg, setMsg] = useState(null);
   const [cur, setCur] = useState(''); const [n1, setN1] = useState(''); const [n2, setN2] = useState('');
   const [qid, setQid] = useState(''); const [qsec, setQsec] = useState('');
-  const [slk, setSlk] = useState(''); const [slc, setSlc] = useState(status.smartlead_campaigns || ''); const [cal, setCal] = useState('');
+  const [slk, setSlk] = useState(''); const [slc, setSlc] = useState(status.smartlead_campaigns || ''); const [cal, setCal] = useState(''); const [gcal, setGcal] = useState('');
   const [busy, setBusy] = useState(null);
 
   const say = (r, ok) => { if (r.error) setMsg({ kind: 'err', text: r.error }); else { setMsg({ kind: 'ok', text: ok }); refreshStatus(); } };
@@ -109,6 +109,12 @@ function Settings({ status, refreshStatus }) {
         <p className="hint">Personal access token from Calendly → Integrations → API & webhooks. Booked calls then show under Sales → Calendar. {status.calendly_set ? 'Token saved.' : 'Not set yet.'}</p>
         <div className="field"><label>Access token</label><input type="password" value={cal} onChange={(e) => setCal(e.target.value)} placeholder={status.calendly_set ? '•••••••• (saved — paste to replace)' : ''} autoComplete="off" /></div>
         <div className="row"><button className="btn-sm primary" disabled={!cal || !!busy} onClick={async () => { await saveSecret('CALENDLY_TOKEN', cal, 'Calendly token'); setCal(''); }}>Save</button></div>
+      </div>
+      <div className="card">
+        <h3>Google Calendar</h3>
+        <p className="hint">In Google Calendar → Settings → your calendar → “Integrate calendar” → copy the <b>Secret address in iCal format</b> and paste it here. Events then show on Sales → Calendar next to Calendly bookings. {status.gcal_set ? 'Address saved.' : 'Not set yet.'}</p>
+        <div className="field"><label>Secret iCal address</label><input type="password" value={gcal} onChange={(e) => setGcal(e.target.value)} placeholder={status.gcal_set ? '•••••••• (saved — paste to replace)' : 'https://calendar.google.com/calendar/ical/…/basic.ics'} autoComplete="off" /></div>
+        <div className="row"><button className="btn-sm primary" disabled={!gcal || !!busy} onClick={async () => { await saveSecret('GCAL_ICS_URL', gcal, 'Google Calendar address'); setGcal(''); }}>Save</button></div>
       </div>
       <form className="card" onSubmit={changePass}>
         <h3>Change passphrase</h3>

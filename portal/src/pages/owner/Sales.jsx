@@ -1,114 +1,129 @@
-// Sales — every lead from every channel in one place (Master), the cold-email machine (Email), the dialer (Calls),
-// and partner / 3rd-party leads (Third party). All rows live in sales_* tables, owner-only.
+// Sales — the CRM. Dashboard (goals, unread replies, funnel, channel leaderboard), Pipeline board, Contacts,
+// Conversations (reply inbox), Calls (dialer), Calendar (Calendly + Google Calendar). Any contact opens in a
+// slide-in panel where everything can be done: reply, log a call, change stage, notes, hand-off, do-not-contact.
+// `rep` mode scopes everything to the signed-in salesperson (RLS enforces it; the UI just hides owner controls).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../lib';
 import { useTeamData, teamStats, TeamTable, useGoals, goalsFor, GoalBars } from './Team';
 import { ownerFn, fetchAll, money, pct, num, ago, mmss, hhmm, STAGES, stageLabel, stageClass, parseCsv, guessColumns } from './util';
 
-const SUB = [['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['calendar', 'Calendar'], ['third', 'Partners']];
-// Storeleads list codes → what they are (hover text)
+const SUB = [['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['calendar', 'Calendar']];
 export const LIST_NAMES = { A1: 'Self-ship brands · NJ metro', A2: 'Already on a 3PL · NJ metro', A3: 'Self-ship brands · Northeast', A4: 'Shopify Plus upgrades', B1: 'Founder-run · NJ metro', C1: 'Amazon sellers · Northeast', C2: 'Q4 overflow', X0: 'Control group' };
 export const listName = (code) => (code && LIST_NAMES[code] ? `${code} · ${LIST_NAMES[code]}` : code || '—');
+export const srcLabel = (sources, k) => sources.find((s) => s.key === k)?.label || k;
+export const srcLabelPlain = (k) => ({ cold_call: 'Cold call list', cold_email: 'Cold email', fulfill_com: 'Fulfill.com', fulfilment_com: 'fulfilment.com', agency: 'Agency', referral: 'Referral', inbound: 'Inbound', linkedin: 'LinkedIn' }[k] || 'Other');
+const lists = (leads) => [...new Set(leads.map((l) => l.filter_id).filter(Boolean))].sort();
+/** Gmail compose link for a reply to a prospect. */
+export const gmailReply = (email, subject) => `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email || '')}&su=${encodeURIComponent(subject ? (subject.startsWith('Re:') ? subject : `Re: ${subject}`) : 'Following up')}`;
 
 export default function Sales({ me, status, refreshStatus, rep = false }) {
   const [sub, setSub] = useState('overview');
-  const [leads, setLeads] = useState(null); const [sources, setSources] = useState([]);
-  const [msg, setMsg] = useState(null);
+  const [leads, setLeads] = useState(null); const [sources, setSources] = useState([]); const [sends, setSends] = useState([]);
+  const [msg, setMsg] = useState(null); const [panel, setPanel] = useState(null); const [focus, setFocus] = useState(null); const [q, setQ] = useState('');
   const load = async () => {
-    const [l, s] = await Promise.all([fetchAll('sales_leads', '*', (q) => q.order('created_at', { ascending: false })), fetchAll('sales_sources')]);
-    setLeads(l); setSources(s);
+    const [l, s, e] = await Promise.all([fetchAll('sales_leads', '*', (qq) => qq.order('created_at', { ascending: false })), fetchAll('sales_sources'), fetchAll('sales_email_sends', '*', (qq) => qq.order('sent_at', { ascending: false }))]);
+    setLeads(l); setSources(s); setSends(e);
   };
   useEffect(() => { load(); }, []);
   const say = (r, ok) => { if (r?.error) setMsg({ kind: 'err', text: r.error }); else if (ok) setMsg({ kind: 'ok', text: ok }); };
+  const go = (tab, focusId = null) => { setFocus(focusId); setSub(tab); };
+  const openLead = (idOrLead) => setPanel(typeof idOrLead === 'string' ? idOrLead : idOrLead?.id || null);
   // a rep's Dashboard / Pipeline / Contacts / Conversations are their own leads; Calls also sees the untouched pool
   const mine = useMemo(() => (rep ? (leads || []).filter((l) => l.assigned_to === me.id) : leads || []), [leads, rep, me.id]);
+  const mineIds = useMemo(() => new Set(mine.map((l) => l.id)), [mine]);
+  const mySends = useMemo(() => (rep ? sends.filter((s) => mineIds.has(s.lead_id)) : sends), [sends, mineIds, rep]);
   const counts = useMemo(() => { const c = { total: 0 }; for (const l of mine) { c.total++; c[l.stage] = (c[l.stage] || 0) + 1; } return c; }, [mine]);
-  const tabs = rep ? SUB.filter(([k]) => k !== 'third') : SUB;
-  const waiting = mine.filter((l) => l.stage === 'replied' && !l.answered_at).length;
+  const unread = mySends.filter((s) => s.replied && !s.read_at && !s.bounced).length;
+  const hits = useMemo(() => { const t = q.trim().toLowerCase(); if (t.length < 2) return []; return (leads || []).filter((l) => [l.company, l.domain, l.contact_name, l.email, l.phone, l.city].filter(Boolean).some((v) => v.toLowerCase().includes(t))).slice(0, 8); }, [q, leads]);
+  const panelLead = panel ? (leads || []).find((l) => l.id === panel) : null;
+  const ctx = { me, rep, sources, reload: load, say, openLead, go };
 
-  if (leads === null) return <div className="card"><div className="empty">Loading leads…</div></div>;
+  if (leads === null) return <div className="card"><div className="empty">Loading…</div></div>;
   return (
     <>
       {msg && <div className={`msg ${msg.kind} flash`}>{msg.text}<button onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
-      <div className="card ownertabs"><div className="tabs">{tabs.map(([k, l]) => <button key={k} className={sub === k ? 'on' : ''} onClick={() => setSub(k)}>{l}{k === 'email' && waiting ? <i>{waiting}</i> : null}</button>)}</div></div>
-      {sub === 'overview' && <Overview me={me} rep={rep} leads={mine} pool={leads} sources={sources} counts={counts} go={setSub} />}
-      {sub === 'pipeline' && <Pipeline me={me} rep={rep} leads={mine} sources={sources} reload={load} say={say} />}
-      {sub === 'master' && <Master me={me} rep={rep} leads={mine} sources={sources} reload={load} say={say} />}
-      {sub === 'email' && <Email me={me} rep={rep} leads={mine} status={status} reload={load} refreshStatus={refreshStatus} say={say} />}
-      {sub === 'calls' && <Calls me={me} rep={rep} leads={leads} reload={load} say={say} />}
-      {sub === 'calendar' && <Calendar me={me} leads={leads} status={status} reload={load} say={say} refreshStatus={refreshStatus} mineOnly={rep} />}
-      {sub === 'third' && !rep && <Third leads={leads} sources={sources} reload={load} say={say} />}
+      <div className="card ownertabs withsearch">
+        <div className="tabs">{SUB.map(([k, l]) => <button key={k} className={sub === k ? 'on' : ''} onClick={() => go(k)}>{l}{k === 'email' && unread ? <i>{unread}</i> : null}</button>)}</div>
+        <div className="gsearch">
+          <input className="search" placeholder="Search contacts…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && hits[0]) { openLead(hits[0]); setQ(''); } if (e.key === 'Escape') setQ(''); }} />
+          {hits.length > 0 && <div className="hits">{hits.map((l) => <button key={l.id} onClick={() => { openLead(l); setQ(''); }}><b>{l.company || l.domain || l.email}</b><span className="sm">{[l.contact_name, l.email, l.city].filter(Boolean).join(' · ')}</span><span className={`statuspill ${stageClass(l.stage)}`}>{stageLabel(l.stage)}</span></button>)}</div>}
+        </div>
+      </div>
+      {sub === 'overview' && <Overview {...ctx} leads={mine} pool={leads} sends={mySends} counts={counts} />}
+      {sub === 'pipeline' && <Pipeline {...ctx} leads={mine} />}
+      {sub === 'master' && <Master {...ctx} leads={mine} />}
+      {sub === 'email' && <Conversations {...ctx} leads={mine} sends={mySends} status={status} refreshStatus={refreshStatus} focus={focus} clearFocus={() => setFocus(null)} />}
+      {sub === 'calls' && <Calls {...ctx} leads={leads} />}
+      {sub === 'calendar' && <Calendar {...ctx} leads={leads} status={status} refreshStatus={refreshStatus} mineOnly={rep} focusDate={focus} />}
+      {panelLead && <LeadPanel {...ctx} lead={panelLead} sends={sends.filter((s) => s.lead_id === panelLead.id)} onClose={() => setPanel(null)} />}
     </>
   );
 }
 
-const srcLabel = (sources, k) => sources.find((s) => s.key === k)?.label || k;
-const lists = (leads) => [...new Set(leads.map((l) => l.filter_id).filter(Boolean))].sort();
-
-/* =================== Overview: the CRM at a glance =================== */
-function Overview({ me, rep, leads, pool, sources, counts, go }) {
-  const [calls, setCalls] = useState([]); const [sends, setSends] = useState([]); const [open, setOpen] = useState(null);
-  useEffect(() => { (async () => { const [c, e] = await Promise.all([fetchAll('sales_calls', 'id, lead_id, outcome, started_at, seconds, by_user'), fetchAll('sales_email_sends', 'id, lead_id, lead_email, sent_at, replied, reply_type, bounced')]); setCalls(rep ? c.filter((x) => x.by_user === me.id) : c); setSends(e); })(); }, []);
+/* =================== Dashboard =================== */
+function Overview({ me, rep, leads, pool, sends, sources, counts, go, openLead }) {
+  const [calls, setCalls] = useState([]);
+  useEffect(() => { fetchAll('sales_calls', 'id, lead_id, outcome, started_at, seconds, by_user').then((c) => setCalls(rep ? c.filter((x) => x.by_user === me.id) : c)); }, []);
   const available = (pool || leads).filter((l) => l.stage === 'new' && !l.assigned_to && l.phone).length;
-  const week = Date.now() - 7 * 86400000;
-  const funnel = [['new', 'New'], ['contacted', 'Contacted'], ['replied', 'Replied'], ['call_booked', 'Call booked'], ['quoted', 'Quoted'], ['signed', 'Won']].map(([k, l]) => ({ k, l, n: counts[k] || 0 }));
-  // "reached" = at this stage or further along
-  const order = ['new', 'contacted', 'replied', 'call_booked', 'quoted', 'signed']; const reached = (k) => leads.filter((l) => order.indexOf(l.stage) >= order.indexOf(k) && l.stage !== 'lost' && l.stage !== 'dnc').length + (k === 'new' ? leads.filter((l) => l.stage === 'lost' || l.stage === 'dnc').length : 0);
-  const by = (key, labelOf) => { const g = {}; for (const l of leads) { const k = key(l) || '—'; g[k] = g[k] || { k, label: labelOf(k), leads: 0, contacted: 0, replied: 0, booked: 0, signed: 0 }; g[k].leads++; if (l.stage !== 'new') g[k].contacted++; if (['replied', 'call_booked', 'quoted', 'signed'].includes(l.stage)) g[k].replied++; if (['call_booked', 'quoted', 'signed'].includes(l.stage)) g[k].booked++; if (l.stage === 'signed') g[k].signed++; } return Object.values(g).sort((a, b) => b.leads - a.leads); };
-  const byChannelRaw = by((l) => l.source, (k) => srcLabel(sources, k));
-  const byChannel = [...byChannelRaw, ...sources.filter((sc) => !byChannelRaw.some((r) => r.k === sc.key)).map((sc) => ({ k: sc.key, label: sc.label, leads: 0, contacted: 0, replied: 0, booked: 0, signed: 0 }))];
-  const byList = by((l) => l.filter_id, (k) => listName(k));
-  const waiting = leads.filter((l) => l.stage === 'replied' && !l.answered_at).length;
-  const attention = leads.filter((l) => (l.stage === 'replied' && !l.answered_at) || l.stage === 'call_booked' || (l.next_action_at && new Date(l.next_action_at) <= new Date() && l.stage !== 'lost' && l.stage !== 'dnc' && l.attempts > 0)).sort((a, b) => ({ replied: 0, call_booked: 1 }[a.stage] ?? 2) - ({ replied: 0, call_booked: 1 }[b.stage] ?? 2) || (a.next_action_at || '').localeCompare(b.next_action_at || '')).slice(0, 12);
-  const wk = { dials: calls.filter((c) => new Date(c.started_at) > week).length, booked: calls.filter((c) => c.outcome === 'booked' && new Date(c.started_at) > week).length, emails: sends.filter((e) => new Date(e.sent_at) > week).length, replies: sends.filter((e) => e.replied && new Date(e.sent_at) > week).length };
-  const day0 = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+  const week = Date.now() - 7 * 86400000; const day0 = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+  const funnel = [['new', 'New'], ['contacted', 'Contacted'], ['replied', 'Replied'], ['call_booked', 'Call booked'], ['quoted', 'Quoted'], ['signed', 'Won']];
+  const order = funnel.map((f) => f[0]); const reached = (k) => leads.filter((l) => order.indexOf(l.stage) >= order.indexOf(k) && l.stage !== 'lost' && l.stage !== 'dnc').length + (k === 'new' ? leads.filter((l) => l.stage === 'lost' || l.stage === 'dnc').length : 0);
+  const byChannel = useMemo(() => {
+    const g = {}; for (const sc of sources) g[sc.key] = { k: sc.key, label: sc.label, leads: 0, contacted: 0, replied: 0, booked: 0, signed: 0 };
+    for (const l of leads) { const r = g[l.source] || (g[l.source] = { k: l.source, label: l.source, leads: 0, contacted: 0, replied: 0, booked: 0, signed: 0 }); r.leads++; if (l.stage !== 'new') r.contacted++; if (['replied', 'call_booked', 'quoted', 'signed'].includes(l.stage)) r.replied++; if (['call_booked', 'quoted', 'signed'].includes(l.stage)) r.booked++; if (l.stage === 'signed') r.signed++; }
+    // leaderboard: signed, then booked, then reply rate
+    return Object.values(g).map((r) => ({ ...r, replyRate: r.contacted ? r.replied / r.contacted : 0, bookRate: r.contacted ? r.booked / r.contacted : 0 })).sort((a, b) => b.signed - a.signed || b.booked - a.booked || b.replyRate - a.replyRate || b.leads - a.leads);
+  }, [leads, sources]);
+  const inbox = sends.filter((s) => s.replied && !s.bounced).sort((a, b) => (a.read_at ? 1 : 0) - (b.read_at ? 1 : 0) || (b.reply_at || b.sent_at).localeCompare(a.reply_at || a.sent_at)).slice(0, 10);
+  const unread = sends.filter((s) => s.replied && !s.bounced && !s.read_at).length;
+  const wk = { dials: calls.filter((c) => new Date(c.started_at) > week).length, booked: calls.filter((c) => c.outcome === 'booked' && new Date(c.started_at) > week).length, emails: sends.filter((e) => new Date(e.sent_at) > week).length };
   const td = { dials: calls.filter((c) => new Date(c.started_at) >= day0).length, booked: calls.filter((c) => c.outcome === 'booked' && new Date(c.started_at) >= day0).length, emails: sends.filter((e) => new Date(e.sent_at) >= day0).length };
   const [goals] = useGoals(); const g = goalsFor(goals, rep ? me.id : null);
   const won = leads.filter((l) => l.stage === 'signed').length; const lostN = leads.filter((l) => l.stage === 'lost').length; const closeRate = won + lostN ? won / (won + lostN) : null;
   const goalItems = (per, v) => [{ key: 'dials', value: v.dials, goal: g[`dials_${per}`] }, ...(rep ? [] : [{ key: 'emails', value: v.emails, goal: g[`emails_${per}`] }]), { key: 'booked', value: v.booked, goal: g[`booked_${per}`] }];
+  const openReply = async (s) => { if (!s.read_at) await supabase.from('sales_email_sends').update({ read_at: new Date().toISOString(), read_by: me.id }).eq('id', s.id); go('email', s.id); };
   return (
     <>
       <div className="kpis fin">
         {rep ? <div className="tile"><small>Your leads</small><b>{num(counts.total)}</b><span>{num(available)} untouched in the shared pool</span></div>
              : <div className="tile"><small>Leads in the system</small><b>{num(counts.total)}</b><span>{num(counts.new || 0)} not touched yet</span></div>}
-        <div className="tile warn"><small>Waiting on you</small><b className="hot">{num(waiting)}</b><span>replied, no answer from us yet</span></div>
-        <div className="tile ok"><small>Calls booked</small><b>{num(counts.call_booked || 0)}</b><span>{num(counts.quoted || 0)} quoted · {num(counts.signed || 0)} signed</span></div>
+        <div className={`tile ${unread ? 'warn' : ''}`}><small>Unread replies</small><b className={unread ? 'hot' : ''}>{num(unread)}</b><span>{num(leads.filter((l) => l.stage === 'replied' && !l.answered_at).length)} still to answer</span></div>
+        <div className="tile ok"><small>Calls booked</small><b>{num(counts.call_booked || 0)}</b><span>{num(counts.quoted || 0)} quoted · {num(counts.signed || 0)} won</span></div>
         <div className="tile"><small>Close rate</small><b>{closeRate == null ? '—' : pct(closeRate)}</b><span>{num(won)} won · {num(lostN)} lost{rep ? '' : ' · team'}</span></div>
       </div>
       <div className="ownergrid">
         <GoalBars title="Today" items={goalItems('day', td)} />
         <GoalBars title="This week" items={goalItems('week', wk)} />
       </div>
-      {!rep && <OwnerTeamBlock />}
-      <div className="card">
-        <div className="cardhead"><h3>Funnel</h3><span className="sm">every lead, every channel</span></div>
-        <div className="funnel">{funnel.map((f, i) => { const r = reached(f.k); const w = Math.max(4, (r / (leads.length || 1)) * 100); return (
-          <div key={f.k} className="step"><div className="barw"><i style={{ width: `${w}%` }} /></div><b>{num(r)}</b><small>{f.l}{i > 0 && <span className="conv"> · {pct(r / (reached(funnel[i - 1].k) || 1))}</span>}</small></div>
-        ); })}</div>
-      </div>
       <div className="ownergrid">
         <div className="card">
-          <div className="cardhead"><h3>Needs attention</h3><button className="btn-xs" onClick={() => go('master')}>All leads →</button></div>
-          {attention.length === 0 ? <div className="empty">Nothing waiting.</div> : (
-            <table className="ordertable leads"><tbody>{attention.map((l) => (
-              <tr key={l.id} className="click" onClick={() => setOpen(l)}>
-                <td><b>{l.company || l.email}</b><div className="sm">{[l.contact_name, l.city].filter(Boolean).join(' · ')}</div></td>
-                <td><span className={`statuspill ${stageClass(l.stage)}`}>{stageLabel(l.stage)}</span></td>
-                <td className="sm">{l.stage === 'replied' ? 'reply to answer' : l.stage === 'call_booked' ? 'call on the books' : `follow-up due ${ago(l.next_action_at).replace(' ago', ' ago')}`}</td>
-              </tr>
-            ))}</tbody></table>
+          <div className="cardhead"><h3>Inbox</h3><span className="sm">{unread ? `${num(unread)} unread` : 'all read'}</span><div className="spacer" /><button className="btn-xs" onClick={() => go('email')}>Open conversations →</button></div>
+          {inbox.length === 0 ? <div className="empty">No replies yet.</div> : (
+            <ul className="inbox">{inbox.map((s) => { const l = leads.find((x) => x.id === s.lead_id); return (
+              <li key={s.id} className={s.read_at ? 'read' : 'unread'} onClick={() => openReply(s)}>
+                <i className="dot" />
+                <div className="who"><b>{s.lead_name || l?.company || s.lead_email}</b><span className="sm">{l?.company && s.lead_name ? l.company : s.lead_email}</span></div>
+                <div className="snip">{(s.reply_body || s.subject || '').split('\n').filter(Boolean).join(' ').slice(0, 110)}</div>
+                <div className="meta"><span className="sm">{ago(s.reply_at || s.sent_at)}</span>{l?.answered_at ? <span className="pill connected">answered</span> : <span className="pill pending">needs answer</span>}</div>
+              </li>
+            ); })}</ul>
           )}
         </div>
         <div className="card">
-          <div className="cardhead"><h3>By channel</h3></div>
-          <ChannelTable rows={byChannel} />
+          <div className="cardhead"><h3>Channel leaderboard</h3><span className="sm">ranked by won, then booked, then reply rate</span></div>
+          <div className="tablewrap"><table className="ordertable fin">
+            <thead><tr><th>#</th><th>Channel</th><th className="n">Leads</th><th className="n">Contacted</th><th className="n">Reply %</th><th className="n">Booked</th><th className="n">Won</th></tr></thead>
+            <tbody>{byChannel.map((r, i) => <tr key={r.k} className={i === 0 && r.contacted ? 'hl' : ''}><td className="mono">{i + 1}</td><td><b>{r.label}</b></td><td className="n">{num(r.leads)}</td><td className="n">{num(r.contacted)}</td><td className="n">{pct(r.replyRate, 1)}</td><td className="n">{num(r.booked)}</td><td className="n">{num(r.signed)}</td></tr>)}</tbody>
+          </table></div>
         </div>
       </div>
+      {!rep && <OwnerTeamBlock />}
       <div className="card">
-        <div className="cardhead"><h3>By list</h3></div>
-        <ChannelTable rows={byList} mono />
+        <div className="cardhead"><h3>Funnel</h3><span className="sm">{rep ? 'your leads' : 'every lead, every channel'}</span></div>
+        <div className="funnel">{funnel.map(([k, l], i) => { const r = reached(k); const w = Math.max(4, (r / (leads.length || 1)) * 100); return (
+          <div key={k} className="step"><div className="barw"><i style={{ width: `${w}%` }} /></div><b>{num(r)}</b><small>{l}{i > 0 && <span className="conv"> · {pct(r / (reached(funnel[i - 1][0]) || 1))}</span>}</small></div>
+        ); })}</div>
       </div>
-      {open && <LeadDrawer lead={open} sources={sources} onClose={() => setOpen(null)} reload={() => {}} say={() => {}} />}
     </>
   );
 }
@@ -116,19 +131,24 @@ function OwnerTeamBlock() {
   const [d] = useTeamData(); const rows = useMemo(() => (d ? teamStats(d, 'week') : []), [d]);
   return <div className="card"><div className="cardhead"><h3>Team · last 7 days</h3><span className="sm">full detail under the Team tab</span></div>{d ? <TeamTable rows={rows} compact /> : <div className="empty">Loading…</div>}</div>;
 }
-function ChannelTable({ rows, mono }) {
+export function ChannelTable({ rows, mono }) {
   return (
     <div className="tablewrap"><table className="ordertable fin">
-      <thead><tr><th /><th className="n">Leads</th><th className="n">Contacted</th><th className="n">Replied</th><th className="n">Reply %</th><th className="n">Booked</th><th className="n">Signed</th></tr></thead>
+      <thead><tr><th /><th className="n">Leads</th><th className="n">Contacted</th><th className="n">Replied</th><th className="n">Reply %</th><th className="n">Booked</th><th className="n">Won</th></tr></thead>
       <tbody>{rows.map((r) => <tr key={r.k}><td title={r.label}><b className={mono ? 'mono' : ''}>{mono ? r.k : r.label}</b>{mono && LIST_NAMES[r.k] && <span className="sm"> {LIST_NAMES[r.k]}</span>}</td><td className="n">{num(r.leads)}</td><td className="n">{num(r.contacted)}</td><td className="n">{num(r.replied)}</td><td className="n">{pct(r.replied / (r.contacted || 1), 1)}</td><td className="n">{num(r.booked)}</td><td className="n">{num(r.signed)}</td></tr>)}</tbody>
     </table></div>
   );
 }
+/** leads grouped by list — used on the Strategies page */
+export function byListRows(leads) {
+  const g = {}; for (const l of leads) { const k = l.filter_id || '—'; const r = g[k] || (g[k] = { k, label: listName(k), leads: 0, contacted: 0, replied: 0, booked: 0, signed: 0 }); r.leads++; if (l.stage !== 'new') r.contacted++; if (['replied', 'call_booked', 'quoted', 'signed'].includes(l.stage)) r.replied++; if (['call_booked', 'quoted', 'signed'].includes(l.stage)) r.booked++; if (l.stage === 'signed') r.signed++; }
+  return Object.values(g).sort((a, b) => b.leads - a.leads);
+}
 
 /* =================== Pipeline: the deals board =================== */
 const COLS = [['contacted', 'Contacted'], ['replied', 'Replied'], ['call_booked', 'Call booked'], ['quoted', 'Quoted'], ['signed', 'Won']];
-function Pipeline({ me, rep, leads, sources, reload, say }) {
-  const [open, setOpen] = useState(null); const [adding, setAdding] = useState(false); const [src, setSrc] = useState(''); const [list, setList] = useState(''); const [more, setMore] = useState({}); const [drag, setDrag] = useState(null); const [over, setOver] = useState(null);
+function Pipeline({ me, rep, leads, sources, reload, say, openLead }) {
+  const [adding, setAdding] = useState(false); const [src, setSrc] = useState(''); const [list, setList] = useState(''); const [more, setMore] = useState({}); const [drag, setDrag] = useState(null); const [over, setOver] = useState(null);
   const pool = leads.filter((l) => (!src || l.source === src) && (!list || l.filter_id === list));
   const col = (k) => pool.filter((l) => l.stage === k).sort((a, b) => (b.deal_value || 0) - (a.deal_value || 0) || (b.last_touch_at || '').localeCompare(a.last_touch_at || ''));
   const move = async (l, stage) => {
@@ -156,7 +176,7 @@ function Pipeline({ me, rep, leads, sources, reload, say }) {
             <div className="khead"><b>{label}</b><span className="cnt">{num(items.length)}</span>{val > 0 && <span className="val">{money(val)}</span>}</div>
             <div className="kcards">
               {shown.map((l) => (
-                <div key={l.id} className={`kcard ${l.stage === 'replied' && !l.answered_at ? 'hot' : ''}`} draggable onDragStart={() => setDrag(l)} onDragEnd={() => setDrag(null)} onClick={() => setOpen(l)}>
+                <div key={l.id} className={`kcard ${l.stage === 'replied' && !l.answered_at ? 'hot' : ''}`} draggable onDragStart={() => setDrag(l)} onDragEnd={() => setDrag(null)} onClick={() => openLead(l)}>
                   <div className="kt"><b>{l.company || l.domain || l.email}</b>{l.deal_value ? <span className="kv" title="expected services per month">{money(l.deal_value)}</span> : null}</div>
                   <div className="sm">{[l.contact_name, l.city].filter(Boolean).join(' · ') || l.email}</div>
                   <div className="kmeta"><span className="pill">{srcLabelPlain(l.source)}</span>{l.filter_id && <span className="pill">{l.filter_id}</span>}{l.assigned_to && <span className="pill connected">assigned</span>}<span className="sm">{ago(l.last_touch_at)}</span></div>
@@ -169,16 +189,16 @@ function Pipeline({ me, rep, leads, sources, reload, say }) {
           </div>
         ); })}
       </div>
-      {open && <LeadDrawer lead={leads.find((x) => x.id === open.id) || open} sources={sources} onClose={() => setOpen(null)} reload={reload} say={say} claimAs={rep ? me.id : null} />}
       {adding && <LeadForm sources={sources} onClose={() => setAdding(false)} reload={reload} say={say} title="Add an opportunity" defaultStage="contacted" claimAs={me.id} />}
     </>
   );
 }
 
+
 /* =================== Master =================== */
-function Master({ me, rep, leads, sources, reload, say }) {
+function Master({ me, rep, leads, sources, reload, say, openLead }) {
   const [q, setQ] = useState(''); const [src, setSrc] = useState(''); const [stage, setStage] = useState(''); const [list, setList] = useState(''); const [phoneOnly, setPhoneOnly] = useState(false); const [showOut, setShowOut] = useState(false); const [pushing, setPushing] = useState(false);
-  const [open, setOpen] = useState(null); const [adding, setAdding] = useState(false); const [importing, setImporting] = useState(false);
+  const [adding, setAdding] = useState(false); const [importing, setImporting] = useState(false);
   const rows = useMemo(() => leads.filter((l) => (!src || l.source === src) && (stage ? l.stage === stage : (showOut || (l.stage !== 'dnc' && l.stage !== 'lost'))) && (!list || l.filter_id === list) && (!phoneOnly || l.phone)
     && (!q || [l.company, l.domain, l.contact_name, l.email, l.phone, l.city, l.state, l.notes].filter(Boolean).some((s) => s.toLowerCase().includes(q.toLowerCase())))), [leads, q, src, stage, list, phoneOnly, showOut]);
   const pushable = rows.filter((l) => l.email && !l.in_email && !['dnc', 'lost', 'signed'].includes(l.stage));
@@ -208,7 +228,7 @@ function Master({ me, rep, leads, sources, reload, say }) {
         <div className="tablewrap"><table className="ordertable leads">
           <thead><tr><th>Company</th><th>Contact</th><th>Phone</th><th>Where</th><th className="n">Est. sales / mo</th><th>Channel · list</th><th>Stage</th><th className="n">Tries</th><th>Last touch</th></tr></thead>
           <tbody>{sorted.slice(0, 400).map((l) => (
-            <tr key={l.id} className="click" onClick={() => setOpen(l)}>
+            <tr key={l.id} className="click" onClick={() => openLead(l)}>
               <td><b>{l.company || l.domain || l.email}</b>{l.domain && <div className="sm">{l.domain}</div>}</td>
               <td>{l.contact_name}{l.email && <div className="sm">{l.email}</div>}</td>
               <td className="mono sm">{l.phone}</td>
@@ -223,7 +243,6 @@ function Master({ me, rep, leads, sources, reload, say }) {
         </table></div>
         <div className="sm" style={{ padding: '8px 2px' }}>Showing {Math.min(400, sorted.length)} of {sorted.length} · replies and booked calls float to the top.</div>
       </div>
-      {open && <LeadDrawer lead={leads.find((x) => x.id === open.id) || open} sources={sources} onClose={() => setOpen(null)} reload={reload} say={say} claimAs={rep ? me.id : null} />}
       {adding && <LeadForm sources={sources} onClose={() => setAdding(false)} reload={reload} say={say} claimAs={rep ? me.id : null} />}
       {importing && <ImportCsv sources={sources} onClose={() => setImporting(false)} reload={reload} say={say} />}
     </>
@@ -231,60 +250,216 @@ function Master({ me, rep, leads, sources, reload, say }) {
 }
 
 /* ---------- one lead: edit, history ---------- */
-function LeadDrawer({ lead, sources, onClose, reload, say, claimAs }) {
-  const [f, setF] = useState(lead); const [calls, setCalls] = useState([]); const [sends, setSends] = useState([]); const [busy, setBusy] = useState(false); const [people, setPeople] = useState([]);
-  useEffect(() => { setF(lead); }, [lead.id]);
-  useEffect(() => { supabase.from('profiles').select('id, full_name, email').like('role', 'shipbay%').eq('active', true).then(({ data }) => setPeople(data || [])); }, []);
+
+/* =================== Contact panel: slides in from the right; everything about one lead =================== */
+const PANEL_OUT = [['connected', 'Connected', 'ok'], ['voicemail', 'Voicemail', ''], ['no_answer', 'No answer', ''], ['gatekeeper', 'Gatekeeper', 'warn'], ['booked', 'Booked a call', 'ok solid'], ['not_fit', 'Not a fit', 'bad'], ['wrong_number', 'Wrong number', 'bad']];
+export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say, go }) {
+  const [tab, setTab] = useState('activity'); const [f, setF] = useState(lead); const [calls, setCalls] = useState([]); const [people, setPeople] = useState([]); const [meetings, setMeetings] = useState([]);
+  const [note, setNote] = useState(''); const [busy, setBusy] = useState(false); const [logging, setLogging] = useState(false);
+  const claimAs = rep ? me.id : null;
+  useEffect(() => { setF(lead); }, [lead.id, lead.updated_at]);
   useEffect(() => { (async () => {
-    const [c, s] = await Promise.all([supabase.from('sales_calls').select('*').eq('lead_id', lead.id).order('started_at', { ascending: false }), supabase.from('sales_email_sends').select('*').eq('lead_id', lead.id).order('sent_at', { ascending: false })]);
-    setCalls(c.data || []); setSends(s.data || []);
+    const [c, p, m] = await Promise.all([supabase.from('sales_calls').select('*').eq('lead_id', lead.id).order('started_at', { ascending: false }), supabase.from('profiles').select('id, full_name, email').like('role', 'shipbay%').eq('active', true), supabase.from('sales_meetings').select('*').eq('lead_id', lead.id).order('starts_at', { ascending: false })]);
+    setCalls(c.data || []); setPeople(p.data || []); setMeetings(m.data || []);
   })(); }, [lead.id]);
-  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  useEffect(() => { const k = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+  const upd = async (patch, ok) => { const { error } = await supabase.from('sales_leads').update({ ...patch, assigned_to: patch.assigned_to !== undefined ? patch.assigned_to : (lead.assigned_to || claimAs || null) }).eq('id', lead.id); if (error) return say({ error: error.message }); if (ok) say(null, ok); reload(); };
   const save = async () => {
     setBusy(true);
-    const patch = { company: f.company, domain: f.domain, contact_name: f.contact_name, email: f.email, phone: f.phone, title: f.title, city: f.city, state: f.state, est_sales_usd: f.est_sales_usd ? Number(f.est_sales_usd) : null, stage: f.stage, source: f.source, filter_id: f.filter_id, notes: f.notes, next_action_at: f.next_action_at ? new Date(f.next_action_at).toISOString() : null, in_calls: f.in_calls, in_email: f.in_email, assigned_to: f.assigned_to || claimAs || null, answered_at: f.answered_at || null, deal_value: f.deal_value ? Number(f.deal_value) : null, won_at: f.stage === 'signed' ? (lead.won_at || new Date().toISOString()) : lead.won_at };
+    const patch = { company: f.company, domain: f.domain, contact_name: f.contact_name, email: f.email, phone: f.phone, title: f.title, city: f.city, state: f.state, est_sales_usd: f.est_sales_usd ? Number(f.est_sales_usd) : null, deal_value: f.deal_value ? Number(f.deal_value) : null, stage: f.stage, source: f.source, filter_id: f.filter_id, notes: f.notes, next_action_at: f.next_action_at ? new Date(f.next_action_at).toISOString() : null, in_calls: f.in_calls, in_email: f.in_email, assigned_to: f.assigned_to || claimAs || null, won_at: f.stage === 'signed' ? (lead.won_at || new Date().toISOString()) : lead.won_at };
     const { error } = await supabase.from('sales_leads').update(patch).eq('id', lead.id); setBusy(false);
     if (error) return say({ error: error.message });
     if (f.stage === 'dnc' && lead.stage !== 'dnc' && f.email) { const r = await ownerFn({ action: 'smartlead_stop_lead', email: f.email }); if (r.error) say(r); }
-    say(null, f.stage === 'dnc' ? 'Saved — removed from the email campaign and the call queue.' : 'Saved.'); reload();
+    say(null, 'Saved.'); reload(); setTab('activity');
   };
-  const del = async () => { if (!window.confirm(`Delete ${lead.company || lead.email}? Call and email history stays but loses its link.`)) return; await supabase.from('sales_leads').delete().eq('id', lead.id); reload(); onClose(); };
+  const setStage = async (stage) => {
+    const patch = { stage, last_touch_at: new Date().toISOString() };
+    if (stage === 'signed') { const v = window.prompt(`${lead.company || lead.email} is won — expected services $ / month?`, lead.deal_value || ''); if (v === null) return; patch.deal_value = Number(v) || null; patch.won_at = new Date().toISOString(); }
+    if (stage === 'lost') { const r = window.prompt('Why lost? (optional)', lead.lost_reason || ''); if (r === null) return; patch.lost_reason = r || null; }
+    if (stage === 'dnc') { if (!window.confirm('Mark do-not-contact? They come out of the email campaign and the call queue.')) return; if (lead.email) ownerFn({ action: 'smartlead_stop_lead', email: lead.email }); patch.in_calls = false; patch.in_email = false; }
+    upd(patch);
+  };
+  const addNote = async () => { if (!note.trim()) return; await upd({ notes: [lead.notes, `${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${(me.full_name || me.email).split(' ')[0]}: ${note.trim()}`].filter(Boolean).join('\n'), last_touch_at: new Date().toISOString() }); setNote(''); };
+  const logCall = async (outcome) => {
+    await supabase.from('sales_calls').insert({ lead_id: lead.id, started_at: new Date().toISOString(), ended_at: new Date().toISOString(), seconds: 0, outcome, note: note || null, by_user: me.id });
+    const next = { no_answer: 2, voicemail: 3, gatekeeper: 1, connected: 7 }[outcome];
+    const patch = { attempts: (lead.attempts || 0) + 1, last_outcome: outcome, last_touch_at: new Date().toISOString(), next_action_at: next ? new Date(Date.now() + next * 86400000).toISOString() : null };
+    if (outcome === 'booked') patch.stage = 'call_booked'; else if (outcome === 'not_fit') patch.stage = 'lost'; else if (outcome === 'wrong_number') patch.in_calls = false; else if (lead.stage === 'new') patch.stage = 'contacted';
+    if (note) patch.notes = [lead.notes, `${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${outcome.replace('_', ' ')}: ${note}`].filter(Boolean).join('\n');
+    await upd(patch, 'Call logged.'); setNote(''); setLogging(false);
+    const { data } = await supabase.from('sales_calls').select('*').eq('lead_id', lead.id).order('started_at', { ascending: false }); setCalls(data || []);
+  };
+  const markRead = async (s) => { if (!s.read_at) { await supabase.from('sales_email_sends').update({ read_at: new Date().toISOString(), read_by: me.id }).eq('id', s.id); reload(); } };
+  const replies = sends.filter((s) => s.replied); const lastReply = replies[0];
+  const timeline = [
+    ...sends.map((s) => ({ at: s.reply_at && s.replied ? s.reply_at : s.sent_at, kind: s.replied ? 'reply' : 'sent', s })),
+    ...calls.map((c) => ({ at: c.started_at, kind: 'call', c })),
+    ...meetings.map((m) => ({ at: m.starts_at, kind: 'meeting', m })),
+  ].sort((a, b) => b.at.localeCompare(a.at));
+  const who = (id) => { const p = people.find((x) => x.id === id); return p ? (p.full_name || p.email).split(' ')[0] : '—'; };
   return (
-    <div className="overlay" onClick={onClose}><div className="modal wide drawer" onClick={(e) => e.stopPropagation()}>
-      <div className="opsbar"><h3 style={{ margin: 0 }}>{lead.company || lead.email}</h3><div className="spacer" />{lead.phone && <a className="btn-sm" href={`tel:${lead.phone.replace(/[^+\d]/g, '')}`}>Call {lead.phone}</a>}{lead.domain && <a className="btn-sm" href={`https://${lead.domain}`} target="_blank" rel="noreferrer">Site ↗</a>}<button className="btn-sm" onClick={onClose}>Close</button></div>
-      <div className="addgrid lead">
-        <label>Stage<select value={f.stage} onChange={set('stage')}>{STAGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
-        <label>Channel<select value={f.source} onChange={set('source')}>{sources.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></label>
-        <label>List / filter<input value={f.filter_id || ''} onChange={set('filter_id')} /></label>
-        <label>Next action<input type="datetime-local" value={toLocalInput(f.next_action_at)} onChange={set('next_action_at')} /></label>
-        <label>Handled by<select value={f.assigned_to || ''} onChange={set('assigned_to')}><option value="">— nobody —</option>{people.map((p) => <option key={p.id} value={p.id}>{p.full_name || p.email}</option>)}</select></label>
-        {f.stage === 'replied' && <label className="chk"><input type="checkbox" checked={!!f.answered_at} onChange={(e) => setF({ ...f, answered_at: e.target.checked ? new Date().toISOString() : null })} /> we answered their reply</label>}
-        <label>Company<input value={f.company || ''} onChange={set('company')} /></label>
-        <label>Domain<input value={f.domain || ''} onChange={set('domain')} /></label>
-        <label>Contact<input value={f.contact_name || ''} onChange={set('contact_name')} /></label>
-        <label>Title<input value={f.title || ''} onChange={set('title')} /></label>
-        <label>Email<input value={f.email || ''} onChange={set('email')} /></label>
-        <label>Phone<input value={f.phone || ''} onChange={set('phone')} /></label>
-        <label>City<input value={f.city || ''} onChange={set('city')} /></label>
-        <label>State<input value={f.state || ''} onChange={set('state')} /></label>
-        <label>Est. sales $/mo<input type="number" value={f.est_sales_usd || ''} onChange={set('est_sales_usd')} /></label>
-        <label>Deal value $ / mo<input type="number" value={f.deal_value || ''} onChange={set('deal_value')} placeholder="services if won" /></label>
-        <label className="chk"><input type="checkbox" checked={!!f.in_calls} onChange={(e) => setF({ ...f, in_calls: e.target.checked })} /> in the call queue</label>
-        <label className="chk"><input type="checkbox" checked={!!f.in_email} onChange={(e) => setF({ ...f, in_email: e.target.checked })} /> in email campaign</label>
-        <label className="wide2">Notes<textarea rows={3} value={f.notes || ''} onChange={set('notes')} /></label>
-      </div>
-      <div className="row">{!claimAs && <button className="btn-xs" onClick={del}>Delete</button>}<div className="spacer" /><span className="sm">{lead.products ? `${lead.products} products · ` : ''}{lead.plan || ''}{lead.rank ? ` · rank ${num(lead.rank)}` : ''}{lead.categories ? ` · ${lead.categories}` : ''}</span><button className="btn-sm primary" disabled={busy} onClick={save}>Save</button></div>
-      {(calls.length > 0 || sends.length > 0) && (
-        <div className="history">
-          {calls.length > 0 && <><h4>Calls</h4><ul>{calls.map((c) => <li key={c.id}><b>{c.outcome.replace('_', ' ')}</b> · {new Date(c.started_at).toLocaleString()} · {mmss(c.seconds)}{c.note && <> — {c.note}</>}</li>)}</ul></>}
-          {sends.length > 0 && <><h4>Emails</h4><ul>{sends.map((s) => <li key={s.id}>Step {s.step}{s.variant ? ` ${s.variant}` : ''} · {new Date(s.sent_at).toLocaleDateString()} · {s.subject}{s.replied && <b> · replied{s.reply_type ? ` (${s.reply_type})` : ''}</b>}{s.bounced && <b className="neg"> · bounced</b>}</li>)}</ul></>}
+    <div className="overlay side" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="panel" role="dialog" aria-label={lead.company || lead.email}>
+        <div className="phead">
+          <div className="ptitle">
+            <h2>{lead.company || lead.domain || lead.email}</h2>
+            <div className="sm">{[lead.contact_name, lead.title, [lead.city, lead.state].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}{lead.domain && <> · <a href={`https://${lead.domain}`} target="_blank" rel="noreferrer">{lead.domain} ↗</a></>}</div>
+            <div className="pchips">
+              <select className={`statuspill ${stageClass(lead.stage)}`} value={lead.stage} onChange={(e) => setStage(e.target.value)}>{STAGES.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+              <span className="pill">{srcLabel(sources, lead.source)}</span>{lead.filter_id && <span className="pill" title={listName(lead.filter_id)}>{lead.filter_id}</span>}
+              {!rep && <select className="statusselect" value={lead.assigned_to || ''} onChange={(e) => upd({ assigned_to: e.target.value || null }, 'Handed off.')}><option value="">— nobody —</option>{people.map((p) => <option key={p.id} value={p.id}>{(p.full_name || p.email).split(' ')[0]}</option>)}</select>}
+              {rep && lead.assigned_to && <span className="pill connected">{lead.assigned_to === me.id ? 'yours' : who(lead.assigned_to)}</span>}
+              {lead.deal_value ? <span className="pill connected">{money(lead.deal_value)}/mo</span> : null}
+            </div>
+          </div>
+          <button className="btn-sm" onClick={onClose} aria-label="Close">✕</button>
         </div>
-      )}
-    </div></div>
+        <div className="pactions">
+          {lead.email && <a className="btn-sm primary" href={gmailReply(lead.email, lastReply?.subject)} target="_blank" rel="noreferrer">Reply in Gmail</a>}
+          {lead.phone && <a className="btn-sm" href={`tel:${lead.phone.replace(/[^+\d]/g, '')}`}>Call {lead.phone}</a>}
+          <button className="btn-sm" onClick={() => setLogging((v) => !v)}>Log a call</button>
+          {lead.stage === 'replied' && (lead.answered_at ? <button className="btn-sm ok" onClick={() => upd({ answered_at: null })}>✓ Answered — undo</button> : <button className="btn-sm" onClick={() => upd({ answered_at: new Date().toISOString() }, 'Marked answered.')}>Mark answered</button>)}
+          {lead.stage !== 'dnc' && <button className="btn-sm" onClick={() => setStage('dnc')}>Do not contact</button>}
+        </div>
+        {logging && <div className="plog"><textarea rows={2} placeholder="What happened on the call…" value={note} onChange={(e) => setNote(e.target.value)} /><div className="outcomes">{PANEL_OUT.map(([k, l, cls]) => <button key={k} className={`oc ${cls}`} onClick={() => logCall(k)}>{l}</button>)}</div></div>}
+        <div className="tabs ptabs"><button className={tab === 'activity' ? 'on' : ''} onClick={() => setTab('activity')}>Activity{replies.length ? <i>{replies.length}</i> : null}</button><button className={tab === 'details' ? 'on' : ''} onClick={() => setTab('details')}>Details</button></div>
+        <div className="pbody">
+          {tab === 'activity' && (
+            <>
+              <div className="notebox"><textarea rows={2} placeholder="Add a note…" value={note} onChange={(e) => setNote(e.target.value)} /><div className="row"><div className="spacer" /><button className="btn-xs primary" onClick={addNote} disabled={!note.trim()}>Add note</button></div></div>
+              {lead.notes && <pre className="notes">{lead.notes}</pre>}
+              {timeline.length === 0 ? <div className="empty">No activity yet.</div> : (
+                <ul className="timeline">{timeline.map((t, i) => (
+                  <li key={i} className={t.kind}>
+                    <span className="when sm">{new Date(t.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+                    {t.kind === 'reply' && <div className={`ev reply ${t.s.read_at ? '' : 'unread'}`} onClick={() => { markRead(t.s); go('email', t.s.id); onClose(); }}><b>Replied</b>{t.s.reply_type && <span className="pill">{t.s.reply_type}</span>}<div className="snip">{(t.s.reply_body || t.s.subject || '').split('\n').filter(Boolean).join(' ').slice(0, 220)}</div><span className="sm">open conversation →</span></div>}
+                    {t.kind === 'sent' && <div className="ev"><span className="sm">Email step {t.s.step} sent · {t.s.subject}</span></div>}
+                    {t.kind === 'call' && <div className="ev"><b>Call · {t.c.outcome.replace('_', ' ')}</b><span className="sm"> · {who(t.c.by_user)}{t.c.seconds ? ` · ${mmss(t.c.seconds)}` : ''}</span>{t.c.note && <div className="sm">{t.c.note}</div>}</div>}
+                    {t.kind === 'meeting' && <div className="ev"><b>{t.m.status === 'canceled' ? 'Canceled call' : 'Call booked'}</b><span className="sm"> · {t.m.name}{t.m.outcome ? ` → ${t.m.outcome.replace('_', ' ')}` : ''}</span></div>}
+                  </li>
+                ))}</ul>
+              )}
+            </>
+          )}
+          {tab === 'details' && (
+            <>
+              <div className="addgrid lead">
+                <label>Company<input value={f.company || ''} onChange={set('company')} /></label>
+                <label>Domain<input value={f.domain || ''} onChange={set('domain')} /></label>
+                <label>Contact<input value={f.contact_name || ''} onChange={set('contact_name')} /></label>
+                <label>Title<input value={f.title || ''} onChange={set('title')} /></label>
+                <label>Email<input value={f.email || ''} onChange={set('email')} /></label>
+                <label>Phone<input value={f.phone || ''} onChange={set('phone')} /></label>
+                <label>City<input value={f.city || ''} onChange={set('city')} /></label>
+                <label>State<input value={f.state || ''} onChange={set('state')} /></label>
+                <label>Status<select value={f.stage} onChange={set('stage')}>{STAGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+                <label>Channel<select value={f.source} onChange={set('source')}>{sources.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></label>
+                <label>List<input value={f.filter_id || ''} onChange={set('filter_id')} /></label>
+                <label>Follow up<input type="datetime-local" value={toLocalInput(f.next_action_at)} onChange={set('next_action_at')} /></label>
+                <label>Est. online sales $/mo<input type="number" value={f.est_sales_usd || ''} onChange={set('est_sales_usd')} /></label>
+                <label>Deal value $/mo<input type="number" value={f.deal_value || ''} onChange={set('deal_value')} placeholder="services if won" /></label>
+                {!rep && <label>Handled by<select value={f.assigned_to || ''} onChange={set('assigned_to')}><option value="">— nobody —</option>{people.map((p) => <option key={p.id} value={p.id}>{p.full_name || p.email}</option>)}</select></label>}
+                <label className="chk"><input type="checkbox" checked={!!f.in_calls} onChange={(e) => setF({ ...f, in_calls: e.target.checked })} /> in the call queue</label>
+                <label className="chk"><input type="checkbox" checked={!!f.in_email} onChange={(e) => setF({ ...f, in_email: e.target.checked })} /> in email campaign</label>
+                <label className="wide2">Notes<textarea rows={5} value={f.notes || ''} onChange={set('notes')} /></label>
+              </div>
+              <div className="row"><span className="sm">{lead.products ? `${lead.products} products · ` : ''}{lead.plan || ''}{lead.rank ? ` · rank ${num(lead.rank)}` : ''}{lead.categories ? ` · ${lead.categories}` : ''}</span><div className="spacer" /><button className="btn-sm primary" disabled={busy} onClick={save}>Save</button></div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
-/* ---------- add one lead (also used by Third party with a fixed source) ---------- */
+/* =================== Conversations: the reply inbox =================== */
+function Conversations({ me, rep, leads, sends, status, reload, refreshStatus, say, openLead, focus, clearFocus }) {
+  const [busy, setBusy] = useState(false); const [show, setShow] = useState('all'); const refs = useRef({});
+  const sync = async () => { setBusy(true); const r = await ownerFn({ action: 'smartlead_sync' }); setBusy(false); say(r, r.error ? null : 'Smartlead synced.'); reload(); refreshStatus?.(); };
+  const replies = useMemo(() => sends.filter((s) => s.replied && !s.bounced).sort((a, b) => (b.reply_at || b.sent_at).localeCompare(a.reply_at || a.sent_at)), [sends]);
+  const unread = replies.filter((s) => !s.read_at).length;
+  const list = replies.filter((s) => { const l = leads.find((x) => x.id === s.lead_id); return show === 'all' || (show === 'unread' && !s.read_at) || (show === 'open' && l && !l.answered_at && l.stage !== 'dnc'); });
+  useEffect(() => { if (focus && refs.current[focus]) { refs.current[focus].scrollIntoView({ behavior: 'smooth', block: 'center' }); const t = setTimeout(clearFocus, 2500); return () => clearTimeout(t); } }, [focus, list.length]);
+  const markRead = async (s, on = true) => { await supabase.from('sales_email_sends').update({ read_at: on ? new Date().toISOString() : null, read_by: on ? me.id : null }).eq('id', s.id); reload(); };
+  const markAnswered = async (l, on) => { await supabase.from('sales_leads').update({ answered_at: on ? new Date().toISOString() : null, last_touch_at: new Date().toISOString(), assigned_to: l.assigned_to || (rep ? me.id : null) }).eq('id', l.id); reload(); };
+  const setReply = async (s, reply_type) => {
+    await supabase.from('sales_email_sends').update({ reply_type }).eq('id', s.id);
+    const { data: cur } = await supabase.from('fin_settings').select('value').eq('key', 'reply_tags').maybeSingle();
+    await supabase.from('fin_settings').upsert({ key: 'reply_tags', value: { ...(cur?.value || {}), [s.lead_email.toLowerCase()]: reply_type } });
+    if (reply_type === 'Negative') { const r = await ownerFn({ action: 'smartlead_stop_lead', email: s.lead_email }); say(r, r.error ? null : 'Marked do-not-contact — unsubscribed in Smartlead, blocked, out of the call queue.'); }
+    reload();
+  };
+  const stopLead = async (s) => { if (!window.confirm(`Mark ${s.lead_name || s.lead_email} do-not-contact?`)) return; const r = await ownerFn({ action: 'smartlead_stop_lead', email: s.lead_email }); say(r, r.error ? null : 'Marked do-not-contact.'); reload(); };
+  return (
+    <>
+      <div className="opsbar wrap">
+        <span className="seg tight"><button className={show === 'all' ? 'on' : ''} onClick={() => setShow('all')}>All ({replies.length})</button><button className={show === 'unread' ? 'on' : ''} onClick={() => setShow('unread')}>Unread ({unread})</button><button className={show === 'open' ? 'on' : ''} onClick={() => setShow('open')}>Needs answer</button></span>
+        <span className="sm">{rep ? 'Replies handed to you. Answer from Gmail, then mark it answered.' : `Synced ${ago(status?.smartlead_last_sync?.at)}`}</span>
+        <div className="spacer" />
+        {!rep && <button className="btn-sm" disabled={busy || !status?.smartlead_key_set} onClick={sync}>{busy ? 'Syncing…' : 'Sync'}</button>}
+      </div>
+      <div className="replies">
+        {list.length === 0 && <div className="card"><div className="empty">{show === 'unread' ? 'Nothing unread.' : 'No replies here.'}</div></div>}
+        {list.map((s) => { const l = leads.find((x) => x.id === s.lead_id); const unreadRow = !s.read_at; return (
+          <div key={s.id} ref={(el) => { refs.current[s.id] = el; }} className={`card reply ${s.reply_type ? s.reply_type.toLowerCase().replace(/[^a-z]/g, '') : 'untagged'} ${unreadRow ? 'unread' : ''} ${focus === s.id ? 'focus' : ''}`} onClick={() => unreadRow && markRead(s)}>
+            <div className="cardhead">
+              <div className="rwho">{unreadRow && <i className="dot" />}<div><b>{s.lead_name || l?.company || s.lead_email}</b>{l?.company && s.lead_name && <span className="sm"> · {l.company}</span>}<div className="sm">{s.lead_email}{l?.filter_id ? ` · list ${l.filter_id}` : ''} · step {s.step}{s.reply_at ? ` · ${ago(s.reply_at)}` : ''}{!rep && l?.assigned_to ? ` · ${(() => '→ assigned')()}` : ''}</div></div></div>
+              <div className="replyacts">
+                <a className="btn-xs primary" href={gmailReply(s.lead_email, s.subject)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Reply</a>
+                {l && l.stage !== 'dnc' && (l.answered_at ? <button className="btn-xs ok" title="Click to undo" onClick={(e) => { e.stopPropagation(); markAnswered(l, false); }}>✓ Answered {new Date(l.answered_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</button> : <button className="btn-xs" onClick={(e) => { e.stopPropagation(); markAnswered(l, true); }}>Mark answered</button>)}
+                {rep ? (s.reply_type && <span className="pill">{s.reply_type}</span>) : <select className="statusselect" value={s.reply_type || ''} onClick={(e) => e.stopPropagation()} onChange={(e) => setReply(s, e.target.value)}><option value="">tag it</option>{['Positive', 'Neutral', 'Negative', 'Auto-reply', 'Bounce-back'].map((t) => <option key={t}>{t}</option>)}</select>}
+                {l && <span className={`statuspill ${stageClass(l.stage)}`}>{stageLabel(l.stage)}</span>}
+                {rep && l && l.stage !== 'dnc' && <button className="btn-xs" onClick={(e) => { e.stopPropagation(); stopLead(s); }}>Do not contact</button>}
+                {l && <button className="btn-xs" onClick={(e) => { e.stopPropagation(); openLead(l); }}>Open contact</button>}
+                {!unreadRow && <button className="btn-xs" title="Mark unread" onClick={(e) => { e.stopPropagation(); markRead(s, false); }}>●</button>}
+              </div>
+            </div>
+            {s.reply_body ? <pre className="replybody">{s.reply_body}</pre> : <div className="sm">Reply text arrives on the next sync.</div>}
+            <div className="sm replyre">Re: {s.subject}</div>
+          </div>
+        ); })}
+      </div>
+    </>
+  );
+}
+
+/* =================== Campaign cards (Strategies page) =================== */
+export function CampaignCards({ status, say, reload }) {
+  const [camp, setCamp] = useState(null); const [busy, setBusy] = useState(false); const [goals] = useGoals();
+  const loadCamp = async () => { const r = await ownerFn({ action: 'smartlead_campaign' }); if (!r.error) setCamp(r.campaigns || []); else say?.(r); };
+  useEffect(() => { loadCamp(); }, []);
+  const setStatus = async (c, st) => { if (st !== 'START' && !window.confirm(`${st === 'PAUSED' ? 'Pause' : 'Stop'} “${c.name}”?`)) return; setBusy(true); const r = await ownerFn({ action: 'smartlead_status', campaign_id: c.id, status: st }); setBusy(false); say?.(r, r.error ? null : st === 'START' ? 'Campaign running.' : 'Campaign paused.'); loadCamp(); };
+  const weekends = async (c, on) => { if (on && !window.confirm('Send on Saturdays and Sundays too? Weekend cold email gets fewer replies and more spam flags.')) return; setBusy(true); const r = await ownerFn({ action: 'smartlead_schedule', campaign_id: c.id, weekends: on }); setBusy(false); say?.(r, r.error ? null : on ? 'Sending 7 days a week.' : 'Sending Monday–Friday.'); loadCamp(); };
+  const sync = async () => { setBusy(true); const r = await ownerFn({ action: 'smartlead_sync' }); setBusy(false); say?.(r, r.error ? null : 'Smartlead synced.'); reload?.(); loadCamp(); };
+  const g = goalsFor(goals, null);
+  if (camp === null) return <div className="card"><div className="empty">Checking the campaign…</div></div>;
+  return camp.map((c) => { const lim = c.daily_limit || 0; const goal = g.emails_day || lim; const p = goal ? Math.min(1, c.sent_today / goal) : 0; const running = c.status === 'ACTIVE' || c.status === 'START'; const wk = Array.isArray(c.days) && c.days.includes(0); const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; return (
+    <div key={c.id} className="card campaign">
+      <div className="cardhead">
+        <div><h3>{c.name}</h3><div className="sm">Smartlead · {Array.isArray(c.days) ? c.days.map((d) => dow[d]).join(' ') : ''}{c.hours ? ` · ${c.hours}` : ''}{lim ? ` · up to ${num(lim)} new leads/day` : ''}</div></div>
+        <span className={`statuspill ${running ? 'ok' : c.status === 'PAUSED' ? 'warn' : 'muted'}`}>{running ? 'Running' : c.status === 'PAUSED' ? 'Paused' : c.status}</span>
+        <div className="spacer" />
+        <label className="chk sm"><input type="checkbox" checked={wk} disabled={busy} onChange={(e) => weekends(c, e.target.checked)} /> weekends</label>
+        {running ? <button className="btn-sm" disabled={busy} onClick={() => setStatus(c, 'PAUSED')}>Pause</button> : <button className="btn-sm primary" disabled={busy} onClick={() => setStatus(c, 'START')}>{c.status === 'PAUSED' ? 'Resume' : 'Start'}</button>}
+        <button className="btn-sm" disabled={busy || !status?.smartlead_key_set} onClick={sync}>{busy ? '…' : 'Sync'}</button>
+      </div>
+      <div className="today">
+        <div className="prog"><div className="lbl"><b>Today</b><span>{num(c.sent_today)} of {num(goal)} emails · {num(c.replied_today)} replied</span></div><div className="bar"><i style={{ width: `${p * 100}%`, background: p >= 1 ? '#1E9E6F' : undefined }} /></div></div>
+        {c.analytics && <div className="board camp">
+          <div><b>{num(c.analytics.total_leads)}</b><small>leads in campaign</small></div>
+          <div><b>{num(c.analytics.in_progress)}</b><small>in sequence</small></div>
+          <div><b>{num(c.analytics.not_started)}</b><small>not started</small></div>
+          <div><b>{num(c.analytics.completed)}</b><small>finished</small></div>
+          <div><b>{num(c.analytics.sent)}</b><small>emails sent</small></div>
+          <div><b>{num(c.analytics.replies)}</b><small>replies</small></div>
+        </div>}
+      </div>
+    </div>
+  ); });
+}
+
+
 export function LeadForm({ sources, onClose, reload, say, fixedSource, title = 'Add a lead', defaultStage = 'new', claimAs = null }) {
   const [f, setF] = useState({ source: fixedSource || 'other', filter_id: '', company: '', domain: '', contact_name: '', email: '', phone: '', title: '', city: '', state: '', est_sales_usd: '', deal_value: '', stage: defaultStage, notes: '', in_calls: true });
   const [busy, setBusy] = useState(false);
@@ -323,7 +498,7 @@ export function LeadForm({ sources, onClose, reload, say, fixedSource, title = '
 const toLocalInput = (iso) => { if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return ''; return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
 const cleanDomain = (d) => (d || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '') || null;
 
-/* ---------- CSV import ---------- */
+
 function ImportCsv({ sources, onClose, reload, say }) {
   const [parsed, setParsed] = useState(null); const [map, setMap] = useState({}); const [source, setSource] = useState('other'); const [list, setList] = useState(''); const [inCalls, setInCalls] = useState(true);
   const [prog, setProg] = useState(null); const fileRef = useRef();
@@ -371,104 +546,8 @@ function ImportCsv({ sources, onClose, reload, say }) {
   );
 }
 
-/* =================== Email =================== */
-function Email({ me, rep, leads, status, reload, refreshStatus, say }) {
-  const [sends, setSends] = useState(null); const [busy, setBusy] = useState(false); const [view, setView] = useState('replies'); const [openLead, setOpenLead] = useState(null);
-  const load = async () => setSends(await fetchAll('sales_email_sends', '*', (q) => q.order('sent_at', { ascending: false })));
-  useEffect(() => { load(); if (!rep && !status?.smartlead_last_sync && status?.smartlead_key_set) sync(); }, []);   // first visit: pull the campaign automatically
-  const sync = async () => { setBusy(true); const r = await ownerFn({ action: 'smartlead_sync' }); setBusy(false); say(r, r.error ? null : 'Smartlead synced.'); load(); reload(); refreshStatus(); };
-  const [camp, setCamp] = useState(null); const [cbusy, setCbusy] = useState(false); const [assignees, setAssignees] = useState([]);
-  const loadCamp = async () => { const r = await ownerFn({ action: 'smartlead_campaign' }); if (!r.error) setCamp(r.campaigns || []); };
-  useEffect(() => { if (!rep) loadCamp(); supabase.from('profiles').select('id, full_name, email').like('role', 'shipbay%').eq('active', true).then(({ data }) => setAssignees(data || [])); }, []);
-  const setCampStatus = async (c, status) => { if (status !== 'START' && !window.confirm(`${status === 'PAUSED' ? 'Pause' : 'Stop'} the campaign “${c.name}”? Nothing more goes out until you resume.`)) return; setCbusy(true); const r = await ownerFn({ action: 'smartlead_status', campaign_id: c.id, status }); setCbusy(false); say(r, r.error ? null : status === 'START' ? 'Campaign running.' : status === 'PAUSED' ? 'Campaign paused.' : 'Campaign stopped.'); loadCamp(); };
-  const markAnswered = async (s, on) => { if (!s.lead_id) return; await supabase.from('sales_leads').update({ answered_at: on ? new Date().toISOString() : null, last_touch_at: new Date().toISOString() }).eq('id', s.lead_id); reload(); };
-  const assign = async (s, uid) => { if (!s.lead_id) return; await supabase.from('sales_leads').update({ assigned_to: uid || null }).eq('id', s.lead_id); reload(); };
-  const stopLead = async (s) => { if (!window.confirm(`Mark ${s.lead_name || s.lead_email} do-not-contact? They come out of the campaign and the call queue.`)) return; const r = await ownerFn({ action: 'smartlead_stop_lead', email: s.lead_email }); say(r, r.error ? null : 'Marked do-not-contact.'); load(); reload(); };
-  const setReply = async (s, reply_type) => {
-    await supabase.from('sales_email_sends').update({ reply_type }).eq('id', s.id);
-    if (reply_type === 'Negative') { const r = await ownerFn({ action: 'smartlead_stop_lead', email: s.lead_email }); say(r, r.error ? null : 'Marked do-not-contact — unsubscribed in Smartlead, blocked, and out of the call queue.'); }
-    const { data: cur } = await supabase.from('fin_settings').select('value').eq('key', 'reply_tags').maybeSingle();   // remembered by email so a re-sync keeps the tag
-    await supabase.from('fin_settings').upsert({ key: 'reply_tags', value: { ...(cur?.value || {}), [s.lead_email.toLowerCase()]: reply_type } }); if (s.lead_id && reply_type === 'Negative') await supabase.from('sales_leads').update({ stage: 'dnc' }).eq('id', s.lead_id).eq('stage', 'replied'); load(); reload(); };
-  const m = useMemo(() => {
-    const S = sends || []; const emails = new Set(S.map((s) => s.lead_email));
-    const replied = S.filter((s) => s.replied); const repliedLeads = new Set(replied.map((s) => s.lead_email));
-    const by = (key) => { const g = {}; for (const s of S) { const k = key(s) || '—'; g[k] = g[k] || { sent: 0, leads: new Set(), replied: 0, pos: 0, bounced: 0 }; g[k].sent++; g[k].leads.add(s.lead_email); if (s.replied) g[k].replied++; if (s.reply_type === 'Positive') g[k].pos++; if (s.bounced) g[k].bounced++; } return Object.entries(g).map(([k, v]) => ({ k, ...v, leads: v.leads.size })).sort((a, b) => a.k.localeCompare(b.k)); };
-    return { sent: S.length, leads: emails.size, replied: replied.length, repliedLeads: repliedLeads.size, pos: S.filter((s) => s.reply_type === 'Positive').length, bounced: S.filter((s) => s.bounced).length, byStep: by((s) => `Step ${s.step}${s.variant ? ' · ' + s.variant : ''}`), byList: by((s) => leads.find((l) => l.id === s.lead_id)?.filter_id), replies: replied };
-  }, [sends, leads]);
-  if (sends === null) return <div className="card"><div className="empty">Loading…</div></div>;
-  return (
-    <>
-      {rep && <div className="opsbar"><div><b>Replies handed to you</b><div className="sm">New replies rotate between the team automatically. Answer from your inbox, then mark it answered here.</div></div></div>}
-      {!rep && (camp || []).map((c) => { const lim = c.daily_limit || 0; const p = lim ? Math.min(100, (c.sent_today / lim) * 100) : 0; const running = c.status === 'ACTIVE' || c.status === 'START'; return (
-        <div key={c.id} className="card campaign">
-          <div className="cardhead">
-            <div><h3>{c.name}</h3><div className="sm">Smartlead campaign {c.id} · synced {ago(status.smartlead_last_sync?.at)}</div></div>
-            <span className={`statuspill ${running ? 'ok' : c.status === 'PAUSED' ? 'warn' : 'muted'}`}>{running ? 'Running' : c.status === 'PAUSED' ? 'Paused' : c.status === 'COMPLETED' ? 'Completed' : c.status}</span>
-            <div className="spacer" />
-            {running ? <button className="btn-sm" disabled={cbusy} onClick={() => setCampStatus(c, 'PAUSED')}>Pause</button> : <button className="btn-sm primary" disabled={cbusy} onClick={() => setCampStatus(c, 'START')}>{c.status === 'PAUSED' ? 'Resume' : 'Start'}</button>}
-            <button className="btn-sm" disabled={busy || !status.smartlead_key_set} onClick={() => { sync(); loadCamp(); }}>{busy ? 'Syncing…' : 'Sync'}</button>
-          </div>
-          <div className="today">
-            <div className="prog"><div className="lbl"><b>Today</b><span>{num(c.sent_today)}{lim ? ` of ${num(lim)}` : ''} sent · {num(c.replied_today)} replied</span></div><div className="bar"><i style={{ width: `${p}%` }} /></div></div>
-            {c.analytics && <div className="board camp">
-              <div><b>{num(c.analytics.total_leads)}</b><small>leads in campaign</small></div>
-              <div><b>{num(c.analytics.in_progress)}</b><small>in sequence</small></div>
-              <div><b>{num(c.analytics.not_started)}</b><small>not started</small></div>
-              <div><b>{num(c.analytics.completed)}</b><small>finished</small></div>
-              <div><b>{num(c.analytics.sent)}</b><small>emails sent</small></div>
-              <div><b>{num(c.analytics.replies)}</b><small>replies</small></div>
-            </div>}
-          </div>
-        </div>
-      ); })}
-      {!rep && camp === null && <div className="card"><div className="empty">Checking the campaign…</div></div>}
-      {!rep && camp && camp.length === 0 && <div className="opsbar"><div className="spacer" /><button className="btn-sm primary" disabled={busy || !status.smartlead_key_set} onClick={sync}>{busy ? 'Syncing…' : 'Sync from Smartlead'}</button></div>}
-      {!rep && <div className="kpis fin">
-        <div className="tile"><small>Emails sent</small><b>{num(m.sent)}</b><span>to {num(m.leads)} people</span></div>
-        <div className="tile"><small>Reply rate</small><b>{pct(m.repliedLeads / (m.leads || 1), 1)}</b><span>{num(m.repliedLeads)} people replied</span></div>
-        <div className="tile ok"><small>Positive</small><b className="hot">{num(m.pos)}</b><span>{pct(m.pos / (m.leads || 1), 1)} of people</span></div>
-        <div className="tile"><small>Bounced</small><b>{num(m.bounced)}</b><span>{pct(m.bounced / (m.sent || 1), 1)} of sends</span></div>
-      </div>}
-      <div className="seg">{(rep ? [['replies', `Replies (${m.replied})`]] : [['replies', `Replies (${m.replied})`], ['score', 'Scoreboard'], ['all', 'All sends']]).map(([k, l]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{l}</button>)}</div>
-      {view === 'replies' && (
-        <div className="replies">
-          {m.replies.length === 0 && <div className="card"><div className="empty">No replies yet.</div></div>}
-          {m.replies.map((s) => { const l = leads.find((x) => x.id === s.lead_id); return (
-            <div key={s.id} className={`card reply ${s.reply_type ? s.reply_type.toLowerCase().replace(/[^a-z]/g, '') : 'untagged'}`}>
-              <div className="cardhead">
-                <div><b>{s.lead_name || l?.company || s.lead_email}</b>{l?.company && s.lead_name && <span className="sm"> · {l.company}</span>}<div className="sm">{s.lead_email}{l?.filter_id ? ` · list ${l.filter_id}` : ''} · step {s.step}{s.reply_at ? ` · ${ago(s.reply_at)}` : ''}</div></div>
-                <div className="replyacts">
-                  {rep ? (s.reply_type && <span className="pill">{s.reply_type}</span>) : <select className="statusselect" value={s.reply_type || ''} onChange={(e) => setReply(s, e.target.value)}><option value="">tag it</option>{['Positive', 'Neutral', 'Negative', 'Auto-reply', 'Bounce-back'].map((t) => <option key={t}>{t}</option>)}</select>}
-                  {rep && l && l.stage !== 'dnc' && <button className="btn-xs" onClick={() => stopLead(s)}>Do not contact</button>}
-                  {l && <span className={`statuspill ${stageClass(l.stage)}`}>{stageLabel(l.stage)}</span>}
-                  {l && l.stage !== 'dnc' && (l.answered_at ? <button className="btn-xs ok" title="Click to undo" onClick={() => markAnswered(s, false)}>✓ Answered {new Date(l.answered_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</button> : <button className="btn-xs primary" onClick={() => markAnswered(s, true)}>Mark answered</button>)}
-                  {!rep && l && assignees.length > 1 && <select className="statusselect" value={l.assigned_to || ''} onChange={(e) => assign(s, e.target.value)} title="Hand this lead to"><option value="">unassigned</option>{assignees.map((a) => <option key={a.id} value={a.id}>{(a.full_name || a.email).split(' ')[0]}</option>)}</select>}
-                  {l && <button className="btn-xs" onClick={() => setOpenLead(l)}>Open lead</button>}
-                </div>
-              </div>
-              {s.reply_body ? <pre className="replybody">{s.reply_body}</pre> : <div className="sm">Reply text arrives on the next sync.</div>}
-              <div className="sm replyre">Re: {s.subject}</div>
-            </div>
-          ); })}
-        </div>
-      )}
-      {view === 'score' && (
-        <div className="ownergrid">
-          <Score title="By step and variant" rows={m.byStep} />
-          <Score title="By list" rows={m.byList} />
-        </div>
-      )}
-      {openLead && <LeadDrawer lead={leads.find((x) => x.id === openLead.id) || openLead} sources={[]} onClose={() => setOpenLead(null)} reload={reload} say={say} claimAs={rep ? me.id : null} />}
-      {view === 'all' && (
-        <div className="card"><div className="tablewrap"><table className="ordertable leads">
-          <thead><tr><th>Sent</th><th>To</th><th>Step</th><th>Subject</th><th>Status</th></tr></thead>
-          <tbody>{sends.slice(0, 500).map((s) => <tr key={s.id}><td className="sm">{new Date(s.sent_at).toLocaleString()}</td><td>{s.lead_name || s.lead_email}<div className="sm">{s.lead_email}</div></td><td className="sm">{s.step}{s.variant ? ` ${s.variant}` : ''}</td><td className="sm">{s.subject}</td><td>{s.bounced ? <span className="statuspill bad">bounced</span> : s.replied ? <span className="statuspill ok">replied{s.reply_type ? ` · ${s.reply_type}` : ''}</span> : <span className="statuspill muted">sent</span>}</td></tr>)}</tbody>
-        </table></div></div>
-      )}
-    </>
-  );
-}
-function Score({ title, rows }) {
+
+export function Score({ title, rows }) {
   return (
     <div className="card"><h3>{title}</h3>
       <table className="ordertable fin"><thead><tr><th /><th className="n">Sent</th><th className="n">People</th><th className="n">Replied</th><th className="n">Reply %</th><th className="n">Positive</th><th className="n">Bounced</th></tr></thead>
@@ -477,12 +556,13 @@ function Score({ title, rows }) {
   );
 }
 
+
 /* =================== Calls =================== */
 const OUTCOMES = [['no_answer', 'No answer', ''], ['voicemail', 'Voicemail', ''], ['gatekeeper', 'Gatekeeper', 'warn'], ['connected', 'Connected', 'ok'], ['booked', 'Booked a call', 'ok solid'], ['not_fit', 'Not a fit', 'bad'], ['wrong_number', 'Wrong number', 'bad'], ['dnc', 'Do not call', 'bad']];
 const PICKUP = new Set(['gatekeeper', 'connected', 'booked', 'not_fit']); const CONNECT = new Set(['connected', 'booked', 'not_fit']);
 const grade = (bookedPer100, dials) => (dials < 30 ? '—' : bookedPer100 >= 3 ? 'A' : bookedPer100 >= 1.5 ? 'B' : bookedPer100 >= 0.5 ? 'C' : 'D');
 
-function Calls({ me, rep, leads, reload, say }) {
+function Calls({ me, rep, leads, reload, say, openLead }) {
   const [list, setList] = useState(''); const [calls, setCalls] = useState([]); const [sessions, setSessions] = useState([]);
   const [session, setSession] = useState(() => { try { return JSON.parse(sessionStorage.getItem('shipbay-call-session') || 'null'); } catch { return null; } });
   const [cur, setCur] = useState(null); const [callStart, setCallStart] = useState(null); const [note, setNote] = useState(''); const [tick, setTick] = useState(0); const [skipped, setSkipped] = useState([]);
@@ -540,7 +620,7 @@ function Calls({ me, rep, leads, reload, say }) {
           {!lead ? <div className="empty">Queue is empty for this list. Import more leads or clear the filter.</div> : (
             <>
               <div className="who"><small>{lead.filter_id ? listName(lead.filter_id) : srcLabelPlain(lead.source)} · try #{(lead.attempts || 0) + 1}{lead.stage === 'replied' && <span className="statuspill warn" style={{ marginLeft: 8 }}>replied to email</span>}</small>
-                <h2>{lead.company || lead.domain}</h2>
+                <h2 className="click" onClick={() => openLead(lead)} title="Open contact">{lead.company || lead.domain}</h2>
                 <a className="phone" href={`tel:${lead.phone.replace(/[^+\d]/g, '')}`}>{lead.phone}</a>
                 <div className="sm">{[lead.contact_name, lead.city, lead.state].filter(Boolean).join(' · ')}{lead.est_sales_usd ? ` · ~${money(lead.est_sales_usd)}/mo online` : ''}{lead.products ? ` · ${lead.products} products` : ''}{lead.plan ? ` · ${lead.plan}` : ''}</div>
                 {lead.domain && <a className="sm" href={`https://${lead.domain}`} target="_blank" rel="noreferrer">{lead.domain} ↗</a>}
@@ -568,7 +648,7 @@ function Calls({ me, rep, leads, reload, say }) {
     </>
   );
 }
-const srcLabelPlain = (k) => ({ cold_call: 'Cold call list', cold_email: 'Cold email', fulfill_com: 'Fulfill.com', fulfilment_com: 'fulfilment.com', agency: 'Agency', referral: 'Referral', inbound: 'Inbound', linkedin: 'LinkedIn' }[k] || 'Other');
+const _unused = (k) => ({ cold_call: 'Cold call list', cold_email: 'Cold email', fulfill_com: 'Fulfill.com', fulfilment_com: 'fulfilment.com', agency: 'Agency', referral: 'Referral', inbound: 'Inbound', linkedin: 'LinkedIn' }[k] || 'Other');
 function Board({ s, time }) {
   return (
     <div className="board">
@@ -585,50 +665,79 @@ function Board({ s, time }) {
   );
 }
 
-/* =================== Calendar: booked calls from Calendly, handed to whoever takes them =================== */
-export function Calendar({ me, leads, status, reload, say, refreshStatus, mineOnly }) {
-  const [mtgs, setMtgs] = useState(null); const [people, setPeople] = useState([]); const [busy, setBusy] = useState(false); const [open, setOpen] = useState(null); const [past, setPast] = useState(false);
-  const load = async () => { const [m, p] = await Promise.all([fetchAll('sales_meetings', '*', (q) => q.order('starts_at', { ascending: false })), supabase.from('profiles').select('id, full_name, email').like('role', 'shipbay%').eq('active', true)]); setMtgs(m); setPeople(p.data || []); };
+
+/* =================== Calendar: a real month grid — Calendly bookings + Google Calendar =================== */
+export function Calendar({ me, leads, status, reload, say, refreshStatus, mineOnly, openLead }) {
+  const [mtgs, setMtgs] = useState(null); const [people, setPeople] = useState([]); const [busy, setBusy] = useState(null); const [sel, setSel] = useState(null);
+  const [month, setMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const load = async () => { const [m, p] = await Promise.all([fetchAll('sales_meetings', '*', (q) => q.order('starts_at')), supabase.from('profiles').select('id, full_name, email').like('role', 'shipbay%').eq('active', true)]); setMtgs(m); setPeople(p.data || []); };
   useEffect(() => { load(); }, []);
-  const sync = async () => { setBusy(true); const r = await ownerFn({ action: 'calendly_sync' }); setBusy(false); say(r, r.error ? null : `Calendly synced · ${r.events} event${r.events === 1 ? '' : 's'}.`); load(); reload?.(); refreshStatus?.(); };
+  const sync = async (which) => { setBusy(which); const r = await ownerFn({ action: which === 'google' ? 'gcal_sync' : 'calendly_sync' }); setBusy(null); say(r, r.error ? null : `${which === 'google' ? 'Google Calendar' : 'Calendly'} synced · ${r.events} event${r.events === 1 ? '' : 's'}.`); load(); reload?.(); refreshStatus?.(); };
   const upd = async (m, patch) => { await supabase.from('sales_meetings').update(patch).eq('id', m.id); load(); };
   const who = (id) => { const p = people.find((x) => x.id === id); return p ? (p.full_name || p.email).split(' ')[0] : '—'; };
   if (mtgs === null) return <div className="card"><div className="empty">Loading…</div></div>;
-  const now = Date.now();
-  const list = mtgs.filter((m) => (!mineOnly || m.assigned_to === me?.id) && (past ? true : (new Date(m.ends_at || m.starts_at).getTime() >= now - 3600000 && m.status !== 'canceled')));
-  const mine = mtgs.filter((m) => m.assigned_to === me?.id && new Date(m.starts_at) >= now && m.status === 'active');
+  const visible = mtgs.filter((m) => !mineOnly || m.assigned_to === me?.id);
+  // grid: Sunday-first weeks covering the month
+  const first = new Date(month.getFullYear(), month.getMonth(), 1); const start = new Date(first); start.setDate(1 - first.getDay());
+  const cells = []; for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); cells.push(d); }
+  const key = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const byDay = {}; for (const m of visible) { const k = key(new Date(m.starts_at)); (byDay[k] = byDay[k] || []).push(m); }
+  const today = key(new Date()); const now = Date.now();
+  const upcoming = visible.filter((m) => new Date(m.starts_at).getTime() >= now - 3600000 && m.status !== 'canceled').slice(0, 8);
+  const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const fmtT = (iso) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(':00', '');
   return (
     <>
       <div className="opsbar wrap">
-        <div><b>{num(list.filter((m) => new Date(m.starts_at) >= now && m.status === 'active').length)} upcoming</b><span className="sm"> · {num(mine.length)} yours{status?.calendly_last_sync?.at ? ` · Calendly synced ${ago(status.calendly_last_sync.at)}` : ''}</span></div>
-        <label className="chk sm"><input type="checkbox" checked={past} onChange={(e) => setPast(e.target.checked)} /> show past & canceled</label>
+        <div className="period"><button className="btn-sm" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>‹</button><b className="monthtitle">{month.toLocaleString('en-US', { month: 'long', year: 'numeric' })}</b><button className="btn-sm" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>›</button><button className="btn-xs" onClick={() => { const d = new Date(); setMonth(new Date(d.getFullYear(), d.getMonth(), 1)); }}>Today</button></div>
+        <span className="sm"><i className="sw cal" /> Calendly &nbsp; <i className="sw gcal" /> Google Calendar</span>
         <div className="spacer" />
-        {!mineOnly && (status?.calendly_set ? <button className="btn-sm primary" disabled={busy} onClick={sync}>{busy ? 'Syncing…' : 'Sync Calendly'}</button> : <span className="sm">Add your Calendly token under Settings to pull booked calls in.</span>)}
+        {!mineOnly && <>
+          {status?.calendly_set ? <button className="btn-sm" disabled={!!busy} onClick={() => sync('calendly')}>{busy === 'calendly' ? '…' : 'Sync Calendly'}</button> : <span className="sm">Calendly token → Settings</span>}
+          {status?.gcal_set ? <button className="btn-sm" disabled={!!busy} onClick={() => sync('google')}>{busy === 'google' ? '…' : 'Sync Google Calendar'}</button> : <span className="sm">· Google Calendar address → Settings</span>}
+        </>}
       </div>
-      <div className="card">
-        {list.length === 0 ? <div className="empty">No booked calls{past ? '' : ' coming up'}.</div> : (
-          <div className="tablewrap"><table className="ordertable leads">
-            <thead><tr><th>When</th><th>Who</th><th>Call</th><th>Taken by</th><th>Status</th><th /></tr></thead>
-            <tbody>{list.map((m) => { const l = leads?.find((x) => x.id === m.lead_id); const d = new Date(m.starts_at); const isPast = d.getTime() < now; return (
-              <tr key={m.id} className={m.status === 'canceled' ? 'muted' : ''}>
-                <td><b>{d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</b><div className="sm">{d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}{m.ends_at ? `–${new Date(m.ends_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : ''}</div></td>
-                <td><b>{m.invitee_name || m.invitee_email || '—'}</b><div className="sm">{l?.company ? `${l.company} · ` : ''}{m.invitee_email}</div></td>
-                <td className="sm">{m.name}{m.location && /^https?:/.test(m.location) ? <div><a href={m.location} target="_blank" rel="noreferrer">Join link ↗</a></div> : m.location ? <div>{m.location}</div> : null}</td>
-                <td>{mineOnly ? who(m.assigned_to) : <select className="statusselect" value={m.assigned_to || ''} onChange={(e) => upd(m, { assigned_to: e.target.value || null })}><option value="">— nobody —</option>{people.map((p) => <option key={p.id} value={p.id}>{(p.full_name || p.email).split(' ')[0]}</option>)}</select>}</td>
-                <td>{m.status === 'canceled' ? <span className="statuspill bad">Canceled</span> : isPast ? <select className="statusselect" value={m.outcome || ''} onChange={(e) => upd(m, { outcome: e.target.value || null, status: 'done' })}><option value="">— how did it go? —</option><option value="quoted">Quoted</option><option value="follow_up">Follow up</option><option value="signed">Signed</option><option value="not_fit">Not a fit</option><option value="no_show">No-show</option></select> : <span className="statuspill ok">Booked</span>}</td>
-                <td className="n">{l && <button className="btn-xs" onClick={() => setOpen(l)}>Lead</button>}</td>
-              </tr>
-            ); })}</tbody>
-          </table></div>
-        )}
+      <div className="calgrid-wrap">
+        <div className="card calcard">
+          <div className="calgrid">
+            {dow.map((d) => <div key={d} className="dow">{d}</div>)}
+            {cells.map((d) => { const k = key(d); const evs = (byDay[k] || []).sort((a, b) => a.starts_at.localeCompare(b.starts_at)); const other = d.getMonth() !== month.getMonth(); return (
+              <div key={k} className={`day ${other ? 'other' : ''} ${k === today ? 'today' : ''}`}>
+                <span className="dnum">{d.getDate()}</span>
+                {evs.slice(0, 4).map((m) => <button key={m.id} className={`ev ${m.source} ${m.status === 'canceled' ? 'canceled' : ''} ${new Date(m.starts_at).getTime() < now ? 'past' : ''}`} onClick={() => setSel(m)} title={m.name}>{!m.all_day && <span className="t">{fmtT(m.starts_at)}</span>}<span className="n">{m.invitee_name || m.name}</span></button>)}
+                {evs.length > 4 && <button className="more" onClick={() => setSel(evs[4])}>+{evs.length - 4} more</button>}
+              </div>
+            ); })}
+          </div>
+        </div>
+        <div className="calside">
+          <div className="card">
+            <div className="cardhead"><h3>Coming up</h3></div>
+            {upcoming.length === 0 ? <div className="empty">Nothing booked.</div> : <ul className="uplist">{upcoming.map((m) => <li key={m.id} onClick={() => setSel(m)}><b>{new Date(m.starts_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · {fmtT(m.starts_at)}</b><span>{m.invitee_name || m.name}</span><span className="sm">{m.name}{!mineOnly ? ` · ${who(m.assigned_to)}` : ''}</span></li>)}</ul>}
+          </div>
+        </div>
       </div>
-      {open && <LeadDrawer lead={open} sources={[]} onClose={() => setOpen(null)} reload={reload || (() => {})} say={say} />}
+      {sel && (() => { const m = sel; const l = leads?.find((x) => x.id === m.lead_id); const isPast = new Date(m.starts_at).getTime() < now; return (
+        <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setSel(null)}><div className="modal">
+          <h3>{m.name}</h3>
+          <p className="lead">{new Date(m.starts_at).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{m.ends_at ? ` – ${fmtT(m.ends_at)}` : ''} · <span className={`pill ${m.source === 'google' ? '' : 'connected'}`}>{m.source === 'google' ? 'Google Calendar' : 'Calendly'}</span></p>
+          <div className="confirm">
+            {(m.invitee_name || m.invitee_email) && <div><small>With</small><b>{m.invitee_name || m.invitee_email}</b>{m.invitee_email && m.invitee_name && <span className="muted"> · {m.invitee_email}</span>}{l && <> · <button className="btn-xs" onClick={() => { setSel(null); openLead(l); }}>Open contact</button></>}</div>}
+            {m.location && <div><small>Where</small>{/^https?:/.test(m.location) ? <a href={m.location} target="_blank" rel="noreferrer">{m.location.includes('meet.google') ? 'Google Meet' : m.location.includes('zoom') ? 'Zoom' : 'Join link'} ↗</a> : <b>{m.location}</b>}</div>}
+            {m.description && <div><small>Notes</small><pre className="notes">{m.description.slice(0, 600)}</pre></div>}
+            <div><small>Taken by</small>{mineOnly ? <b>{who(m.assigned_to)}</b> : <select className="statusselect" value={m.assigned_to || ''} onChange={(e) => { upd(m, { assigned_to: e.target.value || null }); setSel({ ...m, assigned_to: e.target.value || null }); }}><option value="">— nobody —</option>{people.map((p) => <option key={p.id} value={p.id}>{(p.full_name || p.email).split(' ')[0]}</option>)}</select>}</div>
+            {m.status === 'canceled' ? <div><small>Status</small><span className="statuspill bad">Canceled</span></div> : isPast && <div><small>How did it go?</small><select className="statusselect" value={m.outcome || ''} onChange={(e) => { upd(m, { outcome: e.target.value || null, status: 'done' }); setSel({ ...m, outcome: e.target.value }); }}><option value="">—</option><option value="quoted">Quoted</option><option value="follow_up">Follow up</option><option value="signed">Signed</option><option value="not_fit">Not a fit</option><option value="no_show">No-show</option></select></div>}
+          </div>
+          <div className="row"><div className="spacer" /><button className="btn-sm" onClick={() => setSel(null)}>Close</button></div>
+        </div></div>
+      ); })()}
     </>
   );
 }
 
+
 /* =================== Third party =================== */
-function Third({ leads, sources, reload, say }) {
+export function Third({ leads, sources, reload, say }) {
   const [adding, setAdding] = useState(null); const [edit, setEdit] = useState(null);
   const partner = sources.filter((s) => !['cold_email', 'cold_call'].includes(s.key));
   const stats = (k) => { const L = leads.filter((l) => l.source === k); return { n: L.length, replied: L.filter((l) => ['replied', 'call_booked', 'quoted'].includes(l.stage)).length, signed: L.filter((l) => l.stage === 'signed').length }; };

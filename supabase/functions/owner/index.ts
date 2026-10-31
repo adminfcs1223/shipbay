@@ -19,7 +19,7 @@ const json = (b: unknown, status = 200) => Response.json(b, { status, headers: c
 const DASH = 'https://dashboard.shipbay3pl.com/';
 const QBO_REDIRECT = 'https://dashboard.shipbay3pl.com/oauth/qbo';
 const QBO_API = 'https://quickbooks.api.intuit.com';
-const SECRET_KEYS = new Set(['QBO_CLIENT_ID', 'QBO_CLIENT_SECRET', 'SMARTLEAD_API_KEY', 'SMARTLEAD_CAMPAIGNS', 'CALENDLY_TOKEN']);
+const SECRET_KEYS = new Set(['QBO_CLIENT_ID', 'QBO_CLIENT_SECRET', 'SMARTLEAD_API_KEY', 'SMARTLEAD_CAMPAIGNS', 'CALENDLY_TOKEN', 'GCAL_ICS_URL']);
 const SL = 'https://server.smartlead.ai/api/v1';
 const enc = new TextEncoder();
 
@@ -115,19 +115,26 @@ async function smartleadSync(uid: string) {
       const d = j?.data || []; leads.push(...d); if (d.length < 100) break;
     }
     const byEmail = new Map<string, string>(); const slId = new Map<string, string>();
+    // one read of every lead we already have, instead of two lookups per Smartlead lead
+    const byDomain = new Map<string, any>(); const byMail = new Map<string, any>();
+    for (let off = 0; ; off += 1000) {
+      const { data: page } = await admin.from('sales_leads').select('id, domain, email, in_email, contact_name, title, filter_id').range(off, off + 999);
+      for (const r of page || []) { if (r.domain) byDomain.set(String(r.domain).toLowerCase(), r); if (r.email) byMail.set(String(r.email).toLowerCase(), r); }
+      if (!page || page.length < 1000) break;
+    }
+    const inserts: any[] = []; const updates: { id: string; patch: any }[] = [];
     for (const x of leads) {
       const l = x.lead || {}; const email = String(l.email || '').toLowerCase(); if (!email) continue;
       if (l.id) slId.set(email, String(l.id));
       const domain = String(l.website || '').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '').toLowerCase() || null;
       const cf = l.custom_fields || {};
       const row: any = { source: 'cold_email', filter_id: listCode(cf.list_source), company: l.company_name || null, domain, contact_name: [l.first_name, l.last_name].filter(Boolean).join(' ') || null, email, phone: l.phone_number || null, title: cf.title || null, orders_est: cf.orders_est || null, in_email: true };
-      // find existing by domain then email
-      let ex: any = null;
-      if (domain) ({ data: ex } = await admin.from('sales_leads').select('id, in_calls, stage').ilike('domain', domain).maybeSingle());
-      if (!ex) ({ data: ex } = await admin.from('sales_leads').select('id, in_calls, stage').ilike('email', email).maybeSingle());
-      if (ex) { await admin.from('sales_leads').update({ in_email: true, email, contact_name: row.contact_name, title: row.title, filter_id: row.filter_id ?? undefined }).eq('id', ex.id); byEmail.set(email, ex.id); }
-      else { const { data: ins } = await admin.from('sales_leads').insert(row).select('id').single(); if (ins) byEmail.set(email, ins.id); }
+      const ex = (domain && byDomain.get(domain)) || byMail.get(email);
+      if (ex) { byEmail.set(email, ex.id); if (!ex.in_email || ex.email !== email || ex.contact_name !== row.contact_name) updates.push({ id: ex.id, patch: { in_email: true, email, contact_name: row.contact_name, title: row.title, filter_id: row.filter_id ?? undefined } }); }
+      else if (!inserts.some((r) => r.email === email || (domain && r.domain === domain))) inserts.push(row);
     }
+    for (const u of updates) await admin.from('sales_leads').update(u.patch).eq('id', u.id);
+    for (let i = 0; i < inserts.length; i += 200) { const { data: ins } = await admin.from('sales_leads').insert(inserts.slice(i, i + 200)).select('id, email'); for (const r of ins || []) byEmail.set(String(r.email).toLowerCase(), r.id); }
     // statistics → sales_email_sends
     const stats: any[] = [];
     for (let off = 0; off < 50000; off += 100) {
@@ -192,7 +199,7 @@ async function smartleadCampaignStatus() {
     const label = `${cid} ${camp?.name || ''}`.trim();
     const { count: sentToday } = await admin.from('sales_email_sends').select('id', { count: 'exact', head: true }).eq('campaign', label).gte('sent_at', dayStart.toISOString());
     const { count: repliedToday } = await admin.from('sales_email_sends').select('id', { count: 'exact', head: true }).eq('campaign', label).eq('replied', true).gte('sent_at', dayStart.toISOString());
-    out.push({ id: cid, name: camp?.name || cid, status: camp?.status || 'UNKNOWN', daily_limit: camp?.max_leads_per_day ?? null, sent_today: sentToday || 0, replied_today: repliedToday || 0, analytics: an ? { sent: an.sent_count, unique_sent: an.unique_sent_count, replies: an.reply_count, bounces: an.bounce_count, total_leads: an.campaign_lead_stats?.total, completed: an.campaign_lead_stats?.completed, in_progress: an.campaign_lead_stats?.inprogress, not_started: an.campaign_lead_stats?.notStarted, stopped: an.campaign_lead_stats?.stopped } : null });
+    out.push({ id: cid, name: camp?.name || cid, status: camp?.status || 'UNKNOWN', daily_limit: camp?.max_leads_per_day ?? null, days: camp?.scheduler_cron_value?.days || null, hours: camp?.scheduler_cron_value ? `${camp.scheduler_cron_value.startHour}–${camp.scheduler_cron_value.endHour} ${camp.scheduler_cron_value.tz || ''}` : null, sent_today: sentToday || 0, replied_today: repliedToday || 0, analytics: an ? { sent: an.sent_count, unique_sent: an.unique_sent_count, replies: an.reply_count, bounces: an.bounce_count, total_leads: an.campaign_lead_stats?.total, completed: an.campaign_lead_stats?.completed, in_progress: an.campaign_lead_stats?.inprogress, not_started: an.campaign_lead_stats?.notStarted, stopped: an.campaign_lead_stats?.stopped } : null });
   }
   return { ok: true, campaigns: out };
 }
@@ -232,6 +239,58 @@ async function smartleadAddLeads(ids: string[], cid?: string) {
   }
   await admin.from('sales_leads').update({ in_email: true }).in('id', (leads || []).filter((l) => l.email).map((l) => l.id));
   return { ok: true, added, dup, blocked, skipped_no_email: ids.length - rows.length };
+}
+
+// weekend sending on/off, keeping the campaign's own hours and timezone
+async function smartleadSchedule(cid: string, weekends: boolean) {
+  const key = await secret('SMARTLEAD_API_KEY'); if (!key) return { error: 'No Smartlead key.' };
+  const camp = await (await fetch(`${SL}/campaigns/${cid}?api_key=${key}`)).json().catch(() => ({}));
+  const cron = camp?.scheduler_cron_value || {};
+  const body = { timezone: cron.tz || 'America/New_York', days_of_the_week: weekends ? [0, 1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5], start_hour: cron.startHour || '09:00', end_hour: cron.endHour || '17:00', min_time_btw_emails: camp?.min_time_btwn_emails || 10, max_new_leads_per_day: camp?.max_leads_per_day || 100, schedule_start_time: new Date().toISOString() };
+  const r = await fetch(`${SL}/campaigns/${cid}/schedule?api_key=${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({})); if (!r.ok || j.ok === false) return { error: `Smartlead said: ${JSON.stringify(j).slice(0, 160)}` };
+  return { ok: true, days: body.days_of_the_week };
+}
+
+// ---------- Google Calendar (secret iCal address) ----------
+function icsUnfold(t: string) { return t.replace(/\r\n[ \t]/g, '').replace(/\n[ \t]/g, ''); }
+function icsDate(v: string, params: string): string | null {
+  const m = v.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?$/); if (!m) return null;
+  if (!m[4]) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12)).toISOString();           // all-day → noon UTC
+  if (m[7] === 'Z') return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0))).toISOString();
+  // floating / TZID: treat as America/New_York (the team's zone)
+  const tz = /TZID=([^;:]+)/.exec(params)?.[1] || 'America/New_York';
+  const guess = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)));
+  const offMin = (() => { try { const f = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset' }).formatToParts(guess).find((p) => p.type === 'timeZoneName')?.value || 'GMT-5'; const mm = f.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/); return mm ? (mm[1] === '-' ? -1 : 1) * (+mm[2] * 60 + +(mm[3] || 0)) : -300; } catch { return -300; } })();
+  return new Date(guess.getTime() - offMin * 60000).toISOString();
+}
+async function gcalSync(uid: string) {
+  const url = await secret('GCAL_ICS_URL'); if (!url) return { error: 'Paste the Google Calendar secret iCal address under Settings first.' };
+  const r = await fetch(url); if (!r.ok) return { error: `Google Calendar feed ${r.status}` };
+  const text = icsUnfold(await r.text());
+  const blocks = text.split('BEGIN:VEVENT').slice(1).map((b) => b.split('END:VEVENT')[0]);
+  const lo = Date.now() - 30 * 86400000, hi = Date.now() + 120 * 86400000; let n = 0;
+  for (const b of blocks) {
+    const get = (k: string) => { const m = b.match(new RegExp(`^${k}([^:\n]*):(.*)$`, 'm')); return m ? { params: m[1], value: m[2].trim() } : null; };
+    const ds = get('DTSTART'); if (!ds) continue; const starts = icsDate(ds.value, ds.params); if (!starts) continue;
+    const t = new Date(starts).getTime(); if (t < lo || t > hi) continue;
+    const de = get('DTEND'); const ends = de ? icsDate(de.value, de.params) : null;
+    const uidv = get('UID')?.value || `${starts}-${get('SUMMARY')?.value}`;
+    const attendees = [...b.matchAll(/^ATTENDEE([^:\n]*):mailto:(.+)$/gim)].map((m) => ({ params: m[1], email: m[2].trim().toLowerCase() }));
+    const organizer = /^ORGANIZER[^:\n]*:mailto:(.+)$/im.exec(b)?.[1]?.trim().toLowerCase();
+    const guest = attendees.find((a) => a.email !== organizer && !a.email.endsWith('@shipbay3pl.com'));
+    const cn = guest ? /CN=([^;]+)/.exec(guest.params)?.[1]?.replace(/^"|"$/g, '') : null;
+    const desc = (get('DESCRIPTION')?.value || '').replace(/\\n/g, '\n').replace(/\\,/g, ',');
+    const link = /https?:\/\/(meet\.google\.com|[a-z0-9.]*zoom\.us|teams\.microsoft\.com)[^\s"<>]*/i.exec(desc + ' ' + (get('LOCATION')?.value || ''))?.[0] || null;
+    const row: any = { external_id: `gcal:${uidv}`, source: 'google', name: (get('SUMMARY')?.value || '(no title)').replace(/\\,/g, ','), starts_at: starts, ends_at: ends, status: /^STATUS:CANCELLED/m.test(b) ? 'canceled' : undefined, invitee_name: cn || null, invitee_email: guest?.email || null, location: link || (get('LOCATION')?.value || null), description: desc.slice(0, 2000) || null, all_day: !ds.value.includes('T') };
+    if (guest?.email) { const { data: l } = await admin.from('sales_leads').select('id').ilike('email', guest.email).maybeSingle(); if (l) row.lead_id = l.id; }
+    const { data: ex } = await admin.from('sales_meetings').select('id').eq('external_id', row.external_id).maybeSingle();
+    if (!ex) { row.assigned_to = uid; row.status = row.status || 'active'; }
+    Object.keys(row).forEach((k) => row[k] === undefined && delete row[k]);
+    await admin.from('sales_meetings').upsert(row, { onConflict: 'external_id' }); n++;
+  }
+  await setSetting('gcal_last_sync', { at: new Date().toISOString(), events: n });
+  return { ok: true, events: n };
 }
 
 // ---------- Calendly ----------
@@ -334,7 +393,7 @@ Deno.serve(async (req) => {
 
   if (b.action === 'status') {
     const { data: qbo } = await admin.from('fin_qbo_status').select('*').eq('id', 1).maybeSingle();
-    return json({ passphrase_set: !!stored, unlocked, qbo, smartlead_key_set: !!(await secret('SMARTLEAD_API_KEY')), smartlead_campaigns: await secret('SMARTLEAD_CAMPAIGNS'), qbo_keys_set: !!(await secret('QBO_CLIENT_ID')) && !!(await secret('QBO_CLIENT_SECRET')), smartlead_last_sync: await getSetting('smartlead_last_sync'), calendly_set: !!(await secret('CALENDLY_TOKEN')), calendly_last_sync: await getSetting('calendly_last_sync') });
+    return json({ passphrase_set: !!stored, unlocked, qbo, smartlead_key_set: !!(await secret('SMARTLEAD_API_KEY')), smartlead_campaigns: await secret('SMARTLEAD_CAMPAIGNS'), qbo_keys_set: !!(await secret('QBO_CLIENT_ID')) && !!(await secret('QBO_CLIENT_SECRET')), smartlead_last_sync: await getSetting('smartlead_last_sync'), calendly_set: !!(await secret('CALENDLY_TOKEN')), calendly_last_sync: await getSetting('calendly_last_sync'), gcal_set: !!(await secret('GCAL_ICS_URL')), gcal_last_sync: await getSetting('gcal_last_sync') });
   }
 
   if (b.action === 'set_passphrase') {
@@ -368,6 +427,8 @@ Deno.serve(async (req) => {
   if (b.action === 'smartlead_status') { try { return json(await smartleadSetStatus(String(b.campaign_id || ''), String(b.status || ''))); } catch (e) { return json({ error: String(e) }, 500); } }
   if (b.action === 'smartlead_stop_lead') { try { return json(await smartleadStopLead(String(b.email || ''))); } catch (e) { return json({ error: String(e) }, 500); } }
   if (b.action === 'smartlead_add_leads') { try { return json(await smartleadAddLeads(Array.isArray(b.lead_ids) ? b.lead_ids : [], b.campaign_id)); } catch (e) { return json({ error: String(e) }, 500); } }
+  if (b.action === 'smartlead_schedule') { try { return json(await smartleadSchedule(String(b.campaign_id || ''), !!b.weekends)); } catch (e) { return json({ error: String(e) }, 500); } }
+  if (b.action === 'gcal_sync') { try { return json(await gcalSync(me.id)); } catch (e) { return json({ error: String(e) }, 500); } }
   if (b.action === 'calendly_sync') { try { return json(await calendlySync(me.id)); } catch (e) { return json({ error: String(e) }, 500); } }
 
   if (b.action === 'qbo_connect') {
