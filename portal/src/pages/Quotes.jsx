@@ -11,8 +11,8 @@ const STATUS = { draft: ['Draft', 'muted'], sent: ['Sent', 'navy'], accepted: ['
 const PACKAGING = [['client', 'Client-supplied'], ['shipbay', 'ShipBay supplies']];
 const PARCEL = ['dtc', 'hybrid', 'subscription', 'launch'];
 
-export default function Quotes({ me }) {
-  const [quotes, setQuotes] = useState(null);
+export default function Quotes({ me, params }) {
+  const [quotes, setQuotes] = useState(null); const [accounts, setAccounts] = useState([]); const [prefill, setPrefill] = useState(null);
   const [card, setCard] = useState(null);
   const [sel, setSel] = useState('card');
   const [msg, setMsg] = useState(null);
@@ -25,17 +25,21 @@ export default function Quotes({ me }) {
     ]);
     setQuotes(q || []); setCard(c || null);
     if (sel === 'card' && q?.length && !c) setSel(q[0].id);
+    supabase.from('sales_leads').select('id, company, contact_name, email, phone, domain, stage, org_id').not('stage', 'in', '("dnc","lost")').order('company').then(({ data }) => setAccounts(data || []));
   };
   useEffect(() => { load(); }, []);
+  // opened from a contact card: jump to that quote, or start a new one for that account
+  useEffect(() => { if (params?.quote) setSel(params.quote); }, [params?.quote]);
+  useEffect(() => { if (!params?.lead) return; supabase.from('sales_leads').select('id, company, contact_name, email, phone, org_id').eq('id', params.lead).maybeSingle().then(({ data }) => { if (data) { setPrefill({ lead_id: data.id, org_id: data.org_id, company: data.company || '', contact_name: data.contact_name || '', contact_email: data.email || '', contact_phone: data.phone || '' }); setAdding(true); } }); }, [params?.lead]);
 
   const flash = (kind, text) => setMsg({ kind, text });
   const createQuote = async (f) => {
     const orders = Number(f.orders) || DEFAULT_INPUTS.orders;
     const rates = card ? ratesFromCard(card, orders) : {};
     const inputs = { ...DEFAULT_INPUTS, orders, ...(f.model === 'subscription' ? { batch_share: 1, batch_days: 3, drops_per_month: 1, units_per_order: 4 } : {}), ...(f.model === 'launch' ? { batch_days: 5, storage_months: 2, pallets: 6, inbound_pallets: 6 } : {}), ...(f.model === 'b2b' ? { pallets_out: Math.ceil(orders / 4) } : {}), ...(f.model === 'fba' ? { cartons_out: Math.ceil(orders / 24), pallets_out: Math.ceil(orders / 800) } : {}), ...(f.model === 'storage' ? { pallets: orders, pallet_moves: Math.ceil(orders / 2), shelves: 0 } : {}), ...(f.model === 'project' ? { kits: 0, materials: 0, pallets: 0, shelves: 0, inbound_pallets: 1, inbound_cartons: 0 } : {}) };
-    const { data, error } = await supabase.from('quotes').insert({ company: f.company.trim(), contact_name: f.contact_name || null, contact_email: f.contact_email || null, label: f.label || 'Quote', model: f.model, inputs, rates, costs: DEFAULT_COSTS, services: {}, proposal: { included: DEFAULT_INCLUDED }, scenarios: [orders, Math.round(orders * 1.5), orders * 2], created_by: me?.id }).select().single();
+    const { data, error } = await supabase.from('quotes').insert({ company: f.company.trim(), contact_name: f.contact_name || null, contact_email: f.contact_email || null, contact_phone: f.contact_phone || null, lead_id: f.lead_id || null, org_id: f.org_id || null, label: f.label || 'Quote', model: f.model, inputs, rates, costs: DEFAULT_COSTS, services: {}, proposal: { included: DEFAULT_INCLUDED }, scenarios: [orders, Math.round(orders * 1.5), orders * 2], created_by: me?.id }).select().single();
     if (error) return flash('err', error.message);
-    setAdding(false); await load(); setSel(data.id);
+    setAdding(false); setPrefill(null); await load(); setSel(data.id);
   };
 
   const groups = useMemo(() => { const g = {}; for (const q of quotes || []) (g[q.company] ||= []).push(q); return g; }, [quotes]);
@@ -71,14 +75,17 @@ export default function Quotes({ me }) {
           : current ? <QuoteDetail key={current.id} q={current} card={card} onSaved={(t) => { load(); flash('ok', t || 'Quote saved.'); }} onErr={(t) => flash('err', t)} />
           : <div className="card detail"><div className="empty">Pick a quote on the left.</div></div>}
       </div>
-      {adding && <NewQuote onClose={() => setAdding(false)} onCreate={createQuote} />}
+      {adding && <NewQuote onClose={() => { setAdding(false); setPrefill(null); }} onCreate={createQuote} prefill={prefill} accounts={accounts} />}
     </>
   );
 }
 
 /* ---------- new quote: company + model ---------- */
-function NewQuote({ onClose, onCreate }) {
-  const [f, setF] = useState({ company: '', contact_name: '', contact_email: '', label: 'Quote', model: 'dtc', orders: 500 });
+function NewQuote({ onClose, onCreate, prefill, accounts = [] }) {
+  const [f, setF] = useState({ company: '', contact_name: '', contact_email: '', contact_phone: '', lead_id: null, org_id: null, label: 'Quote', model: 'dtc', orders: 500, ...(prefill || {}) });
+  // typing a company that is already an account links the quote to it (one profile everywhere)
+  const pickCompany = (v) => { const a = accounts.find((x) => (x.company || '').toLowerCase() === v.trim().toLowerCase()); setF(a ? { ...f, company: a.company, lead_id: a.id, org_id: a.org_id || null, contact_name: f.contact_name || a.contact_name || '', contact_email: f.contact_email || a.email || '', contact_phone: f.contact_phone || a.phone || '' } : { ...f, company: v, lead_id: null, org_id: null }); };
+  const linked = f.lead_id ? accounts.find((x) => x.id === f.lead_id) : null;
   const [busy, setBusy] = useState(false);
   const m = MODEL[f.model];
   const submit = async (e) => { e.preventDefault(); if (!f.company.trim()) return; setBusy(true); await onCreate(f); setBusy(false); };
@@ -88,7 +95,7 @@ function NewQuote({ onClose, onCreate }) {
         <h3>New quote<span className="dot">.</span></h3>
         <p className="lead">Start from how they sell. Every number is editable afterwards and the quote starts from the standard rate card.</p>
         <div className="grid2">
-          <div className="field"><label>Company</label><input value={f.company} onChange={(e) => setF({ ...f, company: e.target.value })} autoFocus required /></div>
+          <div className="field"><label>Company</label><input list="acctlist" value={f.company} onChange={(e) => pickCompany(e.target.value)} autoFocus required /><datalist id="acctlist">{accounts.map((a) => <option key={a.id} value={a.company || ''}>{[a.contact_name, a.email].filter(Boolean).join(' · ')}</option>)}</datalist>{linked ? <small className="ok">Linked to the account in Sales{linked.org_id ? ' (already a client)' : ''}.</small> : f.company.trim() ? <small>New company — an account is created in Sales with it.</small> : null}</div>
           <div className="field"><label>Quote label</label><input value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} /></div>
           <div className="field"><label>Contact name</label><input value={f.contact_name} onChange={(e) => setF({ ...f, contact_name: e.target.value })} /></div>
           <div className="field"><label>Contact email</label><input type="email" value={f.contact_email} onChange={(e) => setF({ ...f, contact_email: e.target.value })} /></div>

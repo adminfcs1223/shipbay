@@ -637,14 +637,14 @@ function StartOnboarding({ onClose, onCreated }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    supabase.from('leads').select('id, name, brand, email, source, created_at').is('org_id', null).order('created_at', { ascending: false }).limit(50)
-      .then(({ data }) => setLeads((data || []).filter((l) => l.email && !/test|example\.com/i.test(l.email + l.brand + l.name))));
+    supabase.from('sales_leads').select('id, company, contact_name, email, stage, source, last_touch_at').is('org_id', null).not('stage', 'in', '("dnc","lost")').order('last_touch_at', { ascending: false, nullsFirst: false }).limit(200)
+      .then(({ data }) => setLeads(data || []));
   }, []);
 
   const start = async () => {
     setBusy(true); setErr(null);
     if (leadId) {
-      const { data, error } = await supabase.rpc('convert_lead', { p_lead_id: leadId });
+      const { data, error } = await supabase.rpc('win_lead', { p_lead_id: leadId });
       setBusy(false); if (error) return setErr(error.message); return onCreated(data);
     }
     if (!name.trim()) { setBusy(false); return setErr('Enter the brand name.'); }
@@ -658,11 +658,11 @@ function StartOnboarding({ onClose, onCreated }) {
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal">
         <h3>Start onboarding<span className="dot">.</span></h3>
-        <p className="lead">Pick a website lead, or enter the brand by hand. Either way they get the full checklist.</p>
-        <div className="field"><label>From a website lead</label>
+        <p className="lead">Pick the account from Sales (it becomes Won and keeps its quote, history and rep), or enter a brand by hand — that creates the account too.</p>
+        <div className="field"><label>From Sales</label>
           <select value={leadId} onChange={(e) => setLeadId(e.target.value)}>
             <option value="">— choose —</option>
-            {leads.map((l) => <option key={l.id} value={l.id}>{l.brand || l.name} · {l.email} · {l.source || 'website'}</option>)}
+            {leads.map((l) => <option key={l.id} value={l.id}>{l.company || l.email}{l.contact_name ? ` · ${l.contact_name}` : ''}{l.email ? ` · ${l.email}` : ''} · {l.stage.replace('_', ' ')}</option>)}
           </select>
         </div>
         <div className="or">OR</div>

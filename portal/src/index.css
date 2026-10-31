@@ -1179,3 +1179,22 @@ select.statuspill.ok, select.statuspill.warn, select.statuspill.bad, select.stat
 .owner .mreply textarea { width: 100%; font: 14px/1.5 var(--font-body); padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; resize: vertical; background: #fff; }
 .owner .mreply .row, .owner .leadform .row { display: flex; gap: 8px; align-items: center; }
 @media (max-width: 1000px) { .owner .mailgrid { grid-template-columns: minmax(0, 1fr); } .owner .mlist { max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--line); } .owner .mthread { min-height: 0; } }
+
+/* ---- one account: panel account block, quote chips, duplicates ---- */
+.owner .acct { display: grid; gap: 8px; padding: 12px 14px; margin: 0 0 14px; background: #f7f8fa; border: 1px solid var(--line); border-radius: 12px; }
+.owner .acctrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.owner .acctrow small { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+.owner .acctrow > div > b { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; }
+.owner .qlist { display: flex; flex-wrap: wrap; gap: 6px; }
+.owner .qchip { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 5px 9px; font: inherit; font-size: 13px; cursor: pointer; color: inherit; }
+.owner .qchip:hover { border-color: var(--navy); }
+.owner .pill.navy { background: var(--navy); color: #fff; }
+.owner .btn-sm.warn { border-color: #F5C892; background: #FFF4E5; color: #8A4B08; }
+.owner .dupgroups { display: grid; gap: 14px; max-height: 60vh; overflow-y: auto; }
+.owner .dupgroup { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: grid; gap: 6px; }
+.owner .duprow { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.owner .duprow.on { background: #fff6ee; }
+.owner .duprow .dmain { display: grid; min-width: 0; }
+.owner .duprow .dmain .sm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.owner .dupgroup .row { display: flex; align-items: center; gap: 8px; padding-top: 4px; }
+.quotes .field small.ok { color: #177A56; }

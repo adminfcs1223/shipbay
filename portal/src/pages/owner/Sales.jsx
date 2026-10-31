@@ -6,6 +6,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../lib';
 import { useTeamData, teamStats, TeamTable, useGoals, goalsFor, GoalBars, bonusFor, bonusProgress, BonusBar, BONUS_METRICS } from './Team';
 import { ownerFn, fetchAll, money, pct, num, ago, mmss, hhmm, STAGES, stageLabel, stageClass, parseCsv, guessColumns } from './util';
+import { compute, phases } from '../../quote';
+
+/** the quotes that belong to an account (by the account row, or its client org) — best first */
+const QRANK = { accepted: 0, sent: 1, draft: 2, declined: 3, superseded: 4 };
+export const quotesFor = (lead, quotes) => (quotes || []).filter((q) => q.lead_id === lead?.id || (lead?.org_id && q.org_id === lead.org_id)).sort((a, b) => (a.internal_only - b.internal_only) || (QRANK[a.status] ?? 9) - (QRANK[b.status] ?? 9) || (b.updated_at || '').localeCompare(a.updated_at || ''));
+/** what a quote bills per month in services (first phase: what they pay from day one) */
+export const quoteMonthly = (q) => { try { const m = compute(q, undefined, phases(q)[0]?.key || 'standard'); return m.oneTime ? null : Math.round(m.services || 0); } catch { return null; } };
+/** expected services $/month for an account: its quote if it has one, else the hand-typed deal value */
+export const expectedMonthly = (lead, quotes) => { const q = quotesFor(lead, quotes).find((x) => !x.internal_only && x.status !== 'declined' && x.status !== 'superseded'); const v = q ? quoteMonthly(q) : null; return v != null ? { value: v, from: q } : { value: lead?.deal_value ? Number(lead.deal_value) : null, from: null }; };
 
 const SUB = [['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['calendar', 'Calendar'], ['bonus', 'Bonus'], ['settings', 'Settings']];
 export const LIST_NAMES = { A1: 'Self-ship brands · NJ metro', A2: 'Already on a 3PL · NJ metro', A3: 'Self-ship brands · Northeast', A4: 'Shopify Plus upgrades', B1: 'Founder-run · NJ metro', C1: 'Amazon sellers · Northeast', C2: 'Q4 overflow', X0: 'Control group' };
@@ -33,6 +42,18 @@ export function useReplyKit(me) {
   };
   return { booking, tpl: t, link };
 }
+/** Won: the client account is created or linked (one profile everywhere), the quote's number becomes the deal value */
+export async function winLead(lead, quotes, say) {
+  const exp = expectedMonthly(lead, quotes);
+  let value = exp.value;
+  if (!exp.from) { const v = window.prompt(`${lead.company || lead.email} is won. Expected services $ / month? (a quote fills this in automatically)`, lead.deal_value || ''); if (v === null) return false; value = Number(v) || null; }
+  const { data, error } = await supabase.rpc('win_lead', { p_lead_id: lead.id, p_deal_value: value });
+  if (error) { say({ error: error.message }); return false; }
+  say(null, `${lead.company || lead.email} is a client${exp.from ? ` — ${money(value)}/mo from ${exp.from.label}` : ''}. Onboarding is ready for them.`);
+  return data;
+}
+/** is this company / email / website already in the system? */
+export async function findExisting({ email, domain, company }) { const { data } = await supabase.rpc('find_lead', { p_email: email || '', p_domain: domain || '', p_company: company || '' }); return data || null; }
 const firstName = (l) => (l?.contact_name || '').split(' ')[0] || '';
 
 export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
@@ -44,8 +65,10 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
     return { kind: ok === 'ok' ? 'ok' : 'err', text: decodeURIComponent(m || '') };
   }); const [panel, setPanel] = useState(null); const [focus, setFocus] = useState(null); const [q, setQ] = useState(''); const [people, setPeople] = useState([]);
   useEffect(() => { supabase.from('profiles').select('id, full_name, email, is_sales, is_owner').like('role', 'shipbay%').eq('active', true).then(({ data }) => setPeople((data || []).filter((p) => p.is_sales || p.is_owner))); }, []);
-  const [mail, setMail] = useState([]); const [mailAccts, setMailAccts] = useState([]);
+  const [mail, setMail] = useState([]); const [mailAccts, setMailAccts] = useState([]); const [quotes, setQuotes] = useState([]); const [orgs, setOrgs] = useState([]);
   const load = async () => {
+    const [qs, os] = await Promise.all([supabase.from('quotes').select('id, company, label, status, internal_only, org_id, lead_id, model, inputs, rates, costs, services, scenarios, updated_at'), supabase.from('orgs').select('id, name, slug, status, contact_email, sales_rep_id')]);
+    setQuotes(qs.data || []); setOrgs(os.data || []);
     const [l, s, e, g, ga] = await Promise.all([fetchAll('sales_leads', '*', (qq) => qq.order('created_at', { ascending: false })), fetchAll('sales_sources'), fetchAll('sales_email_sends', '*', (qq) => qq.order('sent_at', { ascending: false })),
       fetchAll('gmail_messages', 'id, user_id, gmail_id, thread_id, message_id_hdr, from_email, from_name, to_email, subject, snippet, at, is_sent, lead_id, read_at, hidden', (qq) => qq.order('at', { ascending: false })), supabase.from('v_gmail_accounts').select('*')]);
     setLeads(l); setSources(s); setSends(e); setMail(g); setMailAccts(ga.data || []);
@@ -63,7 +86,7 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
   const unread = mySends.filter((s) => s.replied && !s.read_at && !s.bounced && !s.mailbox && !stopped.has(s.lead_id)).length + mail.filter((m) => m.user_id === me.id && !m.is_sent && !m.read_at && !m.hidden).length;
   const hits = useMemo(() => { const t = q.trim().toLowerCase(); if (t.length < 2) return []; return (leads || []).filter((l) => [l.company, l.domain, l.contact_name, l.email, l.phone, l.city].filter(Boolean).some((v) => v.toLowerCase().includes(t))).slice(0, 8); }, [q, leads]);
   const panelLead = panel ? (leads || []).find((l) => l.id === panel) : null;
-  const ctx = { me, rep, sources, people, reload: load, say, openLead, go, nav };
+  const ctx = { me, rep, sources, people, reload: load, say, openLead, go, nav, quotes, orgs };
 
   if (leads === null) return <div className="card"><div className="empty">Loading…</div></div>;
   return (
@@ -204,21 +227,22 @@ export function byListRows(leads) {
 
 /* =================== Pipeline: the deals board =================== */
 const COLS = [['contacted', 'Contacted'], ['replied', 'Replied'], ['call_booked', 'Call booked'], ['quoted', 'Quoted'], ['signed', 'Won']];
-function Pipeline({ me, rep, leads, sources, people, reload, say, openLead }) {
+function Pipeline({ me, rep, leads, sources, people, reload, say, openLead, quotes }) {
+  const val = (l) => expectedMonthly(l, quotes).value || 0;
   const [adding, setAdding] = useState(false); const [src, setSrc] = useState(''); const [list, setList] = useState(''); const [who, setWho] = useState(''); const [sort, setSort] = useState('value'); const [more, setMore] = useState({}); const [drag, setDrag] = useState(null); const [over, setOver] = useState(null);
   const pool = leads.filter((l) => (!src || l.source === src) && (!list || l.filter_id === list) && (!who || (who === 'none' ? !l.assigned_to : l.assigned_to === who)));
-  const sorters = { value: (a, b) => (b.deal_value || 0) - (a.deal_value || 0) || (b.last_touch_at || '').localeCompare(a.last_touch_at || ''), recent: (a, b) => (b.last_touch_at || '').localeCompare(a.last_touch_at || ''), oldest: (a, b) => (a.last_touch_at || '').localeCompare(b.last_touch_at || ''), sales: (a, b) => (b.est_sales_usd || 0) - (a.est_sales_usd || 0), name: (a, b) => (a.company || '').localeCompare(b.company || '') };
+  const sorters = { value: (a, b) => val(b) - val(a) || (b.last_touch_at || '').localeCompare(a.last_touch_at || ''), recent: (a, b) => (b.last_touch_at || '').localeCompare(a.last_touch_at || ''), oldest: (a, b) => (a.last_touch_at || '').localeCompare(b.last_touch_at || ''), sales: (a, b) => (b.est_sales_usd || 0) - (a.est_sales_usd || 0), name: (a, b) => (a.company || '').localeCompare(b.company || '') };
   const col = (k) => pool.filter((l) => l.stage === k).sort(sorters[sort]);
   const repName = (id) => { const p = people.find((x) => x.id === id); return p ? (p.full_name || p.email).split(' ')[0] : ''; };
   const move = async (l, stage) => {
     if (!l || l.stage === stage) return;
     const patch = { stage, last_touch_at: new Date().toISOString(), assigned_to: l.assigned_to || me.id };
-    if (stage === 'signed') { const v = window.prompt(`${l.company || l.email} is won. Expected services $ / month?`, l.deal_value || ''); if (v === null) return; patch.deal_value = Number(v) || null; patch.won_at = new Date().toISOString(); }
+    if (stage === 'signed') { const r = await winLead(l, quotes, say); if (r) reload(); return; }
     if (stage === 'lost') { const r = window.prompt('Why lost? (optional)', l.lost_reason || ''); if (r === null) return; patch.lost_reason = r || null; }
     const { error } = await supabase.from('sales_leads').update(patch).eq('id', l.id); if (error) return say({ error: error.message }); reload();
   };
   const lost = pool.filter((l) => l.stage === 'lost').length; const dnc = pool.filter((l) => l.stage === 'dnc').length; const fresh = pool.filter((l) => l.stage === 'new').length;
-  const won = col('signed'); const wonVal = won.reduce((a, l) => a + Number(l.deal_value || 0), 0); const openVal = ['replied', 'call_booked', 'quoted'].flatMap(col).reduce((a, l) => a + Number(l.deal_value || 0), 0);
+  const won = col('signed'); const wonVal = won.reduce((a, l) => a + val(l), 0); const openVal = ['replied', 'call_booked', 'quoted'].flatMap(col).reduce((a, l) => a + val(l), 0);
   return (
     <>
       <div className="opsbar wrap">
@@ -232,13 +256,13 @@ function Pipeline({ me, rep, leads, sources, people, reload, say, openLead }) {
         <button className="btn-sm primary" onClick={() => setAdding(true)}>+ Add opportunity</button>
       </div>
       <div className="kanban">
-        {[...COLS, ['lost', 'Lost']].map(([k, label]) => { const items = col(k); const shown = items.slice(0, more[k] ? 1000 : 80); const val = items.reduce((a, l) => a + Number(l.deal_value || 0), 0); return (
+        {[...COLS, ['lost', 'Lost']].map(([k, label]) => { const items = col(k); const shown = items.slice(0, more[k] ? 1000 : 80); const colVal = items.reduce((a, l) => a + Number(val(l) || 0), 0); return (
           <div key={k} className={`kcol ${k} ${over === k ? 'over' : ''}`} onDragOver={(e) => { e.preventDefault(); setOver(k); }} onDragLeave={() => setOver(null)} onDrop={() => { setOver(null); move(drag, k); setDrag(null); }}>
-            <div className="khead"><b>{label}</b><span className="cnt">{num(items.length)}</span>{val > 0 && <span className="val">{money(val)}</span>}</div>
+            <div className="khead"><b>{label}</b><span className="cnt">{num(items.length)}</span>{colVal > 0 && <span className="val">{money(colVal)}</span>}</div>
             <div className="kcards">
               {shown.map((l) => (
                 <div key={l.id} className={`kcard ${l.stage === 'replied' && !l.answered_at ? 'hot' : ''}`} draggable onDragStart={() => setDrag(l)} onDragEnd={() => setDrag(null)} onClick={() => openLead(l)}>
-                  <div className="kt"><b>{l.company || l.domain || l.email}</b>{l.deal_value ? <span className="kv" title="expected services per month">{money(l.deal_value)}</span> : null}</div>
+                  <div className="kt"><b>{l.company || l.domain || l.email}</b>{val(l) ? <span className="kv" title="expected services per month">{money(val(l))}</span> : null}</div>
                   <div className="sm">{[l.contact_name, l.city].filter(Boolean).join(' · ') || l.email}</div>
                   <div className="kmeta"><span className="pill">{srcLabelPlain(l.source)}</span>{l.filter_id && <span className="pill">{l.filter_id}</span>}{l.assigned_to && <span className="pill connected">{rep ? 'yours' : repName(l.assigned_to)}</span>}<span className="sm">{ago(l.last_touch_at)}</span></div>
                   {l.stage === 'replied' && !l.answered_at && <div className="sm neg">reply waiting</div>}
@@ -250,7 +274,7 @@ function Pipeline({ me, rep, leads, sources, people, reload, say, openLead }) {
           </div>
         ); })}
       </div>
-      {adding && <LeadForm sources={sources} onClose={() => setAdding(false)} reload={reload} say={say} title="Add an opportunity" defaultStage="contacted" claimAs={me.id} />}
+      {adding && <LeadForm sources={sources} onClose={() => setAdding(false)} reload={reload} say={say} openExisting={openLead} title="Add an opportunity" defaultStage="contacted" claimAs={me.id} />}
     </>
   );
 }
@@ -258,6 +282,7 @@ function Pipeline({ me, rep, leads, sources, people, reload, say, openLead }) {
 
 /* =================== Master =================== */
 function Master({ me, rep, leads, sources, reload, say, openLead }) {
+  const [dupes, setDupes] = useState(false); const dupeGroups = useMemo(() => findDupes(leads), [leads]);
   const [q, setQ] = useState(''); const [src, setSrc] = useState(''); const [stage, setStage] = useState(''); const [list, setList] = useState(''); const [phoneOnly, setPhoneOnly] = useState(false); const [showOut, setShowOut] = useState(false); const [pushing, setPushing] = useState(false);
   const [adding, setAdding] = useState(false); const [importing, setImporting] = useState(false);
   const rows = useMemo(() => leads.filter((l) => (!src || l.source === src) && (stage ? l.stage === stage : (showOut || (l.stage !== 'dnc' && l.stage !== 'lost'))) && (!list || l.filter_id === list) && (!phoneOnly || l.phone)
@@ -282,9 +307,11 @@ function Master({ me, rep, leads, sources, reload, say, openLead }) {
         <label className="chk sm"><input type="checkbox" checked={showOut} onChange={(e) => setShowOut(e.target.checked)} /> show lost / do-not-contact</label>
         <div className="spacer" />
         {!rep && pushable.length > 0 && <button className="btn-sm" disabled={pushing} onClick={pushToCampaign}>{pushing ? 'Adding…' : `Add ${num(Math.min(500, pushable.length))} to email campaign`}</button>}
+        {dupeGroups.length > 0 && <button className="btn-sm warn" onClick={() => setDupes(true)}>Duplicates ({dupeGroups.length})</button>}
         {!rep && <button className="btn-sm" onClick={() => setImporting(true)}>Import CSV</button>}
         <button className="btn-sm primary" onClick={() => setAdding(true)}>+ Add lead</button>
       </div>
+      {dupes && <DupModal groups={dupeGroups} onClose={() => setDupes(false)} reload={reload} say={say} />}
       <div className="card">
         <div className="tablewrap"><table className="ordertable leads">
           <thead><tr><th>Company</th><th>Contact</th><th>Phone</th><th>Where</th><th className="n">Est. sales / mo</th><th>Channel · list</th><th>Stage</th><th className="n">Tries</th><th>Last touch</th></tr></thead>
@@ -304,7 +331,7 @@ function Master({ me, rep, leads, sources, reload, say, openLead }) {
         </table></div>
         <div className="sm" style={{ padding: '8px 2px' }}>Showing {Math.min(400, sorted.length)} of {sorted.length} · replies and booked calls float to the top.</div>
       </div>
-      {adding && <LeadForm sources={sources} onClose={() => setAdding(false)} reload={reload} say={say} claimAs={rep ? me.id : null} />}
+      {adding && <LeadForm sources={sources} onClose={() => setAdding(false)} reload={reload} say={say} openExisting={openLead} claimAs={rep ? me.id : null} />}
       {importing && <ImportCsv sources={sources} onClose={() => setImporting(false)} reload={reload} say={say} />}
     </>
   );
@@ -314,7 +341,8 @@ function Master({ me, rep, leads, sources, reload, say, openLead }) {
 
 /* =================== Contact panel: slides in from the right; everything about one lead =================== */
 const PANEL_OUT = [['connected', 'Connected', 'ok'], ['voicemail', 'Voicemail', ''], ['no_answer', 'No answer', ''], ['gatekeeper', 'Gatekeeper', 'warn'], ['booked', 'Booked a call', 'ok solid'], ['not_fit', 'Not a fit', 'bad'], ['wrong_number', 'Wrong number', 'bad']];
-export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say, go }) {
+export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say, go, nav, quotes, orgs }) {
+  const exp = expectedMonthly(lead, quotes); const myQuotes = quotesFor(lead, quotes); const org = lead.org_id ? (orgs || []).find((o) => o.id === lead.org_id) : null;
   const [tab, setTab] = useState('activity'); const kit = useReplyKit(me); const booking = kit.booking; const [touches, setTouches] = useState([]); const [f, setF] = useState(lead); const [calls, setCalls] = useState([]); const [people, setPeople] = useState([]); const [meetings, setMeetings] = useState([]);
   const [note, setNote] = useState(''); const [busy, setBusy] = useState(false); const [logging, setLogging] = useState(false);
   const claimAs = rep ? me.id : null;
@@ -336,7 +364,7 @@ export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say,
   };
   const setStage = async (stage) => {
     const patch = { stage, last_touch_at: new Date().toISOString() };
-    if (stage === 'signed') { const v = window.prompt(`${lead.company || lead.email} is won — expected services $ / month?`, lead.deal_value || ''); if (v === null) return; patch.deal_value = Number(v) || null; patch.won_at = new Date().toISOString(); }
+    if (stage === 'signed') { if (await winLead(lead, quotes, say)) reload(); return; }
     if (stage === 'lost') { const r = window.prompt('Why lost? (optional)', lead.lost_reason || ''); if (r === null) return; patch.lost_reason = r || null; }
     if (stage === 'dnc') { if (!window.confirm('Mark do-not-contact? They come out of the email campaign and the call queue.')) return; if (lead.email) ownerFn({ action: 'smartlead_stop_lead', email: lead.email }); patch.in_calls = false; patch.in_email = false; }
     upd(patch);
@@ -369,10 +397,11 @@ export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say,
             <div className="sm">{[lead.contact_name, lead.title, [lead.city, lead.state].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}{lead.domain && <> · <a href={`https://${lead.domain}`} target="_blank" rel="noreferrer">{lead.domain} ↗</a></>}</div>
             <div className="pchips">
               <select className={`statuspill ${stageClass(lead.stage)}`} value={lead.stage} onChange={(e) => setStage(e.target.value)}>{STAGES.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-              <span className="pill">{srcLabel(sources, lead.source)}</span>{lead.filter_id && <span className="pill" title={listName(lead.filter_id)}>{lead.filter_id}</span>}
+              <select className="statusselect" title="Where this lead came from" value={lead.source} onChange={(e) => upd({ source: e.target.value }, 'Channel updated.')}>{sources.map((sx) => <option key={sx.key} value={sx.key}>{sx.label}</option>)}</select>{lead.filter_id && <span className="pill" title={listName(lead.filter_id)}>{lead.filter_id}</span>}
               {!rep && <select className="statusselect" value={lead.assigned_to || ''} onChange={(e) => upd({ assigned_to: e.target.value || null }, 'Handed off.')}><option value="">— nobody —</option>{people.map((p) => <option key={p.id} value={p.id}>{(p.full_name || p.email).split(' ')[0]}</option>)}</select>}
               {rep && lead.assigned_to && <span className="pill connected">{lead.assigned_to === me.id ? 'yours' : who(lead.assigned_to)}</span>}
-              {lead.deal_value ? <span className="pill connected">{money(lead.deal_value)}/mo</span> : null}
+              {exp.value ? <span className="pill connected" title={exp.from ? `From ${exp.from.label}` : 'Typed in by hand'}>{money(exp.value)}/mo{exp.from ? ' · quote' : ''}</span> : null}
+              {org && <span className="pill navy">client</span>}
             </div>
           </div>
           <button className="btn-sm" onClick={onClose} aria-label="Close">✕</button>
@@ -389,6 +418,19 @@ export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say,
         {logging && <div className="plog"><textarea rows={2} placeholder="What happened on the call…" value={note} onChange={(e) => setNote(e.target.value)} /><div className="outcomes">{PANEL_OUT.map(([k, l, cls]) => <button key={k} className={`oc ${cls}`} onClick={() => logCall(k)}>{l}</button>)}</div></div>}
         <div className="tabs ptabs"><button className={tab === 'activity' ? 'on' : ''} onClick={() => setTab('activity')}>Activity{replies.length ? <i>{replies.length}</i> : null}</button><button className={tab === 'details' ? 'on' : ''} onClick={() => setTab('details')}>Details</button></div>
         <div className="pbody">
+          <div className="acct">
+            <div className="acctrow">
+              <div><small>Client account</small>{org ? <b>{org.name} <span className={`statuspill ${org.status === 'active' ? 'ok' : 'navy'}`}>{org.status}</span></b> : <b className="sm">not a client yet</b>}</div>
+              <div className="spacer" />
+              {org ? <><button className="btn-xs" onClick={() => { nav?.('onboarding', { org: org.id }); onClose(); }}>Onboarding →</button><button className="btn-xs" onClick={() => { nav?.('clientsettings', { org: org.id }); onClose(); }}>Client settings →</button></>
+                : lead.stage !== 'dnc' && <button className="btn-xs primary" onClick={() => setStage('signed')}>Won — make them a client</button>}
+            </div>
+            <div className="acctrow">
+              <div><small>Quotes</small>{myQuotes.length ? <div className="qlist">{myQuotes.map((q) => <button key={q.id} className="qchip" onClick={() => { nav?.('quotes', { quote: q.id }); onClose(); }}><b>{q.label}</b><span className={`pill ${q.status === 'accepted' ? 'ok' : q.status === 'sent' ? 'navy' : 'muted'}`}>{q.status}</span>{quoteMonthly(q) != null && <span>{money(quoteMonthly(q))}/mo</span>}{q.internal_only ? <span className="sm">internal</span> : null}</button>)}</div> : <b className="sm">no quote yet</b>}</div>
+              <div className="spacer" />
+              <button className="btn-xs" onClick={() => { nav?.('quotes', { lead: lead.id }); onClose(); }}>+ New quote</button>
+            </div>
+          </div>
           {tab === 'activity' && (
             <>
               <div className="notebox"><textarea rows={2} placeholder="Add a note…" value={note} onChange={(e) => setNote(e.target.value)} /><div className="row"><div className="spacer" /><button className="btn-xs primary" onClick={addNote} disabled={!note.trim()}>Add note</button></div></div>
@@ -657,6 +699,42 @@ function EmailInbox({ me, rep, leads, allLeads, mail, mailAccts, people, reload,
   );
 }
 
+
+/* =================== Duplicates: same company / email / website under more than one row =================== */
+const normCo = (t) => (t || '').toLowerCase().replace(/\b(the|llc|inc|co|company|corp|corporation|ltd|limited|store|shop|official)\b/g, '').replace(/[^a-z0-9]/g, '').replace(/s$/, '');
+export function findDupes(leads) {
+  const by = new Map(); const add = (k, l) => { if (!k) return; const a = by.get(k) || new Set(); a.add(l.id); by.set(k, a); };
+  for (const l of leads) { const nc = normCo(l.company); if (nc.length >= 4) add(`c:${nc}`, l); if (l.email) add(`e:${l.email.toLowerCase()}`, l); if (l.domain) add(`d:${l.domain.toLowerCase().replace(/^www\./, '')}`, l); }
+  // union the keys into groups
+  const parent = new Map(); const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+  for (const l of leads) parent.set(l.id, l.id);
+  for (const ids of by.values()) { const [a, ...rest] = [...ids]; for (const b of rest) parent.set(find(b), find(a)); }
+  const groups = new Map(); for (const l of leads) { const r = find(l.id); const g = groups.get(r) || []; g.push(l); groups.set(r, g); }
+  return [...groups.values()].filter((g) => g.length > 1).map((g) => g.sort((a, b) => (STAGE_RANK[b.stage] || 0) - (STAGE_RANK[a.stage] || 0) || filled(b) - filled(a) || (a.created_at || '').localeCompare(b.created_at || '')));
+}
+const STAGE_RANK = { dnc: 90, signed: 80, quoted: 50, call_booked: 40, replied: 30, contacted: 20, new: 10, lost: 5 };
+const filled = (l) => ['email', 'phone', 'contact_name', 'domain', 'city', 'notes', 'org_id', 'assigned_to'].filter((k) => l[k]).length;
+function DupModal({ groups, onClose, reload, say }) {
+  const [keep, setKeep] = useState(() => Object.fromEntries(groups.map((g, i) => [i, g[0].id]))); const [busy, setBusy] = useState(null);
+  const merge = async (i) => { const g = groups[i]; const k = keep[i]; setBusy(i); const { error } = await supabase.rpc('merge_leads', { p_keep: k, p_drop: g.filter((l) => l.id !== k).map((l) => l.id) }); setBusy(null); if (error) return say({ error: error.message }); say(null, `Merged ${g.length} rows into one.`); reload(); };
+  const mergeAll = async () => { setBusy('all'); for (let i = 0; i < groups.length; i++) { const g = groups[i]; const k = keep[i]; const { error } = await supabase.rpc('merge_leads', { p_keep: k, p_drop: g.filter((l) => l.id !== k).map((l) => l.id) }); if (error) { setBusy(null); return say({ error: error.message }); } } setBusy(null); say(null, `Merged ${groups.length} duplicate groups.`); reload(); onClose(); };
+  return (
+    <div className="overlay" onClick={onClose}><div className="modal wide" onClick={(e) => e.stopPropagation()}>
+      <div className="cardhead"><h3>Duplicates</h3><span className="sm">Same company, email or website on more than one row. Pick the row to keep — calls, emails, quotes and notes from the others move onto it.</span><div className="spacer" /><button className="btn-xs" onClick={onClose}>×</button></div>
+      <div className="dupgroups">
+        {groups.map((g, i) => <div key={i} className="dupgroup">
+          {g.map((l) => <label key={l.id} className={`duprow ${keep[i] === l.id ? 'on' : ''}`}><input type="radio" name={`k${i}`} checked={keep[i] === l.id} onChange={() => setKeep({ ...keep, [i]: l.id })} />
+            <span className="dmain"><b>{l.company || l.domain || l.email}</b><span className="sm">{[l.contact_name, l.email, l.phone, l.domain, l.city].filter(Boolean).join(' · ') || 'no details'}</span></span>
+            <span className={`statuspill ${stageClass(l.stage)}`}>{stageLabel(l.stage)}</span><span className="sm">{srcLabelPlain(l.source)}{l.filter_id ? ` · ${l.filter_id}` : ''}</span><span className="sm">{l.org_id ? 'client' : ''}</span>
+          </label>)}
+          <div className="row"><span className="sm">keep the checked one</span><div className="spacer" /><button className="btn-sm primary" disabled={busy !== null} onClick={() => merge(i)}>{busy === i ? 'Merging…' : `Merge ${g.length} → 1`}</button></div>
+        </div>)}
+      </div>
+      {groups.length > 1 && <div className="row" style={{ marginTop: 12 }}><div className="spacer" /><button className="btn-sm" disabled={busy !== null} onClick={mergeAll}>{busy === 'all' ? 'Merging…' : `Merge all ${groups.length} groups`}</button></div>}
+    </div></div>
+  );
+}
+
 /* =================== Campaign cards (Strategies page) =================== */
 export function CampaignCards({ status, say, reload }) {
   const [camp, setCamp] = useState(null); const [busy, setBusy] = useState(false); const [goals] = useGoals();
@@ -693,13 +771,15 @@ export function CampaignCards({ status, say, reload }) {
 }
 
 
-export function LeadForm({ sources, onClose, reload, say, fixedSource, title = 'Add a lead', defaultStage = 'new', claimAs = null }) {
+export function LeadForm({ sources, onClose, reload, say, fixedSource, title = 'Add a lead', defaultStage = 'new', claimAs = null, openExisting = null }) {
   const [f, setF] = useState({ source: fixedSource || 'other', filter_id: '', company: '', domain: '', contact_name: '', email: '', phone: '', title: '', city: '', state: '', est_sales_usd: '', deal_value: '', stage: defaultStage, notes: '', in_calls: true });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const save = async (e) => {
     e.preventDefault(); if (!f.company && !f.email && !f.domain) return say({ error: 'Give at least a company, email or domain.' }); setBusy(true);
     const row = { ...f, est_sales_usd: f.est_sales_usd ? Number(f.est_sales_usd) : null, deal_value: f.deal_value ? Number(f.deal_value) : null, domain: cleanDomain(f.domain), filter_id: f.filter_id || null, won_at: f.stage === 'signed' ? new Date().toISOString() : null, last_touch_at: f.stage === 'new' ? null : new Date().toISOString(), assigned_to: claimAs };
+    const dup = await findExisting({ email: row.email, domain: row.domain, company: row.company });
+    if (dup) { setBusy(false); const { data: ex } = await supabase.from('sales_leads').select('company, email, stage').eq('id', dup).maybeSingle(); if (!window.confirm(`${ex?.company || ex?.email || 'This company'} is already in the system (${stageLabel(ex?.stage)}). Open that one instead of adding a copy?`)) return; onClose(); openExisting?.(dup); return; }
     const { error } = await supabase.from('sales_leads').insert(row); setBusy(false);
     if (error) return say({ error: /duplicate/i.test(error.message) ? 'That domain or email is already in the list.' : error.message });
     say(null, 'Lead added.'); reload(); onClose();
