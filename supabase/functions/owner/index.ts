@@ -21,7 +21,7 @@ const QBO_REDIRECT = 'https://dashboard.shipbay3pl.com/oauth/qbo';
 const QBO_API = 'https://quickbooks.api.intuit.com';
 const SECRET_KEYS = new Set(['QBO_CLIENT_ID', 'QBO_CLIENT_SECRET', 'SMARTLEAD_API_KEY', 'SMARTLEAD_CAMPAIGNS', 'CALENDLY_TOKEN', 'GCAL_ICS_URL', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']);
 const GOOGLE_REDIRECT = 'https://dashboard.shipbay3pl.com/oauth/google';
-const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.email';
+const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email';
 const SL = 'https://server.smartlead.ai/api/v1';
 const enc = new TextEncoder();
 
@@ -313,42 +313,71 @@ function gmailBody(payload: any): string {
   return '';
 }
 const addr = (h: string) => (h || '').toLowerCase().match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/g) || [];
+const hdrs = (m: any) => Object.fromEntries((m.payload?.headers || []).map((h: any) => [h.name.toLowerCase(), h.value]));
+const fromName = (h: string) => (h || '').replace(/<.*$/, '').replace(/"/g, '').trim() || null;
+/** pull the whole mailbox (inbound + sent, no spam/trash/promotions) into gmail_messages; link to leads by address */
 async function gmailSync(uid: string, all: boolean) {
-  const { data: accts } = all ? await admin.from('gmail_accounts').select('user_id, email') : await admin.from('gmail_accounts').select('user_id, email').eq('user_id', uid);
+  const { data: accts } = all ? await admin.from('gmail_accounts').select('user_id, email, last_sync_at') : await admin.from('gmail_accounts').select('user_id, email, last_sync_at').eq('user_id', uid);
   if (!accts?.length) return { error: 'No Gmail connected yet.' };
-  // every lead with an email → id
   const byMail = new Map<string, any>();
   for (let off = 0; ; off += 1000) { const { data: page } = await admin.from('sales_leads').select('id, email, stage, assigned_to, company').not('email', 'is', null).range(off, off + 999); for (const l of page || []) byMail.set(String(l.email).toLowerCase(), l); if (!page || page.length < 1000) break; }
   const out: Record<string, unknown> = {};
   for (const a of accts) {
     const tok = await googleAccess(a.user_id); if (!tok) { out[a.email] = 'token problem'; continue; }
     const H = { Authorization: `Bearer ${tok.access_token}` }; const G = 'https://gmail.googleapis.com/gmail/v1/users/me';
-    const { data: have } = await admin.from('sales_email_sends').select('external_id').eq('mailbox', a.email); const seen = new Set((have || []).map((h: any) => h.external_id));
-    let ids: string[] = []; let pageToken = '';
-    for (let n = 0; n < 4; n++) { const j = await (await fetch(`${G}/messages?${new URLSearchParams({ q: 'newer_than:21d -in:spam -in:trash -category:promotions', maxResults: '100', ...(pageToken ? { pageToken } : {}) })}`, { headers: H })).json(); ids.push(...(j.messages || []).map((m: any) => m.id)); pageToken = j.nextPageToken || ''; if (!pageToken) break; }
-    let replies = 0, sent = 0;
+    const me = String(a.email || '').toLowerCase();
+    // first run: 21 days; after that: since the last check minus a day of slack
+    const since = a.last_sync_at ? Math.floor((new Date(a.last_sync_at).getTime() - 86400000) / 1000) : Math.floor((Date.now() - 21 * 86400000) / 1000);
+    const ids: string[] = []; let pageToken = '';
+    for (let n = 0; n < 5; n++) { const j = await (await fetch(`${G}/messages?${new URLSearchParams({ q: `after:${since} -in:spam -in:trash -category:promotions -category:social`, maxResults: '100', ...(pageToken ? { pageToken } : {}) })}`, { headers: H })).json(); if (j.error) { out[a.email] = `Gmail: ${j.error.message}`; break; } ids.push(...(j.messages || []).map((m: any) => m.id)); pageToken = j.nextPageToken || ''; if (!pageToken) break; }
+    const { data: have } = await admin.from('gmail_messages').select('gmail_id').eq('user_id', a.user_id).in('gmail_id', ids.length ? ids : ['-']); const seen = new Set((have || []).map((h: any) => h.gmail_id));
+    let added = 0, linked = 0;
     for (const id of ids) {
-      if (seen.has(`gmail:${id}`)) continue;
-      const m = await (await fetch(`${G}/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`, { headers: H })).json();
-      const hd = Object.fromEntries((m.payload?.headers || []).map((h: any) => [h.name.toLowerCase(), h.value]));
-      const from = addr(hd.from)[0]; const tos = addr(hd.to); const when = new Date(Number(m.internalDate || Date.now())).toISOString(); const labels: string[] = m.labelIds || [];
-      if (labels.includes('SENT')) {
-        const l = tos.map((t) => byMail.get(t)).find(Boolean); if (!l) continue;
-        const { data: dup } = await admin.from('sales_touches').select('id').eq('lead_id', l.id).eq('note', `gmail:${id}`).maybeSingle(); if (dup) continue;
-        await admin.from('sales_touches').insert({ lead_id: l.id, kind: 'email_sent', note: `gmail:${id}`, at: when, by_user: a.user_id });
-        await admin.from('sales_leads').update({ last_touch_at: when, last_outcome: 'email_sent', ...(l.stage === 'new' ? { stage: 'contacted' } : {}), ...(l.assigned_to ? {} : { assigned_to: a.user_id }) }).eq('id', l.id); sent++;
-        continue;
+      if (seen.has(id)) continue;
+      const m = await (await fetch(`${G}/messages/${id}?format=full`, { headers: H })).json(); if (!m?.id) continue;
+      const hd = hdrs(m); const labels: string[] = m.labelIds || []; const isSent = labels.includes('SENT') || addr(hd.from)[0] === me;
+      const from = addr(hd.from)[0] || null; const tos = addr(hd.to); const other = isSent ? tos.find((t) => t !== me) || tos[0] || null : from;
+      const when = new Date(Number(m.internalDate || Date.now())).toISOString();
+      const l = other ? byMail.get(other) : null;
+      const body = gmailBody(m.payload) || m.snippet || '';
+      const { error } = await admin.from('gmail_messages').upsert({ user_id: a.user_id, gmail_id: id, thread_id: m.threadId || null, message_id_hdr: hd['message-id'] || null, from_email: from, from_name: fromName(hd.from), to_email: tos.join(', ') || null, subject: hd.subject || '(no subject)', snippet: (m.snippet || '').slice(0, 300), body: body.slice(0, 20000), at: when, is_sent: isSent, lead_id: l?.id || null, read_at: isSent || !labels.includes('UNREAD') ? when : null }, { onConflict: 'user_id,gmail_id' });
+      if (error) continue; added++;
+      if (!l) continue; linked++;
+      if (isSent) {
+        const { data: dup } = await admin.from('sales_touches').select('id').eq('lead_id', l.id).eq('note', `gmail:${id}`).maybeSingle();
+        if (!dup) await admin.from('sales_touches').insert({ lead_id: l.id, kind: 'email_sent', note: `gmail:${id}`, at: when, by_user: a.user_id });
+        await admin.from('sales_leads').update({ last_touch_at: when, last_outcome: 'email_sent', ...(l.stage === 'new' ? { stage: 'contacted' } : {}), ...(l.assigned_to ? {} : { assigned_to: a.user_id }) }).eq('id', l.id);
+      } else {
+        await admin.from('sales_email_sends').upsert({ external_id: `gmail:${id}`, lead_id: l.id, lead_email: other, lead_name: fromName(hd.from), campaign: `Gmail · ${a.email}`, mailbox: a.email, step: 0, subject: hd.subject || '(no subject)', sent_at: when, replied: true, reply_at: when, reply_body: body.slice(0, 4000), reply_subject: hd.subject || null, bounced: false }, { onConflict: 'external_id' });
+        await admin.from('sales_leads').update({ ...(['new', 'contacted'].includes(l.stage) ? { stage: 'replied' } : {}), last_touch_at: when, ...(l.assigned_to ? {} : { assigned_to: a.user_id }) }).eq('id', l.id);
       }
-      const l = from ? byMail.get(from) : null; if (!l) continue;
-      const full = await (await fetch(`${G}/messages/${id}?format=full`, { headers: H })).json();
-      const body = gmailBody(full.payload) || m.snippet || '';
-      await admin.from('sales_email_sends').upsert({ external_id: `gmail:${id}`, lead_id: l.id, lead_email: from, lead_name: (hd.from || '').replace(/<.*$/, '').replace(/"/g, '').trim() || null, campaign: `Gmail · ${a.email}`, mailbox: a.email, step: 0, subject: hd.subject || '(no subject)', sent_at: when, replied: true, reply_at: when, reply_body: body.slice(0, 4000), reply_subject: hd.subject || null, bounced: false }, { onConflict: 'external_id' });
-      await admin.from('sales_leads').update({ ...(['new', 'contacted'].includes(l.stage) ? { stage: 'replied' } : {}), last_touch_at: when, ...(l.assigned_to ? {} : { assigned_to: a.user_id }) }).eq('id', l.id); replies++;
     }
-    await admin.from('gmail_accounts').update({ last_sync_at: new Date().toISOString(), last_error: null }).eq('user_id', a.user_id);
-    out[a.email] = { scanned: ids.length, replies, sent };
+    if (!out[a.email]) { await admin.from('gmail_accounts').update({ last_sync_at: new Date().toISOString(), last_error: null }).eq('user_id', a.user_id); out[a.email] = { scanned: ids.length, added, linked }; }
+    else await admin.from('gmail_accounts').update({ last_error: String(out[a.email]) }).eq('user_id', a.user_id);
   }
   return { ok: true, accounts: out };
+}
+const b64urlEnc = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const rfc2047 = (s: string) => (/^[\x00-\x7F]*$/.test(s) ? s : `=?UTF-8?B?${btoa(String.fromCharCode(...new TextEncoder().encode(s)))}?=`);
+/** send an email from the rep's own Gmail (reply into a thread when thread_id is given) */
+async function gmailSend(uid: string, b: any) {
+  const tok = await googleAccess(uid); if (!tok) return { error: 'Gmail is not connected.' };
+  if (!String(tok.scopes || '').includes('gmail.send')) return { error: 'Reconnect Gmail (Sales → Settings) to allow sending from here.', reconnect: true };
+  const to = String(b.to || '').trim(); const subject = String(b.subject || '').trim() || '(no subject)'; const body = String(b.body || '');
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { error: 'That "to" address does not look right.' };
+  const lines = [`From: ${tok.email}`, `To: ${to}`, `Subject: ${rfc2047(subject)}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: 8bit'];
+  if (b.in_reply_to) { lines.push(`In-Reply-To: ${b.in_reply_to}`, `References: ${b.in_reply_to}`); }
+  const raw = b64urlEnc(lines.join('\r\n') + '\r\n\r\n' + body);
+  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { method: 'POST', headers: { Authorization: `Bearer ${tok.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ raw, ...(b.thread_id && !String(b.thread_id).startsWith('sl:') ? { threadId: b.thread_id } : {}) }) });
+  const j = await r.json(); if (!r.ok) return { error: `Gmail refused: ${j.error?.message || r.status}`, reconnect: r.status === 403 };
+  const when = new Date().toISOString(); const leadId = b.lead_id || null;
+  await admin.from('gmail_messages').upsert({ user_id: uid, gmail_id: j.id, thread_id: j.threadId || b.thread_id || null, from_email: tok.email, from_name: null, to_email: to, subject, snippet: body.slice(0, 300), body: body.slice(0, 20000), at: when, is_sent: true, lead_id: leadId, read_at: when }, { onConflict: 'user_id,gmail_id' });
+  if (leadId) {
+    await admin.from('sales_touches').insert({ lead_id: leadId, kind: 'email_sent', note: `gmail:${j.id}`, at: when, by_user: uid });
+    const { data: l } = await admin.from('sales_leads').select('stage, assigned_to').eq('id', leadId).maybeSingle();
+    await admin.from('sales_leads').update({ last_touch_at: when, last_outcome: 'email_sent', ...(l?.stage === 'new' ? { stage: 'contacted' } : {}), ...(l?.assigned_to ? {} : { assigned_to: uid }) }).eq('id', leadId);
+  }
+  return { ok: true, id: j.id, thread_id: j.threadId };
 }
 
 // ---------- Calendly ----------
@@ -450,7 +479,7 @@ Deno.serve(async (req) => {
     const j = await r.json(); if (!r.ok || !j.access_token) return back(false, `Token exchange failed: ${JSON.stringify(j).slice(0, 160)}`);
     const info = await (await fetch('https://www.googleapis.com/oauth2/v2/userinfo', { headers: { Authorization: `Bearer ${j.access_token}` } })).json().catch(() => ({}));
     const { data: prev } = await admin.from('gmail_accounts').select('refresh_token').eq('user_id', st.uid).maybeSingle();
-    await admin.from('gmail_accounts').upsert({ user_id: st.uid, email: info.email || null, access_token: j.access_token, refresh_token: j.refresh_token || prev?.refresh_token || null, expires_at: new Date(Date.now() + (j.expires_in || 3600) * 1000).toISOString(), connected_at: new Date().toISOString(), last_error: null }, { onConflict: 'user_id' });
+    await admin.from('gmail_accounts').upsert({ user_id: st.uid, email: info.email || null, access_token: j.access_token, refresh_token: j.refresh_token || prev?.refresh_token || null, expires_at: new Date(Date.now() + (j.expires_in || 3600) * 1000).toISOString(), connected_at: new Date().toISOString(), last_error: null, scopes: j.scope || null }, { onConflict: 'user_id' });
     await setSetting(`google_state:${q.get('state')}`, null);
     return back(true, info.email ? `Gmail connected: ${info.email}` : 'Gmail connected');
   }
@@ -462,13 +491,14 @@ Deno.serve(async (req) => {
   if (!me) return json({ error: 'not signed in' }, 401);
   const { data: prof } = await admin.from('profiles').select('is_owner, is_sales, role').eq('id', me.id).single();
   const b = await req.json().catch(() => ({}));
-  const REP_ACTIONS = new Set(['smartlead_stop_lead', 'gmail_connect', 'gmail_sync', 'gmail_disconnect']);   // sales reps may do these without the owner passphrase
+  const REP_ACTIONS = new Set(['smartlead_stop_lead', 'gmail_connect', 'gmail_sync', 'gmail_disconnect', 'gmail_send']);   // sales reps may do these without the owner passphrase
   const gmailConnect = async () => { const id = await secret('GOOGLE_CLIENT_ID'); if (!id) return json({ error: 'Google app keys are missing.' }, 400); const state = crypto.randomUUID(); await setSetting(`google_state:${state}`, { uid: me.id, at: new Date().toISOString() }); return json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({ client_id: id, redirect_uri: GOOGLE_REDIRECT, response_type: 'code', scope: GOOGLE_SCOPES, access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state })}` }); };
   const repAction = async () => {
     if (b.action === 'smartlead_stop_lead') return json(await smartleadStopLead(String(b.email || '')));
     if (b.action === 'gmail_connect') return gmailConnect();
     if (b.action === 'gmail_sync') return json(await gmailSync(me.id, !!prof?.is_owner && !!b.all));
     if (b.action === 'gmail_disconnect') { await admin.from('gmail_accounts').delete().eq('user_id', me.id); return json({ ok: true }); }
+    if (b.action === 'gmail_send') return json(await gmailSend(me.id, b));
     return null;
   };
   if (!prof?.is_owner) {

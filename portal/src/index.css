@@ -1142,3 +1142,40 @@ select.statuspill.ok, select.statuspill.warn, select.statuspill.bad, select.stat
 .owner .kv span { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .owner .kv b { font-size: 14px; word-break: break-all; }
 @media (max-width: 860px) { .owner .tplgrid { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---- Conversations → Email: two-pane mailbox ---- */
+.msg.warn { background: #FFF4E5; border: 1px solid #F5C892; color: #8A4B08; }
+.owner .srcpick { font-weight: 700; color: var(--navy); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: #fff; }
+.owner .mailgrid { display: grid; grid-template-columns: 360px minmax(0, 1fr); padding: 0 !important; overflow: hidden; min-height: 520px; }
+.owner .mlist { border-right: 1px solid var(--line); max-height: 76vh; overflow-y: auto; }
+.owner .mlist .empty { padding: 40px 18px; }
+.owner .mrow { display: grid; grid-template-columns: 36px minmax(0, 1fr) 14px; gap: 10px; width: 100%; text-align: left; padding: 12px 14px; border: 0; border-bottom: 1px solid var(--line); background: #fff; cursor: pointer; font: inherit; color: inherit; align-items: start; }
+.owner .mrow:hover { background: #fafbfc; }
+.owner .mrow.on { background: #fff6ee; box-shadow: inset 3px 0 0 var(--orange); }
+.owner .mrow.unread b { font-weight: 800; }
+.owner .mrow .av { width: 36px; height: 36px; border-radius: 99px; background: #e9edf2; color: var(--navy); font-weight: 700; display: grid; place-items: center; font-size: 14px; }
+.owner .mrow .av.lead { background: var(--navy); color: #fff; }
+.owner .mrow .mmain { display: grid; gap: 2px; min-width: 0; }
+.owner .mrow .mtop { display: flex; justify-content: space-between; gap: 8px; }
+.owner .mrow .mtop b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+.owner .mrow .when { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.owner .mrow .msub { font-size: 13px; color: var(--navy); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.owner .mrow .msnip { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.owner .mrow .mtags { display: flex; gap: 6px; align-items: center; margin-top: 3px; }
+.owner .mrow .dot { width: 9px; height: 9px; border-radius: 99px; background: var(--orange); margin-top: 12px; }
+.owner .pill.muted { background: #eef1f5; color: var(--muted); }
+.owner .mthread { display: flex; flex-direction: column; max-height: 76vh; min-height: 520px; }
+.owner .mthread > .empty { margin: auto; padding: 40px; }
+.owner .mhead { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.owner .mhead b { font-size: 16px; }
+.owner .leadform { padding: 14px 18px; border-bottom: 1px solid var(--line); background: #fff9f3; display: grid; gap: 10px; }
+.owner .mmsgs { flex: 1; overflow-y: auto; padding: 16px 18px; display: grid; gap: 12px; align-content: start; }
+.owner .mmsg { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 88%; background: #fff; }
+.owner .mmsg.out { margin-left: auto; background: #f3f6fa; border-color: #dfe6ee; }
+.owner .mmsg .mmeta { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-bottom: 4px; }
+.owner .mmsg .msubj { font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
+.owner .mmsg pre { white-space: pre-wrap; font: 14px/1.55 var(--font-body); margin: 0; max-height: 420px; overflow: auto; }
+.owner .mreply { border-top: 1px solid var(--line); padding: 12px 18px 14px; display: grid; gap: 10px; background: #fafbfc; }
+.owner .mreply textarea { width: 100%; font: 14px/1.5 var(--font-body); padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; resize: vertical; background: #fff; }
+.owner .mreply .row, .owner .leadform .row { display: flex; gap: 8px; align-items: center; }
+@media (max-width: 1000px) { .owner .mailgrid { grid-template-columns: minmax(0, 1fr); } .owner .mlist { max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--line); } .owner .mthread { min-height: 0; } }

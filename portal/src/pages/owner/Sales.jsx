@@ -44,9 +44,11 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
     return { kind: ok === 'ok' ? 'ok' : 'err', text: decodeURIComponent(m || '') };
   }); const [panel, setPanel] = useState(null); const [focus, setFocus] = useState(null); const [q, setQ] = useState(''); const [people, setPeople] = useState([]);
   useEffect(() => { supabase.from('profiles').select('id, full_name, email, is_sales, is_owner').like('role', 'shipbay%').eq('active', true).then(({ data }) => setPeople((data || []).filter((p) => p.is_sales || p.is_owner))); }, []);
+  const [mail, setMail] = useState([]); const [mailAccts, setMailAccts] = useState([]);
   const load = async () => {
-    const [l, s, e] = await Promise.all([fetchAll('sales_leads', '*', (qq) => qq.order('created_at', { ascending: false })), fetchAll('sales_sources'), fetchAll('sales_email_sends', '*', (qq) => qq.order('sent_at', { ascending: false }))]);
-    setLeads(l); setSources(s); setSends(e);
+    const [l, s, e, g, ga] = await Promise.all([fetchAll('sales_leads', '*', (qq) => qq.order('created_at', { ascending: false })), fetchAll('sales_sources'), fetchAll('sales_email_sends', '*', (qq) => qq.order('sent_at', { ascending: false })),
+      fetchAll('gmail_messages', 'id, user_id, gmail_id, thread_id, message_id_hdr, from_email, from_name, to_email, subject, snippet, at, is_sent, lead_id, read_at, hidden', (qq) => qq.order('at', { ascending: false })), supabase.from('v_gmail_accounts').select('*')]);
+    setLeads(l); setSources(s); setSends(e); setMail(g); setMailAccts(ga.data || []);
   };
   useEffect(() => { load(); }, []);
   const say = (r, ok) => { if (r?.error) setMsg({ kind: 'err', text: r.error }); else if (ok) setMsg({ kind: 'ok', text: ok }); };
@@ -58,7 +60,7 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
   const mySends = useMemo(() => (rep ? sends.filter((s) => mineIds.has(s.lead_id)) : sends), [sends, mineIds, rep]);
   const counts = useMemo(() => { const c = { total: 0 }; for (const l of mine) { c.total++; c[l.stage] = (c[l.stage] || 0) + 1; } return c; }, [mine]);
   const stopped = useMemo(() => new Set((leads || []).filter((l) => l.stage === 'dnc').map((l) => l.id)), [leads]);
-  const unread = mySends.filter((s) => s.replied && !s.read_at && !s.bounced && !stopped.has(s.lead_id)).length;
+  const unread = mySends.filter((s) => s.replied && !s.read_at && !s.bounced && !s.mailbox && !stopped.has(s.lead_id)).length + mail.filter((m) => m.user_id === me.id && !m.is_sent && !m.read_at && !m.hidden).length;
   const hits = useMemo(() => { const t = q.trim().toLowerCase(); if (t.length < 2) return []; return (leads || []).filter((l) => [l.company, l.domain, l.contact_name, l.email, l.phone, l.city].filter(Boolean).some((v) => v.toLowerCase().includes(t))).slice(0, 8); }, [q, leads]);
   const panelLead = panel ? (leads || []).find((l) => l.id === panel) : null;
   const ctx = { me, rep, sources, people, reload: load, say, openLead, go, nav };
@@ -78,7 +80,7 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
       {sub === 'overview' && <Overview {...ctx} leads={mine} pool={leads} sends={mySends} counts={counts} />}
       {sub === 'pipeline' && <Pipeline {...ctx} leads={mine} />}
       {sub === 'master' && <Master {...ctx} leads={mine} />}
-      {sub === 'email' && <Conversations {...ctx} leads={mine} sends={mySends} status={status} refreshStatus={refreshStatus} focus={focus} clearFocus={() => setFocus(null)} />}
+      {sub === 'email' && <Conversations {...ctx} leads={mine} allLeads={leads} sends={mySends} mail={mail} mailAccts={mailAccts} status={status} refreshStatus={refreshStatus} focus={focus} clearFocus={() => setFocus(null)} />}
       {sub === 'calls' && <Calls {...ctx} leads={leads} />}
       {sub === 'calendar' && <Calendar {...ctx} leads={leads} status={status} refreshStatus={refreshStatus} mineOnly={rep} focusDate={focus} />}
       {sub === 'bonus' && <Bonus {...ctx} leads={leads} />}
@@ -437,11 +439,34 @@ export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say,
 }
 
 /* =================== Conversations: the reply inbox =================== */
-function Conversations({ me, rep, leads, sends, status, people, reload, refreshStatus, say, openLead, focus, clearFocus }) {
+/* =================== Conversations: SB Blast (Smartlead replies) or Email (your own Gmail) =================== */
+function Conversations(props) {
+  const { focus, sends, mailAccts, me } = props;
+  const [src, setSrc] = useState(() => { try { return localStorage.getItem('shipbay-conv-src') || 'blast'; } catch { return 'blast'; } });
+  const pick = (v) => { setSrc(v); try { localStorage.setItem('shipbay-conv-src', v); } catch { /* ignore */ } };
+  // a Gmail-origin reply opened from the Dashboard inbox belongs in the Email view
+  const focusSend = focus ? sends.find((x) => x.id === focus) : null;
+  useEffect(() => { if (focusSend?.mailbox) setSrc('email'); }, [focusSend?.id]);
+  const connected = mailAccts.some((a) => a.user_id === me.id);
+  const picker = <select className="srcpick" value={src} onChange={(e) => pick(e.target.value)}><option value="blast">SB Blast</option><option value="email">Email{connected ? '' : ' (not connected)'}</option></select>;
+  return src === 'email' ? <EmailInbox {...props} picker={picker} focusLead={focusSend?.mailbox ? focusSend.lead_id : null} /> : <BlastInbox {...props} picker={picker} toEmail={() => pick('email')} />;
+}
+
+function BlastInbox({ me, rep, leads, sends, mailAccts, status, people, reload, refreshStatus, say, openLead, focus, clearFocus, picker, toEmail }) {
   const [busy, setBusy] = useState(false); const [show, setShow] = useState('all'); const [who, setWho] = useState(''); const refs = useRef({}); const kit = useReplyKit(me);
   const sync = async () => { setBusy(true); const r = await ownerFn({ action: 'smartlead_sync' }); setBusy(false); say(r, r.error ? null : 'Smartlead synced.'); reload(); refreshStatus?.(); };
-  const replies = useMemo(() => sends.filter((s) => s.replied && !s.bounced).sort((a, b) => (b.reply_at || b.sent_at).localeCompare(a.reply_at || a.sent_at)), [sends]);
+  const replies = useMemo(() => sends.filter((s) => s.replied && !s.bounced && !s.mailbox).sort((a, b) => (b.reply_at || b.sent_at).localeCompare(a.reply_at || a.sent_at)), [sends]);
   const unread = replies.filter((s) => !s.read_at && leads.find((x) => x.id === s.lead_id)?.stage !== 'dnc').length;
+  const myMail = mailAccts.find((a) => a.user_id === me.id);
+  /** take this conversation into my own Gmail: it leaves SB Blast and shows under Email, where I answer from my inbox */
+  const moveToEmail = async (s, l) => {
+    if (!myMail) { say({ error: 'Connect your Gmail first (Sales → Settings), then you can move conversations there.' }); return; }
+    const { error } = await supabase.from('gmail_messages').upsert({ user_id: me.id, gmail_id: `sl:${s.id}`, thread_id: `sl:${l?.id || s.id}`, from_email: s.lead_email, from_name: s.lead_name, to_email: null, subject: s.reply_subject || s.subject, snippet: (s.reply_body || '').slice(0, 300), body: s.reply_body || '', at: s.reply_at || s.sent_at, is_sent: false, lead_id: l?.id || null, read_at: new Date().toISOString() }, { onConflict: 'user_id,gmail_id' });
+    if (error) { say({ error: error.message }); return; }
+    await supabase.from('sales_email_sends').update({ mailbox: 'moved', read_at: new Date().toISOString(), read_by: me.id }).eq('id', s.id);
+    if (l && !l.assigned_to) await supabase.from('sales_leads').update({ assigned_to: me.id }).eq('id', l.id);
+    await reload(); say(null, 'Moved to Email — answer it from there.'); toEmail();
+  };
   const list = replies.filter((s) => { const l = leads.find((x) => x.id === s.lead_id); const stoppedRow = l?.stage === 'dnc'; if (who && l?.assigned_to !== who) return false; return (show === 'all' && !stoppedRow) || (show === 'unread' && !s.read_at && !stoppedRow) || (show === 'open' && l && !l.answered_at && !stoppedRow) || (show === 'stopped' && stoppedRow); });
   useEffect(() => { if (focus && refs.current[focus]) { refs.current[focus].scrollIntoView({ behavior: 'smooth', block: 'center' }); const t = setTimeout(clearFocus, 2500); return () => clearTimeout(t); } }, [focus, list.length]);
   const markRead = async (s, on = true) => { await supabase.from('sales_email_sends').update({ read_at: on ? new Date().toISOString() : null, read_by: on ? me.id : null }).eq('id', s.id); reload(); };
@@ -457,6 +482,7 @@ function Conversations({ me, rep, leads, sends, status, people, reload, refreshS
   return (
     <>
       <div className="opsbar wrap">
+        {picker}
         <span className="seg tight"><button className={show === 'all' ? 'on' : ''} onClick={() => setShow('all')}>All</button><button className={show === 'unread' ? 'on' : ''} onClick={() => setShow('unread')}>Unread ({unread})</button><button className={show === 'open' ? 'on' : ''} onClick={() => setShow('open')}>Needs answer</button><button className={show === 'stopped' ? 'on' : ''} onClick={() => setShow('stopped')}>Stopped</button></span>
         {!rep && <select value={who} onChange={(e) => setWho(e.target.value)}><option value="">Everyone</option>{people.map((p) => <option key={p.id} value={p.id}>{(p.full_name || p.email).split(' ')[0]}</option>)}</select>}
         <span className="sm">{rep ? 'Replies handed to you. Answer from Gmail, then mark it answered.' : `Synced ${ago(status?.smartlead_last_sync?.at)}`}</span>
@@ -477,6 +503,7 @@ function Conversations({ me, rep, leads, sends, status, people, reload, refreshS
                 {l && l.stage !== 'dnc' ? <button className="btn-xs bad" onClick={(e) => { e.stopPropagation(); stopLead(s); }}>Stop</button> : <span className="pill error">stopped</span>}
                 {!rep && l?.assigned_to && <span className="pill">{(people.find((p) => p.id === l.assigned_to)?.full_name || '').split(' ')[0]}</span>}
                 {l && <button className="btn-xs" onClick={(e) => { e.stopPropagation(); openLead(l); }}>Open contact</button>}
+                {l && l.stage !== 'dnc' && <button className="btn-xs" title="Move this conversation into your Gmail inbox view and answer it from there" onClick={(e) => { e.stopPropagation(); moveToEmail(s, l); }}>Move to Email →</button>}
                 {!unreadRow && <button className="btn-xs" title="Mark unread" onClick={(e) => { e.stopPropagation(); markRead(s, false); }}>●</button>}
               </div>
             </div>
@@ -485,6 +512,147 @@ function Conversations({ me, rep, leads, sends, status, people, reload, refreshS
           </div>
         ); })}
       </div>
+    </>
+  );
+}
+
+
+/* =================== Email: the rep's own Gmail — whole inbox, they decide what's a lead, reply from here =================== */
+const FREE_MAIL = /(gmail|yahoo|hotmail|outlook|icloud|aol|proton|me)\.com$|\.edu$/i;
+const initials = (name, email) => ((name || email || '?').trim()[0] || '?').toUpperCase();
+function EmailInbox({ me, rep, leads, allLeads, mail, mailAccts, people, reload, say, openLead, picker, focusLead }) {
+  const kit = useReplyKit(me);
+  const [who, setWho] = useState(me.id); const [show, setShow] = useState('all'); const [q, setQ] = useState(''); const [sel, setSel] = useState(focusLead ? `lead:${focusLead}` : null);
+  const [thread, setThread] = useState(null); const [draft, setDraft] = useState(''); const [sending, setSending] = useState(false); const [busy, setBusy] = useState(false);
+  const [compose, setCompose] = useState(null); const [leadForm, setLeadForm] = useState(null);
+  const acct = mailAccts.find((a) => a.user_id === who); const myAcct = mailAccts.find((a) => a.user_id === me.id); const mineView = who === me.id;
+  const canSend = mineView && !!myAcct && String(myAcct.scopes || '').includes('gmail.send');
+  const myAddr = (acct?.email || '').toLowerCase();
+  const rows = useMemo(() => mail.filter((m) => m.user_id === who), [mail, who]);
+  const leadOf = (id) => (allLeads || leads).find((l) => l.id === id);
+  // conversations: one per lead when known, else one per Gmail thread
+  const threads = useMemo(() => {
+    const g = new Map();
+    for (const m of rows) {
+      const key = m.lead_id ? `lead:${m.lead_id}` : `t:${m.thread_id || m.gmail_id}`;
+      const other = m.is_sent ? (m.to_email || '').split(',')[0].trim().toLowerCase() : (m.from_email || '').toLowerCase();
+      const t = g.get(key) || { key, msgs: [], unread: 0, hidden: true, other, name: null, lead: m.lead_id ? leadOf(m.lead_id) : null, leadId: m.lead_id };
+      t.msgs.push(m); if (!m.is_sent && !m.read_at) t.unread++; if (!m.hidden) t.hidden = false; if (!m.is_sent && m.from_name && !t.name) t.name = m.from_name; if (!m.is_sent) t.other = (m.from_email || '').toLowerCase();
+      g.set(key, t);
+    }
+    return [...g.values()].map((t) => ({ ...t, last: t.msgs[0] })).sort((a, b) => b.last.at.localeCompare(a.last.at));
+  }, [rows, allLeads, leads]);
+  const unread = threads.filter((t) => !t.hidden && t.unread).length;
+  const list = threads.filter((t) => {
+    if (show === 'hidden') return t.hidden; if (t.hidden) return false;
+    if (show === 'unread' && !t.unread) return false; if (show === 'leads' && !t.leadId) return false; if (show === 'unsorted' && t.leadId) return false;
+    const s = q.trim().toLowerCase(); if (!s) return true;
+    return [t.other, t.name, t.lead?.company, t.last.subject, t.last.snippet].filter(Boolean).some((v) => v.toLowerCase().includes(s));
+  });
+  const cur = threads.find((t) => t.key === sel) || null;
+  // open a thread: fetch bodies, mark unread inbound as read
+  useEffect(() => {
+    if (!cur) { setThread(null); return; }
+    let live = true;
+    const want = new Set(cur.msgs.map((m) => m.id)); supabase.from('gmail_messages').select('*').in('id', [...want]).order('at', { ascending: true }).then(({ data }) => { if (live) setThread((data || []).filter((m) => want.has(m.id))); });
+    const un = cur.msgs.filter((m) => !m.is_sent && !m.read_at).map((m) => m.id);
+    if (un.length && mineView) supabase.from('gmail_messages').update({ read_at: new Date().toISOString() }).in('id', un).then(() => reload());
+    setDraft(''); setLeadForm(null);
+    return () => { live = false; };
+  }, [sel, cur?.msgs.length]);
+  const connect = async () => { setBusy(true); const r = await ownerFn({ action: 'gmail_connect' }); setBusy(false); if (r.url) window.location.href = r.url; else say(r); };
+  const check = async () => { setBusy(true); const r = await ownerFn({ action: 'gmail_sync', all: !rep && !mineView }); setBusy(false); const v = r.accounts?.[acct?.email]; say(r, r.ok ? (v && typeof v === 'object' ? `Checked — ${v.added} new, ${v.linked} matched to leads.` : 'Checked.') : null); reload(); };
+  const send = async ({ to, subject, body, threadId, inReplyTo, leadId }) => {
+    if (!body.trim()) { say({ error: 'Write something first.' }); return false; }
+    setSending(true); const r = await ownerFn({ action: 'gmail_send', to, subject, body, thread_id: threadId, in_reply_to: inReplyTo, lead_id: leadId }); setSending(false);
+    if (r.error) { say(r); return false; }
+    say(null, `Sent to ${to}.`); await reload(); return true;
+  };
+  const reply = async () => {
+    if (!cur) return; const lastIn = [...(thread || [])].reverse().find((m) => !m.is_sent) || thread?.[thread.length - 1];
+    const subj = lastIn?.subject ? (/^re:/i.test(lastIn.subject) ? lastIn.subject : `Re: ${lastIn.subject}`) : 'Re:';
+    const realThread = cur.msgs.find((m) => m.thread_id && !String(m.thread_id).startsWith('sl:'))?.thread_id || null;
+    if (await send({ to: cur.other, subject: subj, body: draft, threadId: realThread, inReplyTo: lastIn?.message_id_hdr || null, leadId: cur.leadId || null })) setDraft('');
+  };
+  const useTemplate = () => { const l = cur?.lead || { contact_name: cur?.name || '', company: '' }; setDraft(fillTpl(kit.tpl.reply_body, l, me, kit.booking) + (kit.tpl.signature ? `\n${fillTpl(kit.tpl.signature, l, me, kit.booking)}` : '')); };
+  const hide = async (t, on = true) => { await supabase.from('gmail_messages').update({ hidden: on }).in('id', t.msgs.map((m) => m.id)); setSel(null); reload(); };
+  // make (or link) a lead from a thread, then attach every message with that address to it
+  const startLeadForm = (t) => { const dom = (t.other.split('@')[1] || '').toLowerCase(); const existing = !FREE_MAIL.test(dom) ? (allLeads || leads).find((l) => (l.domain || '').toLowerCase() === dom || (l.email || '').toLowerCase() === t.other) : (allLeads || leads).find((l) => (l.email || '').toLowerCase() === t.other); setLeadForm({ company: existing?.company || (FREE_MAIL.test(dom) ? '' : dom.replace(/^www\./, '').split('.')[0].replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())), contact_name: t.name || '', email: t.other, domain: FREE_MAIL.test(dom) ? '' : dom, existing }); };
+  const saveLead = async (t) => {
+    const f = leadForm; let leadId = f.existing?.id;
+    if (leadId) { await supabase.from('sales_leads').update({ email: f.existing.email || f.email, contact_name: f.existing.contact_name || f.contact_name, assigned_to: f.existing.assigned_to || me.id, ...(['new', 'contacted'].includes(f.existing.stage) ? { stage: 'replied' } : {}), last_touch_at: new Date().toISOString() }).eq('id', leadId); }
+    else { const { data, error } = await supabase.from('sales_leads').insert({ company: f.company || f.email, contact_name: f.contact_name || null, email: f.email, domain: f.domain || null, source: 'inbound', stage: 'replied', assigned_to: me.id, last_touch_at: new Date().toISOString(), notes: 'Came in by email.' }).select('id').single(); if (error) { say({ error: error.message }); return; } leadId = data.id; }
+    const ids = rows.filter((m) => (m.from_email || '').toLowerCase() === f.email || (m.to_email || '').toLowerCase().includes(f.email)).map((m) => m.id);
+    await supabase.from('gmail_messages').update({ lead_id: leadId }).in('id', ids.length ? ids : t.msgs.map((m) => m.id));
+    setLeadForm(null); setSel(`lead:${leadId}`); await reload(); say(null, f.existing ? `Linked to ${f.existing.company}.` : 'Added as a lead — it is in your pipeline under Replied.');
+  };
+  const dateish = (iso) => { const d = new Date(iso); const today = new Date().toDateString() === d.toDateString(); return today ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
+  const whoName = (id) => (people.find((p) => p.id === id)?.full_name || '').split(' ')[0];
+
+  if (!acct) return (
+    <>
+      <div className="opsbar wrap">{picker}{!rep && <select value={who} onChange={(e) => { setWho(e.target.value); setSel(null); }}>{people.map((p) => <option key={p.id} value={p.id}>{p.id === me.id ? 'My inbox' : `${whoName(p.id)}'s inbox`}</option>)}</select>}</div>
+      <div className="card"><div className="empty">{mineView ? <>Your Gmail isn't connected yet. <button className="btn-sm primary" disabled={busy} onClick={connect}>{busy ? 'Opening Google…' : 'Connect Gmail'}</button><div className="sm" style={{ marginTop: 8 }}>Read + send on your own mailbox. Nothing goes out without you hitting Send.</div></> : `${whoName(who)} hasn't connected Gmail yet (they do it from Sales → Settings).`}</div></div>
+    </>
+  );
+  return (
+    <>
+      <div className="opsbar wrap">
+        {picker}
+        {!rep && <select value={who} onChange={(e) => { setWho(e.target.value); setSel(null); }}>{people.map((p) => <option key={p.id} value={p.id}>{p.id === me.id ? 'My inbox' : `${whoName(p.id)}'s inbox`}</option>)}</select>}
+        <span className="seg tight"><button className={show === 'all' ? 'on' : ''} onClick={() => setShow('all')}>All</button><button className={show === 'unread' ? 'on' : ''} onClick={() => setShow('unread')}>Unread ({unread})</button><button className={show === 'leads' ? 'on' : ''} onClick={() => setShow('leads')}>Leads</button><button className={show === 'unsorted' ? 'on' : ''} onClick={() => setShow('unsorted')}>Unsorted</button><button className={show === 'hidden' ? 'on' : ''} onClick={() => setShow('hidden')}>Not leads</button></span>
+        <input className="search" placeholder="Search mail…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <span className="sm">{acct.email} · checked {ago(acct.last_sync_at)}</span>
+        <div className="spacer" />
+        {mineView && <button className="btn-sm" disabled={busy} onClick={check}>{busy ? 'Checking…' : 'Check now'}</button>}
+        {mineView && <button className="btn-sm primary" onClick={() => setCompose({ to: '', subject: fillTpl(kit.tpl.reply_subject, {}, me, kit.booking), body: fillTpl(kit.tpl.reply_body, {}, me, kit.booking) + (kit.tpl.signature ? `\n${fillTpl(kit.tpl.signature, {}, me, kit.booking)}` : '') })}>New email</button>}
+      </div>
+      {myAcct && mineView && !canSend && <div className="msg warn">Sending from here needs one more permission — <button className="linkbtn" onClick={connect}>reconnect Gmail</button> and tick "Send email on your behalf". Reading works already.</div>}
+      <div className="card mailgrid">
+        <div className="mlist">
+          {list.length === 0 && <div className="empty">{rows.length === 0 ? 'Nothing pulled in yet — hit Check now.' : 'Nothing here.'}</div>}
+          {list.map((t) => <button key={t.key} className={`mrow ${t.unread ? 'unread' : ''} ${sel === t.key ? 'on' : ''}`} onClick={() => setSel(t.key)}>
+            <span className={`av ${t.leadId ? 'lead' : ''}`}>{initials(t.lead?.company || t.name, t.other)}</span>
+            <span className="mmain"><span className="mtop"><b>{t.lead?.company || t.name || t.other}</b><span className="when">{dateish(t.last.at)}</span></span><span className="msub">{t.last.is_sent ? 'You: ' : ''}{t.last.subject}</span><span className="msnip">{t.last.snippet}</span>
+              <span className="mtags">{t.leadId ? <span className={`statuspill ${stageClass(t.lead?.stage)}`}>{stageLabel(t.lead?.stage)}</span> : <span className="pill muted">unsorted</span>}{t.msgs.length > 1 && <span className="sm">{t.msgs.length} msgs</span>}</span></span>
+            {t.unread ? <i className="dot" /> : null}
+          </button>)}
+        </div>
+        <div className="mthread">
+          {!cur && <div className="empty">Pick a conversation. Unsorted ones aren't leads yet — open one and decide.</div>}
+          {cur && (
+            <>
+              <div className="mhead">
+                <div><b>{cur.lead?.company || cur.name || cur.other}</b><div className="sm">{cur.name && cur.lead?.company ? `${cur.name} · ` : ''}{cur.other}{cur.lead?.assigned_to && !rep ? ` · ${whoName(cur.lead.assigned_to)}` : ''}</div></div>
+                <div className="spacer" />
+                {cur.lead ? <><span className={`statuspill ${stageClass(cur.lead.stage)}`}>{stageLabel(cur.lead.stage)}</span><button className="btn-xs" onClick={() => openLead(cur.lead)}>Open contact</button></>
+                  : mineView && !cur.hidden && <><button className="btn-xs primary" onClick={() => (leadForm ? setLeadForm(null) : startLeadForm(cur))}>{leadForm ? 'Cancel' : 'This is a lead'}</button><button className="btn-xs" onClick={() => hide(cur)}>Not a lead</button></>}
+                {cur.hidden && mineView && <button className="btn-xs" onClick={() => hide(cur, false)}>Put back</button>}
+              </div>
+              {leadForm && <div className="leadform">
+                {leadForm.existing ? <div className="sm">Already in your contacts as <b>{leadForm.existing.company}</b> — this links the conversation to them.</div> : <div className="addgrid two"><label>Company<input value={leadForm.company} onChange={(e) => setLeadForm({ ...leadForm, company: e.target.value })} /></label><label>Contact<input value={leadForm.contact_name} onChange={(e) => setLeadForm({ ...leadForm, contact_name: e.target.value })} /></label><label>Email<input value={leadForm.email} readOnly /></label><label>Website<input value={leadForm.domain} onChange={(e) => setLeadForm({ ...leadForm, domain: e.target.value })} /></label></div>}
+                <div className="row"><button className="btn-sm primary" onClick={() => saveLead(cur)}>{leadForm.existing ? 'Link it' : 'Add to my leads'}</button><span className="sm">Goes into your pipeline as Replied, assigned to you.</span></div>
+              </div>}
+              <div className="mmsgs">
+                {(thread || []).map((m) => <div key={m.id} className={`mmsg ${m.is_sent ? 'out' : 'in'}`}><div className="mmeta"><b>{m.is_sent ? 'You' : (m.from_name || m.from_email)}</b><span className="sm">{m.is_sent ? `to ${m.to_email}` : m.from_email} · {new Date(m.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span></div><div className="msubj">{m.subject}</div><pre>{m.body || m.snippet}</pre></div>)}
+                {thread === null && <div className="empty">Loading…</div>}
+              </div>
+              {mineView && !cur.hidden && <div className="mreply">
+                <textarea rows={5} placeholder={`Reply to ${cur.name || cur.other}…`} value={draft} onChange={(e) => setDraft(e.target.value)} />
+                <div className="row"><button className="btn-sm" onClick={useTemplate}>Use my template</button><a className="btn-sm" href={kit.link(cur.other, cur.last.subject, cur.lead || { contact_name: cur.name })} target="_blank" rel="noreferrer">Open in Gmail</a><div className="spacer" /><button className="btn-sm primary" disabled={sending || !canSend} title={canSend ? '' : 'Reconnect Gmail to send from here'} onClick={reply}>{sending ? 'Sending…' : `Send from ${acct.email}`}</button></div>
+              </div>}
+            </>
+          )}
+        </div>
+      </div>
+      {compose && <div className="overlay" onClick={() => setCompose(null)}><div className="modal wide" onClick={(e) => e.stopPropagation()}>
+        <div className="cardhead"><h3>New email</h3><span className="sm">from {acct.email}</span><div className="spacer" /><button className="btn-xs" onClick={() => setCompose(null)}>×</button></div>
+        <div className="addgrid two"><label className="wide2">To<input autoFocus placeholder="name@brand.com" value={compose.to} onChange={(e) => { const to = e.target.value; const l = (allLeads || leads).find((x) => (x.email || '').toLowerCase() === to.trim().toLowerCase()); setCompose({ ...compose, to, lead: l || null, ...(l ? { subject: fillTpl(kit.tpl.reply_subject, l, me, kit.booking), body: fillTpl(kit.tpl.reply_body, l, me, kit.booking) + (kit.tpl.signature ? `\n${fillTpl(kit.tpl.signature, l, me, kit.booking)}` : '') } : {}) }); }} /></label>
+          <label className="wide2">Subject<input value={compose.subject} onChange={(e) => setCompose({ ...compose, subject: e.target.value })} /></label>
+          <label className="wide2">Message<textarea rows={10} value={compose.body} onChange={(e) => setCompose({ ...compose, body: e.target.value })} /></label></div>
+        {compose.lead && <div className="sm">Matches your contact <b>{compose.lead.company}</b> — this counts as a touch.</div>}
+        <div className="row" style={{ marginTop: 10 }}><div className="spacer" /><button className="btn-sm" onClick={() => setCompose(null)}>Cancel</button><button className="btn-sm primary" disabled={sending || !canSend} onClick={async () => { if (await send({ to: compose.to.trim(), subject: compose.subject, body: compose.body, leadId: compose.lead?.id || null })) setCompose(null); }}>{sending ? 'Sending…' : 'Send'}</button></div>
+      </div></div>}
     </>
   );
 }
