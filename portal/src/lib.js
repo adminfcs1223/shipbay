@@ -22,8 +22,8 @@ export function forgetLocalSession() {
 }
 
 /** Call an Edge Function and surface the JSON error it returned (FunctionsHttpError hides it in context). */
-export async function fn(name, body) {
-  const { data, error } = await supabase.functions.invoke(name, { body });
+export async function fn(name, body, headers) {
+  const { data, error } = await supabase.functions.invoke(name, { body, headers });
   if (error) {
     let msg = error.message; try { const j = await error.context?.json?.(); if (j?.error) msg = j.error; } catch { /* keep */ }
     return { error: msg };

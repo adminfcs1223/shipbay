@@ -21,6 +21,12 @@
   force = true
 
 [[redirects]]
+  from = "/oauth/qbo"
+  to = "https://poxlczzkpztmoiixyrth.supabase.co/functions/v1/owner/qbo-callback"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

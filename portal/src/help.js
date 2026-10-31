@@ -66,4 +66,16 @@ export const HELP = {
   corders: { title: 'Orders', what: 'Every order we’ve received for you, with status and tracking.', steps: ['New = in our queue. Packed = verified and boxed. Shipped = label bought; click the tracking number to follow it.', 'On hold means something needs your answer — your account manager will have messaged you.'] },
   products: { title: 'Products', what: 'Your catalog as we have it.', steps: ['Check codes, barcodes and weights — these drive picking accuracy and postage. Send corrections to your account manager.'] },
   documents: { title: 'Documents', what: 'Everything you’ve sent us and its review status.', steps: ['Pending = we have it and are reviewing. Approved = done. Rejected = see the note and re-upload from Overview.'] },
+  owner: {
+    title: 'the Owner area',
+    what: 'Your private view: the company’s money and every lead, behind a second passphrase.',
+    steps: [
+      'Financials: tiles up top are the four numbers to know — burn (what a month costs with zero orders), break-even (services you must bill to cover it), cash, and what you’ve put in. The Ledger is every dollar; add a line whenever money moves.',
+      'Connect QuickBooks once (Settings → paste the app keys, then Financials → Connect). “Pull latest” refreshes the P&L, balance sheet and recent transactions so you can check they match the Ledger.',
+      'Sales → Master leads is every company from every channel. Replies and booked calls float to the top. Click a row to edit it or see its call and email history.',
+      'Sales → Email syncs the Smartlead campaign. Tag each reply Positive / Negative — that’s the only honest measure of the campaign.',
+      'Sales → Calls is the dialer: Start session, Start call, tap the outcome. It times you, grades each list, and parks a lead after 4 tries with no human.',
+      'Sales → Third party is where Fulfill.com, fulfilment.com, agency and referral leads go, with their costs, so every channel is judged by cost per signed client.',
+    ],
+  },
 };
