@@ -22,7 +22,8 @@
 <link rel="icon" type="image/svg+xml" href="assets/brand/08-icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<script src="js/config.js" defer></script>
 <style>
   :root{
     --bg:#FFFFFF; --bg-soft:#F8F7F5; --line:#E8E6E1;
@@ -390,117 +391,105 @@
   .tier-chips span{background:#fff;border:1px solid var(--orange);border-radius:99px;padding:8px 16px;font-size:13px;font-weight:600}
   @media(max-width:880px){.tier-grid{grid-template-columns:1fr}}
 
+  /* display type */
+  h2{font-family:'Barlow Condensed','Archivo',sans-serif;text-transform:uppercase;letter-spacing:.015em;font-size:clamp(38px,4.6vw,58px)}
+
   /* ===== intro overlay ===== */
-  #intro{position:fixed;inset:0;z-index:2000;background:
-    radial-gradient(900px 600px at 85% 10%, #FF8A45 0%, transparent 55%),
-    radial-gradient(700px 500px at 8% 92%, #E85E0A 0%, transparent 55%), var(--orange);
-    color:#fff;display:flex;align-items:center;overflow:hidden;cursor:pointer;
-    transition:transform .75s cubic-bezier(.76,0,.24,1),opacity .55s ease .25s}
-  #intro.go{transform:translateX(-100%);opacity:0}
+  #intro{position:fixed;inset:0;z-index:2000;background:var(--orange);color:#fff;display:flex;align-items:center;overflow:hidden;cursor:pointer}
+  #intro.go{opacity:0;transition:opacity .85s ease .2s}
+  #intro.go .in-wrap{transform:translateX(-34vw);opacity:0;transition:transform .85s cubic-bezier(.55,0,.25,1),opacity .75s ease .15s}
   #intro.off{display:none}
-  #intro::before{content:"";position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.14) 1px, transparent 1.4px);background-size:26px 26px;opacity:.5}
-  #intro::after{content:"";position:absolute;right:-180px;bottom:-180px;width:560px;height:560px;border:2px solid rgba(255,255,255,.18);border-radius:48px;transform:rotate(14deg)}
-  .in-wrap{position:relative;max-width:1100px;margin:0 auto;padding:0 32px;width:100%}
-  .in-kicker{font-family:'IBM Plex Mono',monospace;font-size:13px;letter-spacing:.22em;opacity:0;margin-bottom:26px;animation:inUp .5s ease .15s forwards}
-  .in-h{font-family:'Archivo',sans-serif;font-weight:800;font-size:clamp(40px,6.4vw,84px);line-height:1.02;letter-spacing:-.02em;margin:0}
+  .in-wrap{max-width:1150px;margin:0 auto;padding:0 32px;width:100%}
+  .in-h{font-family:'Barlow Condensed','Archivo',sans-serif;font-weight:700;text-transform:uppercase;font-size:clamp(54px,8.4vw,122px);line-height:.95;letter-spacing:.01em;margin:0}
   .in-h .w{display:inline-block;overflow:hidden;vertical-align:bottom}
-  .in-h .w i{display:inline-block;font-style:normal;transform:translateY(110%);animation:inWord .62s cubic-bezier(.2,.7,.2,1) forwards}
-  .in-h em{font-style:normal;color:var(--ink);background:#fff;padding:0 .18em;border-radius:.12em;display:inline-block}
-  .in-list{list-style:none;display:flex;flex-wrap:wrap;gap:12px 26px;margin-top:40px;padding:0}
-  .in-list li{font-size:clamp(15px,1.5vw,19px);font-weight:600;display:flex;align-items:center;gap:10px;opacity:0;animation:inUp .45s ease forwards}
-  .in-list li::before{content:"";width:20px;height:20px;border-radius:50%;background:#fff;color:var(--orange);
-    background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23FF6B15" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>');background-size:12px;background-position:center;background-repeat:no-repeat;flex:0 0 20px}
-  .in-skip{position:absolute;right:32px;bottom:-72px;font-family:'IBM Plex Mono',monospace;font-size:12.5px;letter-spacing:.14em;opacity:0;animation:inUp .5s ease 2.2s forwards;border:1px solid rgba(255,255,255,.5);border-radius:99px;padding:8px 18px}
+  .in-h .w i{display:inline-block;font-style:normal;transform:translateY(110%);animation:inWord .6s cubic-bezier(.2,.7,.2,1) forwards}
+  .in-h em{font-style:normal;color:var(--orange);background:#fff;padding:0 .14em}
+  .in-list{list-style:none;display:flex;flex-wrap:wrap;gap:10px 30px;margin-top:44px;padding:26px 0 0;border-top:2px solid rgba(255,255,255,.4);max-width:980px}
+  .in-list li{font-size:clamp(15px,1.6vw,20px);font-weight:600;opacity:0;animation:inUp .45s ease forwards;display:flex;align-items:center;gap:10px}
+  .in-list li::before{content:"";width:8px;height:8px;background:#fff;flex:0 0 8px}
+  .in-skip{position:fixed;right:34px;bottom:30px;font-size:13px;font-weight:700;letter-spacing:.14em;opacity:0;animation:inUp .5s ease 2.2s forwards;border-bottom:2px solid rgba(255,255,255,.6);padding-bottom:3px}
   @keyframes inWord{to{transform:translateY(0)}}
   @keyframes inUp{to{opacity:1}}
   @media(prefers-reduced-motion:reduce){#intro{display:none}}
 
-  /* ===== hero v2 ===== */
-  .hero2{position:relative;padding:56px 0 72px;background:
-    radial-gradient(880px 500px at 90% -8%, var(--orange-tint) 0%, transparent 60%),
-    radial-gradient(640px 440px at -5% 70%, #F7D9C480 0%, transparent 60%), var(--bg)}
-  .h2-grid{display:grid;grid-template-columns:1fr 1.06fr;gap:34px;align-items:stretch}
+  /* ===== hero ===== */
+  .hero2{position:relative;padding:54px 0 64px;background:var(--orange)}
+  .h2-grid{display:grid;grid-template-columns:1fr 1.04fr;gap:48px;align-items:center}
   .h2-grid>*{min-width:0}
-  .hv-left{background:
-    radial-gradient(640px 420px at 85% 8%, #FF8A45 0%, transparent 55%),
-    radial-gradient(520px 380px at 6% 95%, #E85E0A 0%, transparent 55%), var(--orange);
-    border-radius:26px;color:#fff;padding:clamp(30px,3.4vw,52px);display:flex;flex-direction:column;justify-content:center;position:relative;overflow:hidden;box-shadow:0 30px 70px rgba(255,107,21,.35)}
-  .hv-left::before{content:"";position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.13) 1px, transparent 1.4px);background-size:24px 24px;opacity:.5;pointer-events:none}
-  .hv-kick{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.2em;margin-bottom:20px;opacity:.95}
-  .hv-left h1{font-size:clamp(34px,3.6vw,52px);font-weight:800;line-height:1.05;letter-spacing:-.02em;color:#fff}
-  .hv-left h1 em{font-style:normal;color:var(--ink);background:#fff;padding:0 .16em;border-radius:.1em;display:inline-block}
-  .hv-list{list-style:none;margin:28px 0 30px;padding:0;display:grid;gap:11px}
-  .hv-list li{display:flex;gap:11px;align-items:flex-start;font-size:15.5px;font-weight:600;line-height:1.4}
-  .hv-list li::before{content:"";width:19px;height:19px;border-radius:50%;background:#fff url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23FF6B15" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>') center/11px no-repeat;flex:0 0 19px;margin-top:2px}
+  .hv-left{color:#fff}
+  .hv-kick{font-size:12.5px;font-weight:700;letter-spacing:.18em;margin-bottom:18px;opacity:.92}
+  .hv-left h1{font-family:'Barlow Condensed','Archivo',sans-serif;font-weight:700;text-transform:uppercase;font-size:clamp(44px,4.8vw,74px);line-height:.96;letter-spacing:.01em;color:#fff}
+  .hv-left h1 em{font-style:normal;color:var(--orange);background:#fff;padding:0 .12em}
+  .hv-list{list-style:none;margin:30px 0 32px;padding:26px 0 0;border-top:2px solid rgba(255,255,255,.4);display:grid;gap:12px}
+  .hv-list li{display:flex;gap:12px;align-items:flex-start;font-size:16px;font-weight:600;line-height:1.4}
+  .hv-list li::before{content:"";width:9px;height:9px;background:#fff;flex:0 0 9px;margin-top:7px}
   .hv-ctas{display:flex;gap:12px;flex-wrap:wrap}
-  .btn-white{background:#fff;color:var(--ink);box-shadow:0 8px 24px rgba(16,28,43,.25)}
-  .btn-white:hover{transform:translateY(-2px)}
-  .btn-ghostw{border:1.5px solid rgba(255,255,255,.75);color:#fff;background:transparent}
-  .btn-ghostw:hover{background:#fff;color:var(--ink)}
-  .hv-foot{margin-top:26px;padding-top:18px;border-top:1px solid rgba(255,255,255,.3);font-family:'IBM Plex Mono',monospace;font-size:11.5px;letter-spacing:.08em;opacity:.95}
+  .btn{border-radius:8px}
+  .btn-white{background:var(--ink);color:#fff;box-shadow:0 8px 24px rgba(16,28,43,.3)}
+  .btn-white:hover{transform:translateY(-2px);background:#1C2B40}
+  .btn-ghostw{border:2px solid #fff;color:#fff;background:transparent}
+  .btn-ghostw:hover{background:#fff;color:var(--orange-soft)}
+  .hv-foot{margin-top:28px;font-size:12.5px;font-weight:700;letter-spacing:.1em;opacity:.92}
 
   /* ===== quote calculator ===== */
-  .qc{background:#fff;border:1px solid var(--line);border-radius:26px;box-shadow:0 30px 70px rgba(16,28,43,.13);padding:26px 26px 22px;display:flex;flex-direction:column;gap:16px}
-  .qc-head{display:flex;justify-content:space-between;align-items:center}
-  .qc-head b{font-family:'Archivo',sans-serif;font-size:19px}
-  .qc-pill{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;background:rgba(30,158,111,.1);color:var(--green);padding:4px 11px;border-radius:99px}
-  .qc-chips{display:flex;gap:8px;flex-wrap:wrap}
-  .qch{font-family:'Archivo',sans-serif;font-weight:600;font-size:13.5px;padding:9px 16px;border-radius:99px;border:1.5px solid var(--line);background:#fff;color:var(--muted);cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:7px}
-  .qch::before{content:"+";font-weight:700;color:var(--muted-2)}
-  .qch.on{border-color:var(--orange);background:var(--orange);color:#fff;box-shadow:0 6px 18px rgba(255,107,21,.3)}
-  .qch.on::before{content:"✓";color:#fff}
-  .qc-mod{border:1px solid var(--line);border-radius:16px;padding:16px;display:grid;gap:12px;background:var(--bg-soft)}
-  .qc-mod.hide{display:none}
-  .qc-mod .qm-t{font-family:'Archivo',sans-serif;font-weight:700;font-size:13.5px;display:flex;justify-content:space-between;align-items:center}
-  .qc-mod .qm-t small{font-family:'IBM Plex Mono',monospace;font-weight:400;font-size:10.5px;color:var(--muted-2);letter-spacing:.04em}
-  .qc-lab{font-size:12.5px;font-weight:600;color:var(--muted);display:flex;justify-content:space-between;align-items:center}
-  .qc-lab output{font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--ink);font-weight:600}
-  input[type=range].qr{-webkit-appearance:none;appearance:none;width:100%;height:5px;border-radius:99px;background:linear-gradient(90deg,var(--orange) var(--p,5%),#E8E6E1 var(--p,5%));outline:none}
-  input[type=range].qr::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:#fff;border:3px solid var(--orange);box-shadow:0 2px 8px rgba(16,28,43,.25);cursor:pointer}
-  input[type=range].qr::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#fff;border:3px solid var(--orange);cursor:pointer}
-  .qc-row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .qc{background:#fff;border-radius:14px;box-shadow:0 34px 80px rgba(60,20,0,.3);padding:26px 26px 24px;display:flex;flex-direction:column;gap:13px}
+  .qc-head{display:flex;justify-content:space-between;align-items:baseline;border-bottom:3px solid var(--ink);padding-bottom:12px}
+  .qc-head b{font-family:'Barlow Condensed','Archivo',sans-serif;text-transform:uppercase;font-size:27px;font-weight:700;letter-spacing:.02em}
+  .qc-head small{font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--muted-2)}
+  .qrow{border:1.5px solid var(--line);border-radius:10px;padding:13px 15px;display:grid;gap:10px}
+  .qrow .qr-top{display:flex;align-items:center;gap:11px}
+  .qrow .qr-top label{font-weight:700;font-size:15px;flex:1;cursor:pointer}
+  .qrow .qr-top label small{display:block;font-weight:500;font-size:12px;color:var(--muted)}
+  .qrow input[type=checkbox]{width:19px;height:19px;accent-color:var(--orange);cursor:pointer;flex:0 0 19px}
+  .qr-in{display:none;grid-template-columns:1fr 1fr;gap:10px}
+  .qrow.on{border-color:var(--orange);background:#FFF8F3}
+  .qrow.on .qr-in{display:grid}
   .qc-num{display:grid;gap:5px;font-size:12px;font-weight:600;color:var(--muted)}
-  .qc-num input{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:10px;font-family:'IBM Plex Mono',monospace;font-size:14px;color:var(--ink);background:#fff}
-  .qc-num input:focus{outline:2px solid var(--orange);border-color:var(--orange)}
-  /* storage picker */
-  .qs-t{font-family:'Archivo',sans-serif;font-weight:700;font-size:13.5px;display:flex;justify-content:space-between;align-items:center}
-  .qs-t small{font-family:'IBM Plex Mono',monospace;font-weight:400;font-size:10.5px;color:var(--muted-2)}
-  .pal-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-  .pal{border:1.5px solid var(--line);border-radius:13px;padding:10px 8px 9px;text-align:center;background:#fff;transition:all .15s;position:relative}
-  .pal.on{border-color:var(--orange);box-shadow:0 6px 16px rgba(255,107,21,.18)}
-  .pal svg{display:block;margin:0 auto 6px;height:52px;width:auto}
-  .pal b{display:block;font-family:'Archivo',sans-serif;font-size:11.5px;line-height:1.25}
-  .pal small{display:block;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted-2);margin:2px 0 7px}
-  .pal .st{display:flex;align-items:center;justify-content:center;gap:8px}
-  .pal .st button{width:22px;height:22px;border-radius:7px;border:1px solid var(--line);background:#fff;font-weight:700;color:var(--muted);cursor:pointer;line-height:1}
-  .pal .st button:hover{border-color:var(--orange);color:var(--orange)}
-  .pal .st output{font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;min-width:18px}
-  /* output */
-  .qc-out{border-top:2px solid var(--ink);padding-top:13px;display:grid;gap:6px}
-  .qo-line{display:flex;justify-content:space-between;font-size:13.5px;color:var(--muted)}
-  .qo-line b{font-family:'IBM Plex Mono',monospace;color:var(--ink);font-weight:600}
+  .qc-num input{width:100%;padding:10px 12px;border:1.5px solid var(--line);border-radius:8px;font-size:15px;font-weight:600;color:var(--ink);background:#fff}
+  .qc-num input:focus{outline:none;border-color:var(--orange)}
+  /* storage */
+  .qs-t{font-weight:700;font-size:15px}
+  .qs-t small{display:block;font-weight:500;font-size:12px;color:var(--muted)}
+  .pal-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .pal{border:1.5px solid var(--line);border-radius:10px;padding:10px 8px 9px;text-align:center;background:#fff}
+  .pal.on{border-color:var(--orange);background:#FFF8F3}
+  .pal svg{display:block;margin:0 auto 6px;height:46px;width:auto}
+  .pal b{display:block;font-size:12px;line-height:1.25}
+  .pal small{display:block;font-size:10.5px;color:var(--muted-2);margin:2px 0 7px}
+  .pal input{width:60px;margin:0 auto;display:block;text-align:center;padding:6px 4px;border:1.5px solid var(--line);border-radius:7px;font-size:14px;font-weight:600;color:var(--ink)}
+  .pal input:focus{outline:none;border-color:var(--orange)}
+  /* output + email capture */
+  .qc-out{border-top:3px solid var(--ink);padding-top:12px;display:grid;gap:6px}
+  .qo-line{display:flex;justify-content:space-between;gap:14px;font-size:13.5px;color:var(--muted)}
+  .qo-line b{color:var(--ink);font-weight:700;white-space:nowrap}
   .qo-total{display:flex;justify-content:space-between;align-items:baseline;margin-top:4px}
-  .qo-total span{font-family:'Archivo',sans-serif;font-weight:700;font-size:15px}
-  .qo-total b{font-family:'Archivo',sans-serif;font-size:32px;font-weight:800;color:var(--orange-soft)}
-  .qo-total b em{font-style:normal;font-size:14px;color:var(--muted);font-weight:600}
-  .qo-post{font-size:11.5px;color:var(--muted-2);line-height:1.5;background:var(--bg-soft);border-radius:10px;padding:8px 12px}
-  .qo-ctas{display:flex;gap:10px;margin-top:6px}
-  .qo-ctas .btn{flex:1;justify-content:center;padding:13px 16px;font-size:15px}
+  .qo-total span{font-weight:700;font-size:15px}
+  .qo-total b{font-family:'Barlow Condensed','Archivo',sans-serif;font-size:40px;font-weight:700;color:var(--orange-soft)}
+  .qo-total b em{font-style:normal;font-size:15px;color:var(--muted);font-weight:600}
+  .qo-post{font-size:11.5px;color:var(--muted);line-height:1.5;border-left:3px solid var(--orange);padding:2px 0 2px 10px}
+  .qmail{background:var(--ink);border-radius:10px;padding:16px;margin-top:8px;color:#fff;display:grid;gap:9px}
+  .qmail b{font-size:14.5px}
+  .qmail .qm-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .qmail input{padding:11px 12px;border-radius:8px;border:none;font-size:14px;width:100%;background:#fff;color:var(--ink);font-family:'Inter',sans-serif}
+  .qmail input:focus{outline:2px solid var(--orange)}
+  .qmail button{background:var(--orange);color:#fff;border:none;border-radius:8px;padding:13px;font-size:15px;font-weight:700;cursor:pointer;font-family:'Archivo',sans-serif}
+  .qmail button:hover{background:var(--orange-hover)}
+  .qmail button:disabled{opacity:.6;cursor:default}
+  .qmail small{font-size:11px;color:#9AA3B2}
+  .qmail .qm-ok{text-align:center;padding:8px 0;font-size:15px;font-weight:600}
   /* gallery */
   .gal-grid{display:grid;grid-template-columns:1.1fr 1fr 1fr 1fr;gap:14px;align-items:stretch}
-  .gal-grid .gv,.gal-grid img{border-radius:18px;object-fit:cover;width:100%;height:100%;min-height:300px;max-height:420px;display:block;box-shadow:0 18px 44px rgba(16,28,43,.14)}
+  .gal-grid .gv,.gal-grid img{border-radius:12px;object-fit:cover;width:100%;height:100%;min-height:300px;max-height:420px;display:block;box-shadow:0 18px 44px rgba(16,28,43,.14)}
   .gal-grid .gv{overflow:hidden;position:relative;font-size:0;border-top:3px solid var(--orange);background:#fff}
   .gal-grid .gv video{width:100%;height:100%;object-fit:cover;display:block}
-  .gal-cap{text-align:center;margin-top:16px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;letter-spacing:.08em;color:var(--muted-2)}
+  .gal-cap{text-align:center;margin-top:16px;font-size:11.5px;font-weight:600;letter-spacing:.08em;color:var(--muted-2)}
   @media(max-width:960px){
     .h2-grid{grid-template-columns:1fr}
-    .pal-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
-    .pal small{font-size:9px}
     .gal-grid{grid-template-columns:1fr 1fr}
     .in-skip{right:20px}
   }
   @media(max-width:560px){
-    .qc-row2{grid-template-columns:1fr}
+    .qr-in,.qmail .qm-grid{grid-template-columns:1fr}
     .gal-grid{grid-template-columns:1fr}
   }
 
@@ -534,22 +523,21 @@
 <!-- INTRO OVERLAY -->
 <div id="intro" role="presentation">
   <div class="in-wrap">
-    <div class="in-kicker">SHIPBAY 3PL &middot; HILLSBOROUGH, NJ</div>
     <h2 class="in-h">
-      <span class="w"><i style="animation-delay:.25s">A&nbsp;DTC&nbsp;3PL</i></span>
-      <span class="w"><i style="animation-delay:.45s">Built&nbsp;For</i></span>
-      <span class="w"><i style="animation-delay:.65s">Small&nbsp;Brands...</i></span>
+      <span class="w"><i style="animation-delay:.2s">A&nbsp;DTC&nbsp;3PL</i></span>
+      <span class="w"><i style="animation-delay:.42s">Built&nbsp;For</i></span>
+      <span class="w"><i style="animation-delay:.64s">Small&nbsp;Brands...</i></span>
       <span class="w"><i style="animation-delay:1.05s"><em>Finally.</em></i></span>
     </h2>
     <ul class="in-list">
       <li style="animation-delay:1.5s">No order minimums</li>
-      <li style="animation-delay:1.7s">Orders in by 2pm ship same day</li>
-      <li style="animation-delay:1.9s">$0 setup fee</li>
-      <li style="animation-delay:2.1s">No monthly minimums</li>
-      <li style="animation-delay:2.3s">Rates built for small brands</li>
-      <li style="animation-delay:2.5s">Postage at your rates &mdash; never marked up</li>
+      <li style="animation-delay:1.68s">Orders in by 2pm ship same day</li>
+      <li style="animation-delay:1.86s">$0 setup fee</li>
+      <li style="animation-delay:2.04s">No monthly minimums</li>
+      <li style="animation-delay:2.22s">Rates built for small brands</li>
+      <li style="animation-delay:2.4s">Postage at your rates, never marked up</li>
     </ul>
-    <span class="in-skip">SKIP &rarr;</span>
+    <span class="in-skip">SKIP</span>
   </div>
 </div>
 
@@ -557,59 +545,76 @@
 <div class="hero2">
   <div class="wrap h2-grid">
     <div class="hv-left">
-      <div class="hv-kick">SHIPBAY 3PL &middot; 115 STRYKER LN, HILLSBOROUGH NJ</div>
+      <div class="hv-kick">115 STRYKER LN &middot; HILLSBOROUGH, NJ</div>
       <h1>A DTC 3PL built for small brands... <em>finally.</em></h1>
       <ul class="hv-list">
         <li>No order minimums &mdash; start with one bin</li>
         <li>Orders in by 2pm ET ship the same day</li>
         <li>$0 setup fee &middot; no monthly minimums</li>
-        <li>Only pay for what you use &mdash; storage billed on daily average</li>
+        <li>Storage billed on daily average &mdash; only pay for what you use</li>
         <li>Postage at your own carrier rates, never marked up</li>
       </ul>
       <div class="hv-ctas">
         <a class="btn btn-white" href="book.html">Book a call</a>
         <a class="btn btn-ghostw" href="pricing.html">See pricing</a>
       </div>
-      <div class="hv-foot">MONTH-TO-MONTH &middot; SCAN-VERIFIED PICKS &middot; 99.8% ACCURACY TARGET</div>
+      <div class="hv-foot">MONTH-TO-MONTH &middot; SCAN-VERIFIED PICKS &middot; SATURDAYS INCLUDED</div>
     </div>
     <div class="qc" id="quote" aria-label="Instant quote calculator">
-      <div class="qc-head"><b>Get an instant estimate<span class="dot">.</span></b><span class="qc-pill">LIVE RATE CARD</span></div>
-      <div class="qc-chips" role="group" aria-label="Pick your services — choose one, two or all three">
-        <button class="qch on" data-m="pp" type="button">Pick &amp; Pack</button>
-        <button class="qch" data-m="fba" type="button">FBA Prep</button>
-        <button class="qch" data-m="sub" type="button">Subscriptions</button>
-      </div>
-      <div class="qc-mod" id="m-pp">
-        <div class="qm-t">Pick &amp; Pack &mdash; order processing &amp; packaging <small>FROM $1.65/ORDER</small></div>
-        <label class="qc-lab" for="pp-orders">Orders per month <output id="pp-orders-o">500</output></label>
-        <input class="qr" type="range" id="pp-orders" min="0" max="10000" step="50" value="500">
-        <div class="qc-row2">
-          <label class="qc-num">Avg units per order <input type="number" id="pp-units" value="1.2" step="0.1" min="1" max="10"></label>
-          <label class="qc-num">% shipped in a box <input type="number" id="pp-box" value="0" step="5" min="0" max="100"></label>
+      <div class="qc-head"><b>Price your month</b><small>2026 RATES</small></div>
+
+      <div class="qrow on" id="r-pp">
+        <div class="qr-top">
+          <input type="checkbox" id="ck-pp" checked>
+          <label for="ck-pp">Pick &amp; Pack<small>Order processing &amp; packaging &mdash; from $1.65 per order</small></label>
+        </div>
+        <div class="qr-in">
+          <label class="qc-num">Orders per month <input type="number" id="pp-orders" value="500" min="0" step="1" inputmode="numeric"></label>
+          <label class="qc-num">Avg units per order <input type="number" id="pp-units" value="1" min="1" step="0.1" inputmode="decimal"></label>
         </div>
       </div>
-      <div class="qc-mod hide" id="m-fba">
-        <div class="qm-t">FBA Prep <small>$0.60/UNIT &middot; POLY BAG + FNSKU</small></div>
-        <label class="qc-lab" for="fba-units">Units per month <output id="fba-units-o">1,000</output></label>
-        <input class="qr" type="range" id="fba-units" min="0" max="20000" step="100" value="1000">
+
+      <div class="qrow" id="r-fba">
+        <div class="qr-top">
+          <input type="checkbox" id="ck-fba">
+          <label for="ck-fba">FBA Prep<small>Poly bag + FNSKU label &mdash; $0.60 per unit</small></label>
+        </div>
+        <div class="qr-in">
+          <label class="qc-num">Units per month <input type="number" id="fba-units" value="1000" min="0" step="1" inputmode="numeric"></label>
+          <span></span>
+        </div>
       </div>
-      <div class="qc-mod hide" id="m-sub">
-        <div class="qm-t">Subscription box drops <small>LINE-PACKED &middot; FROM $0.85/BOX</small></div>
-        <label class="qc-lab" for="sub-boxes">Boxes per month <output id="sub-boxes-o">1,000</output></label>
-        <input class="qr" type="range" id="sub-boxes" min="0" max="10000" step="50" value="1000">
+
+      <div class="qrow" id="r-sub">
+        <div class="qr-top">
+          <input type="checkbox" id="ck-sub">
+          <label for="ck-sub">Subscription Boxes<small>Line-packed drops, your packaging &mdash; from $0.85 per box</small></label>
+        </div>
+        <div class="qr-in">
+          <label class="qc-num">Boxes per month <input type="number" id="sub-boxes" value="1000" min="0" step="1" inputmode="numeric"></label>
+          <span></span>
+        </div>
       </div>
-      <div class="qc-mod">
-        <div class="qs-t">Storage &mdash; only pay for what you use <small>DAILY AVERAGE, PRO-RATED</small></div>
+
+      <div class="qrow" style="display:grid">
+        <div class="qs-t">Storage<small>Type how many of each size &mdash; billed on daily average, only pay for what you use</small></div>
         <div class="pal-grid" id="palGrid"></div>
       </div>
+
       <div class="qc-out">
         <div id="qoLines"></div>
         <div class="qo-total"><span>Estimated monthly</span><b id="qoTotal">$0<em>/mo</em></b></div>
-        <div class="qo-post"><b>Postage:</b> billed by the carrier on your own account at your rates &mdash; it never appears on a ShipBay invoice, and we never mark it up.</div>
-        <div class="qo-ctas">
-          <a class="btn btn-orange" href="book.html">Book a call</a>
-          <a class="btn btn-outline" href="start.html">Apply</a>
-        </div>
+        <div class="qo-post">Postage is billed by the carrier on your own account, at your rates. It never appears on a ShipBay invoice.</div>
+        <form class="qmail" id="qMail" onsubmit="return qSend(event)">
+          <b>Get this quote in your inbox</b>
+          <div class="qm-grid">
+            <input type="text" id="q-name" placeholder="Full name" required>
+            <input type="text" id="q-brand" placeholder="Brand / company" required>
+          </div>
+          <input type="email" id="q-email" placeholder="Work email" required>
+          <button type="submit" id="qBtn">Email me this quote</button>
+          <small>Your quote and one follow-up from the founder. No spam.</small>
+        </form>
       </div>
     </div>
   </div>
@@ -944,119 +949,148 @@
       if (done) return; done = true;
       document.documentElement.style.overflow = '';
       ov.classList.add('go');
-      setTimeout(() => ov.classList.add('off'), 900);
+      setTimeout(() => ov.classList.add('off'), 1000);
     }
     ov.addEventListener('click', go);
     addEventListener('keydown', go, {once:true});
     setTimeout(go, 3400);
   })();
 
-  // ===== instant quote calculator — ShipBay Rate Card v2 (2026-10-30) =====
+  // ===== quote calculator — ShipBay Rate Card v2 (2026-10-30) =====
   const RATES = {
-    pp:   { tiers: [[1000,1.95],[5000,1.80],[Infinity,1.65]], addlUnit: .45, box: 2.50 },
+    pp:   { tiers: [[1000,1.95],[5000,1.80],[Infinity,1.65]], addlUnit: .45 },
     fba:  { unit: .60 },
     sub:  { tiers: [[2999,1.10],[4999,.95],[Infinity,.85]] },
     storage: [
-      { k:'bin',    name:'Bin',          dims:'18×12×8″',   mo:1,  h:10 },
-      { k:'shelf',  name:'Shelf',        dims:'48×18×18″',  mo:4,  h:16 },
-      { k:'half',   name:'Half pallet',  dims:'30×36×24″',  mo:12, h:20 },
-      { k:'std48',  name:'Pallet 48″', dims:'40×48×48″', mo:18, h:30 },
-      { k:'std60',  name:'Pallet 60″', dims:'40×48×60″', mo:20, h:38 },
-      { k:'tall72', name:'Pallet 72″', dims:'40×48×72″', mo:24, h:46 }
+      { k:'bin',    name:'Bin',             dims:'18\u00d712\u00d78\u2033',   mo:1,  h:10 },
+      { k:'shelf',  name:'Shelf',           dims:'48\u00d718\u00d718\u2033',  mo:4,  h:16 },
+      { k:'half',   name:'Half pallet',     dims:'30\u00d736\u00d724\u2033',  mo:12, h:20 },
+      { k:'std48',  name:'Pallet 48\u2033', dims:'40\u00d748\u00d748\u2033', mo:18, h:30 },
+      { k:'std60',  name:'Pallet 60\u2033', dims:'40\u00d748\u00d760\u2033', mo:20, h:38 },
+      { k:'tall72', name:'Pallet 72\u2033', dims:'40\u00d748\u00d772\u2033', mo:24, h:46 }
     ],
     storageMin: 10
   };
-  const $ = id => document.getElementById(id);
+  const $id = id => document.getElementById(id);
   const fmt = n => '$' + Math.round(n).toLocaleString('en-US');
-  const active = { pp:true, fba:false, sub:false };
   const stor = {};
+  let qLines = [], qTotal = 0;
 
-  // pallet picker — visual size cards
   function palSVG(p){
     const H = p.h, y0 = 56 - 8 - H;
     const load = (p.k==='bin')
-      ? `<rect x="19" y="${56-8-10}" width="26" height="10" rx="2" fill="#F7D9C4" stroke="#D14E00" stroke-width="1.3"/>`
+      ? `<rect x="19" y="${56-8-10}" width="26" height="10" fill="#F7D9C4" stroke="#D14E00" stroke-width="1.3"/>`
       : (p.k==='shelf')
-      ? `<rect x="14" y="20" width="36" height="28" rx="2" fill="none" stroke="#D14E00" stroke-width="1.3"/><line x1="14" y1="30" x2="50" y2="30" stroke="#D14E00" stroke-width="1.3"/><line x1="14" y1="39" x2="50" y2="39" stroke="#D14E00" stroke-width="1.3"/><rect x="17" y="23" width="9" height="6" fill="#F7D9C4"/><rect x="28" y="32" width="9" height="6" fill="#F7D9C4"/><rect x="17" y="41" width="9" height="6" fill="#F7D9C4"/>`
-      : `<rect x="15" y="${y0}" width="34" height="${H}" rx="2" fill="#F7D9C4" stroke="#D14E00" stroke-width="1.3"/>
+      ? `<rect x="14" y="20" width="36" height="28" fill="none" stroke="#D14E00" stroke-width="1.3"/><line x1="14" y1="30" x2="50" y2="30" stroke="#D14E00" stroke-width="1.3"/><line x1="14" y1="39" x2="50" y2="39" stroke="#D14E00" stroke-width="1.3"/><rect x="17" y="23" width="9" height="6" fill="#F7D9C4"/><rect x="28" y="32" width="9" height="6" fill="#F7D9C4"/><rect x="17" y="41" width="9" height="6" fill="#F7D9C4"/>`
+      : `<rect x="15" y="${y0}" width="34" height="${H}" fill="#F7D9C4" stroke="#D14E00" stroke-width="1.3"/>
          <line x1="15" y1="${y0+H/2}" x2="49" y2="${y0+H/2}" stroke="#D14E00" stroke-width=".8" opacity=".5"/>
          <line x1="32" y1="${y0}" x2="32" y2="${y0+H}" stroke="#D14E00" stroke-width=".8" opacity=".5"/>`;
     const palBase = (p.k==='bin'||p.k==='shelf') ? '' :
-      `<rect x="12" y="48" width="40" height="4" rx="1" fill="#FF6B15"/><rect x="14" y="52" width="6" height="4" fill="#D14E00"/><rect x="29" y="52" width="6" height="4" fill="#D14E00"/><rect x="44" y="52" width="6" height="4" fill="#D14E00"/>`;
+      `<rect x="12" y="48" width="40" height="4" fill="#FF6B15"/><rect x="14" y="52" width="6" height="4" fill="#D14E00"/><rect x="29" y="52" width="6" height="4" fill="#D14E00"/><rect x="44" y="52" width="6" height="4" fill="#D14E00"/>`;
     return `<svg viewBox="0 0 64 58" xmlns="http://www.w3.org/2000/svg">${load}${palBase}</svg>`;
   }
   (function(){
-    const grid = $('palGrid');
+    const grid = $id('palGrid');
     RATES.storage.forEach(p => {
       stor[p.k] = 0;
       const el = document.createElement('div');
       el.className = 'pal'; el.id = 'pal-' + p.k;
       el.innerHTML = `${palSVG(p)}<b>${p.name}</b><small>${p.dims} &middot; $${p.mo}/mo</small>
-        <div class="st"><button type="button" aria-label="Remove one ${p.name}" data-k="${p.k}" data-d="-1">&minus;</button><output id="st-${p.k}">0</output><button type="button" aria-label="Add one ${p.name}" data-k="${p.k}" data-d="1">+</button></div>`;
+        <input type="number" id="st-${p.k}" value="0" min="0" step="1" inputmode="numeric" aria-label="How many: ${p.name}">`;
       grid.appendChild(el);
     });
-    grid.addEventListener('click', e => {
-      const b = e.target.closest('button'); if (!b) return;
-      const k = b.dataset.k;
-      stor[k] = Math.max(0, Math.min(99, stor[k] + (+b.dataset.d)));
-      $('st-' + k).textContent = stor[k];
-      $('pal-' + k).classList.toggle('on', stor[k] > 0);
+    grid.addEventListener('input', e => {
+      const inp = e.target.closest('input'); if (!inp) return;
+      const k = inp.id.replace('st-','');
+      stor[k] = Math.max(0, Math.min(999, +inp.value || 0));
+      $id('pal-' + k).classList.toggle('on', stor[k] > 0);
       calc();
     });
   })();
 
-  // service chips — pick one, two, or all three
-  document.querySelectorAll('.qch').forEach(ch => ch.addEventListener('click', () => {
-    const m = ch.dataset.m;
-    active[m] = !active[m];
-    ch.classList.toggle('on', active[m]);
-    $('m-' + m).classList.toggle('hide', !active[m]);
-    calc();
-  }));
-
-  // sliders + number inputs
-  function paintRange(r){ const p = (r.value - r.min) / (r.max - r.min) * 100; r.style.setProperty('--p', p + '%'); }
-  [['pp-orders','pp-orders-o'],['fba-units','fba-units-o'],['sub-boxes','sub-boxes-o']].forEach(([rid,oid]) => {
-    const r = $(rid); paintRange(r);
-    r.addEventListener('input', () => { $(oid).textContent = (+r.value).toLocaleString('en-US'); paintRange(r); calc(); });
+  // service rows — check one, two, or all three
+  ['pp','fba','sub'].forEach(m => {
+    $id('ck-' + m).addEventListener('change', e => {
+      $id('r-' + m).classList.toggle('on', e.target.checked);
+      calc();
+    });
   });
-  ['pp-units','pp-box'].forEach(id => $(id).addEventListener('input', calc));
+  ['pp-orders','pp-units','fba-units','sub-boxes'].forEach(id => $id(id).addEventListener('input', calc));
 
   function tierPrice(tiers, v){ for (const [max, p] of tiers) if (v <= max) return p; return tiers[tiers.length-1][1]; }
 
   function calc(){
-    const lines = [];
-    let total = 0;
-    if (active.pp) {
-      const o = +$('pp-orders').value, u = Math.max(1, +$('pp-units').value || 1), bx = Math.min(100, Math.max(0, +$('pp-box').value || 0));
+    qLines = []; qTotal = 0;
+    if ($id('ck-pp').checked) {
+      const o = Math.max(0, +$id('pp-orders').value || 0);
+      const u = Math.max(1, +$id('pp-units').value || 1);
       const rate = tierPrice(RATES.pp.tiers, o);
-      const cost = o * rate + o * (u - 1) * RATES.pp.addlUnit + o * bx/100 * RATES.pp.box;
-      total += cost;
-      if (o > 0) lines.push([`Pick & pack — ${o.toLocaleString()} orders @ ${rate.toFixed(2)}${u>1 ? ' + extra units' : ''}${bx>0 ? ' + box pack-outs' : ''}`, cost]);
+      const cost = o * rate + o * (u - 1) * RATES.pp.addlUnit;
+      qTotal += cost;
+      if (o > 0) qLines.push([`Pick & pack, ${o.toLocaleString()} orders at $${rate.toFixed(2)}${u > 1 ? ' incl. extra units' : ''}`, cost]);
     }
-    if (active.fba) {
-      const n = +$('fba-units').value, cost = n * RATES.fba.unit;
-      total += cost;
-      if (n > 0) lines.push([`FBA prep — ${n.toLocaleString()} units @ $0.60`, cost]);
+    if ($id('ck-fba').checked) {
+      const n = Math.max(0, +$id('fba-units').value || 0), cost = n * RATES.fba.unit;
+      qTotal += cost;
+      if (n > 0) qLines.push([`FBA prep, ${n.toLocaleString()} units at $0.60`, cost]);
     }
-    if (active.sub) {
-      const n = +$('sub-boxes').value, rate = tierPrice(RATES.sub.tiers, n), cost = n * rate;
-      total += cost;
-      if (n > 0) lines.push([`Subscription drop — ${n.toLocaleString()} boxes @ $${rate.toFixed(2)}`, cost]);
+    if ($id('ck-sub').checked) {
+      const n = Math.max(0, +$id('sub-boxes').value || 0), rate = tierPrice(RATES.sub.tiers, n), cost = n * rate;
+      qTotal += cost;
+      if (n > 0) qLines.push([`Subscription drop, ${n.toLocaleString()} boxes at $${rate.toFixed(2)}`, cost]);
     }
     let sCost = 0, sItems = 0;
-    RATES.storage.forEach(p => { sCost += stor[p.k] * p.mo; sItems += stor[p.k]; });
+    const sParts = [];
+    RATES.storage.forEach(p => {
+      if (stor[p.k] > 0) { sCost += stor[p.k] * p.mo; sItems += stor[p.k]; sParts.push(`${stor[p.k]}\u00d7 ${p.name.toLowerCase()}`); }
+    });
     if (sItems > 0) {
       sCost = Math.max(sCost, RATES.storageMin);
-      total += sCost;
-      lines.push(['Storage — billed on daily average', sCost]);
+      qTotal += sCost;
+      qLines.push([`Storage (${sParts.join(', ')})`, sCost]);
     }
-    $('qoLines').innerHTML = lines.length
-      ? lines.map(([t,c]) => `<div class="qo-line"><span>${t}</span><b>${fmt(c)}</b></div>`).join('')
-      : '<div class="qo-line"><span>Pick a service above and set your volumes.</span></div>';
-    $('qoTotal').innerHTML = fmt(total) + '<em>/mo</em>';
+    $id('qoLines').innerHTML = qLines.length
+      ? qLines.map(([t,c]) => `<div class="qo-line"><span>${t}</span><b>${fmt(c)}</b></div>`).join('')
+      : '<div class="qo-line"><span>Check a service and type your volumes.</span></div>';
+    $id('qoTotal').innerHTML = fmt(qTotal) + '<em>/mo</em>';
   }
   calc();
+
+  // ===== email me this quote =====
+  async function qSend(e){
+    e.preventDefault();
+    const btn = $id('qBtn');
+    btn.disabled = true; btn.textContent = 'Sending\u2026';
+    const name = $id('q-name').value.trim(), email = $id('q-email').value.trim(), brand = $id('q-brand').value.trim();
+    const breakdown = 'Instant quote built on the homepage calculator:\n'
+      + (qLines.length ? qLines.map(([t,c]) => `${t}: ${fmt(c)}/mo`).join('\n') + '\n' : '')
+      + `Estimated monthly total: ${fmt(qTotal)}/mo`;
+    const orders = $id('ck-pp').checked ? (+$id('pp-orders').value || 0) : 0;
+    try {
+      const C = window.SHIPBAY_CONFIG || {};
+      if (C.SUPABASE_URL && C.SUPABASE_ANON_KEY) {
+        const r = await fetch(C.SUPABASE_URL + '/rest/v1/leads', {
+          method: 'POST',
+          headers: { 'apikey': C.SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + C.SUPABASE_ANON_KEY,
+                     'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify({
+            name, email, brand, phone: '',
+            volume: orders ? String(orders) + ' orders/mo' : '',
+            notes: breakdown, source: 'Instant quote', stage: 'new',
+            activity: [{ t: 'Built an instant quote on the homepage (' + fmt(qTotal) + '/mo)', when: new Date().toISOString() }]
+          })
+        });
+        if (!r.ok) console.warn('quote capture failed:', r.status);
+      }
+    } catch (err) { console.warn('quote capture skipped:', err); }
+    const fd = new URLSearchParams();
+    fd.append('form-name','consultation');
+    Object.entries({name, email, brand, notes: breakdown}).forEach(([k,v]) => fd.append(k, v || ''));
+    fetch('/', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: fd.toString()}).catch(()=>{});
+    document.getElementById('qMail').innerHTML = '<div class="qm-ok">Sent. Your quote is on its way to ' + email.replace(/</g,'&lt;') + '.</div>';
+    return false;
+  }
+  window.qSend = qSend;
 
   // marquee
   const cities = ['Receiving','Storage','Pick + pack','Kitting','Returns','Subscription boxes','B2B + wholesale','FBA prep','Same-day quotes','Shopify','TikTok Shop','Amazon'];
