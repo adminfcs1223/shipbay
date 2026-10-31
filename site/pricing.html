@@ -31,7 +31,9 @@
   .btn-outline:hover{background:var(--ink);color:#fff}
   header{position:sticky;top:0;z-index:100;background:rgba(255,255,255,.92);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
   nav{display:flex;align-items:center;justify-content:space-between;height:76px}
-  .nav-logo img{height:38px;width:auto}
+  .nav-logo{display:grid;justify-items:start;gap:2px}
+  .nav-logo img{height:34px;width:auto}
+  .nav-logo small{font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2);padding-left:46px;line-height:1}
   .nav-links{display:flex;gap:34px;font-size:15px;font-weight:500;color:var(--muted)}
   .nav-links a:hover{color:var(--ink)}
   .nav-links a.on{color:var(--ink);font-weight:600}
@@ -195,7 +197,7 @@
 <header>
   <div class="wrap">
     <nav>
-      <a class="nav-logo" href="index.html"><img src="assets/brand/01-horizontal.svg" alt="shipbay."></a>
+      <a class="nav-logo" href="index.html"><img src="assets/brand/01-horizontal.svg" alt="shipbay."><small>Hillsborough, NJ</small></a>
       <div class="nav-links">
         <a href="facility.html">Facility</a>
         <a href="pricing.html" class="on">Pricing</a>

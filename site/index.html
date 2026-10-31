@@ -17,7 +17,7 @@
 <meta name="twitter:description" content="No order minimums. No monthly minimums. $0 setup. Same-day fulfillment from Hillsborough, NJ.">
 <meta name="twitter:image" content="https://www.shipbay3pl.com/assets/media/facility-racking.jpg">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"LocalBusiness","@id":"https://www.shipbay3pl.com/#business","name":"ShipBay 3PL","description":"DTC third-party logistics (3PL) fulfillment for small and growing brands. Pick & pack, storage, FBA prep, subscription box fulfillment, B2B and returns.","url":"https://www.shipbay3pl.com/","telephone":"+1-610-478-5432","email":"sales@shipbay3pl.com","image":"https://www.shipbay3pl.com/assets/media/facility-entrance.jpg","logo":"https://www.shipbay3pl.com/assets/brand/08-icon.svg","address":{"@type":"PostalAddress","streetAddress":"115 Stryker Ln, Bldg 4 Unit 10","addressLocality":"Hillsborough Township","addressRegion":"NJ","postalCode":"08844","addressCountry":"US"},"geo":{"@type":"GeoCoordinates","latitude":40.4912574,"longitude":-74.6447272},"openingHoursSpecification":[{"@type":"OpeningHoursSpecification","dayOfWeek":["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"],"opens":"09:00","closes":"18:00"}],"priceRange":"$$","sameAs":["https://maps.google.com/?cid=0x969c1f6d2aea32a8"]}
+{"@context":"https://schema.org","@type":"LocalBusiness","@id":"https://www.shipbay3pl.com/#business","name":"ShipBay 3PL","description":"DTC third-party logistics (3PL) fulfillment for small and growing brands. Pick & pack, storage, FBA prep, subscription box fulfillment, B2B and returns.","url":"https://www.shipbay3pl.com/","telephone":"+1-610-478-5432","email":"sales@shipbay3pl.com","image":"https://www.shipbay3pl.com/assets/media/facility-entrance.jpg","logo":"https://www.shipbay3pl.com/assets/brand/08-icon.svg","address":{"@type":"PostalAddress","streetAddress":"115 Stryker Ln","addressLocality":"Hillsborough Township","addressRegion":"NJ","postalCode":"08844","addressCountry":"US"},"geo":{"@type":"GeoCoordinates","latitude":40.4912574,"longitude":-74.6447272},"openingHoursSpecification":[{"@type":"OpeningHoursSpecification","dayOfWeek":["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"],"opens":"09:00","closes":"18:00"}],"priceRange":"$$","sameAs":["https://maps.google.com/?cid=0x969c1f6d2aea32a8"]}
 </script>
 <link rel="icon" type="image/svg+xml" href="assets/brand/08-icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -83,8 +83,11 @@
   header.scrolled .progress{opacity:1}
   nav{display:flex;align-items:center;justify-content:space-between;height:74px;transition:height .35s var(--ease)}
   header.scrolled nav{height:64px}
-  .nav-logo img{height:36px;width:auto;transition:height .35s var(--ease)}
-  header.scrolled .nav-logo img{height:32px}
+  .nav-logo{display:grid;justify-items:start;gap:2px}
+  .nav-logo img{height:34px;width:auto;transition:height .35s var(--ease)}
+  .nav-logo small{font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2);padding-left:46px;line-height:1;transition:opacity .3s}
+  header.scrolled .nav-logo img{height:30px}
+  header.scrolled .nav-logo small{padding-left:41px;font-size:10px}
   .nav-links{display:flex;gap:6px;font-size:14.5px;font-weight:600;color:var(--muted)}
   .nav-links a{padding:9px 14px;border-radius:99px;transition:background .25s,color .25s}
   .nav-links a:hover{color:var(--ink);background:var(--bg-soft)}
@@ -312,13 +315,30 @@
 
   /* ============ floor video ============ */
   .floorvid{padding:110px 0;border-top:1px solid var(--line);background:var(--bg-soft)}
-  .gal-grid{display:grid;grid-template-columns:1.15fr 1fr 1fr 1fr;gap:12px;align-items:stretch}
-  .gal-grid>*{border-radius:16px;overflow:hidden;position:relative;min-height:320px;max-height:440px;box-shadow:var(--shadow-1);transition:transform .7s var(--ease),box-shadow .7s var(--ease)}
-  .gal-grid>*:hover{transform:translateY(-6px) scale(1.01);box-shadow:var(--shadow-2)}
-  .gal-grid img,.gal-grid video{width:100%;height:100%;object-fit:cover;display:block;transition:transform 1.4s var(--ease)}
-  .gal-grid>*:hover img{transform:scale(1.06)}
-  .gal-grid .gv{background:#000}
-  .gal-grid .cap{position:absolute;left:12px;bottom:12px;background:rgba(15,27,42,.72);backdrop-filter:blur(8px);color:#fff;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:6px 10px;border-radius:8px}
+  .li-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;max-width:1040px;margin:0 auto}
+  .li-post{background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:var(--shadow-1);transition:transform .7s var(--ease),box-shadow .7s var(--ease)}
+  .li-post:hover{transform:translateY(-6px);box-shadow:var(--shadow-2)}
+  .li-head{display:flex;align-items:flex-start;gap:12px;padding:16px 18px 10px}
+  .li-av{width:46px;height:46px;border-radius:10px;flex:none}
+  .li-who{flex:1;min-width:0;line-height:1.3}
+  .li-who b{display:block;font-size:14.5px;letter-spacing:-.01em}
+  .li-who small{display:block;font-size:12px;color:var(--muted)}
+  .li-who .li-when{color:var(--muted-2);font-size:11.5px;margin-top:2px}
+  .li-in{width:22px;height:22px;color:#0A66C2;flex:none;margin-top:2px}
+  .li-text{padding:0 18px 12px;font-size:14.5px;line-height:1.5;color:var(--ink)}
+  .li-media{position:relative;background:#000;aspect-ratio:1/1}
+  .li-media video{width:100%;height:100%;object-fit:cover;display:block}
+  .li-foot{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 18px 12px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+  .li-react{display:flex;align-items:center;gap:6px;font-weight:600}
+  .li-react i{width:16px;height:16px;border-radius:50%;border:2px solid #fff;margin-right:-8px}
+  .li-react i.r1{background:#378FE9}.li-react i.r2{background:#DF704D}.li-react i.r3{background:#6DAE4F;margin-right:4px}
+  .li-acts{display:flex;gap:16px;font-weight:700;color:var(--muted)}
+  .photo-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;max-width:1040px;margin:14px auto 0}
+  .photo-strip>div{position:relative;border-radius:14px;overflow:hidden;height:200px;box-shadow:var(--shadow-1);transition:transform .7s var(--ease),box-shadow .7s var(--ease)}
+  .photo-strip>div:hover{transform:translateY(-4px);box-shadow:var(--shadow-2)}
+  .photo-strip img{width:100%;height:100%;object-fit:cover;transition:transform 1.4s var(--ease)}
+  .photo-strip>div:hover img{transform:scale(1.06)}
+  .photo-strip .cap{position:absolute;left:12px;bottom:12px;background:rgba(15,27,42,.72);backdrop-filter:blur(8px);color:#fff;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:6px 10px;border-radius:8px}
   .gal-cap{text-align:center;margin-top:18px;font-size:11.5px;font-weight:700;letter-spacing:.1em;color:var(--muted-2);text-transform:uppercase}
 
   /* ============ account manager ============ */
@@ -399,7 +419,7 @@
     .kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
     .rail-steps{grid-template-columns:1fr 1fr;gap:38px}
     .rail-line{display:none}
-    .gal-grid{grid-template-columns:1fr 1fr}
+    .li-grid{grid-template-columns:1fr}
     .cta-card{padding:48px 28px}
     .foot-cols{grid-template-columns:1fr 1fr}
     .toast{display:none}
@@ -409,11 +429,9 @@
   @media(max-width:560px){
     .wrap{padding:0 20px}
     .qr-in,.qmail .qm-grid{grid-template-columns:1fr}
-    .gal-grid,.kpi-grid{grid-template-columns:1fr}
+    .kpi-grid,.photo-strip{grid-template-columns:1fr}
     .hv-proof{grid-template-columns:repeat(3,1fr);gap:12px}
     .hv-proof b{font-size:24px}
-    .hv-kick .nm{display:none}
-    .hv-kick{font-size:11px}
     .hv-ctas .btn{width:100%}
     .pal-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
     .hero h1 .line-mask>span{white-space:normal}
@@ -432,7 +450,7 @@
 <header id="hdr">
   <div class="wrap">
     <nav>
-      <a class="nav-logo" href="index.html" aria-label="shipbay home"><img src="assets/brand/01-horizontal.svg" alt="shipbay."></a>
+      <a class="nav-logo" href="index.html" aria-label="shipbay home"><img src="assets/brand/01-horizontal.svg" alt="shipbay."><small>Hillsborough, NJ</small></a>
       <div class="nav-links">
         <a href="facility.html">Facility</a>
         <a href="pricing.html">Pricing</a>
@@ -476,7 +494,6 @@
   <img class="wm" src="assets/brand/13-mono-horizontal-white.svg" alt="" data-depth="0.03">
   <div class="wrap hero-grid">
     <div class="hv-left">
-      <div class="hv-kick line-mask"><span style="--d:0ms"><i></i><span class="nm">115 Stryker Ln &middot; </span>Hillsborough, NJ &middot; Live</span></div>
       <h1>
         <span class="line-mask"><span style="--d:80ms">A DTC 3PL built</span></span>
         <span class="line-mask"><span style="--d:180ms">for small brands.</span></span>
@@ -697,18 +714,48 @@
       <span class="eyebrow" data-reveal>Live from the floor</span>
       <h2 data-reveal style="--i:1">See it moving<span class="dot">.</span></h2>
     </div>
-    <div class="gal-grid">
-      <div class="gv" data-reveal="scale" style="--i:1">
-        <video autoplay muted loop playsinline preload="metadata" poster="assets/media/facility-floor-poster.jpg" aria-label="Inside the ShipBay facility in Hillsborough, NJ">
-          <source src="assets/media/facility-floor.mp4" type="video/mp4">
-        </video>
-        <span class="cap">Live floor</span>
-      </div>
-      <div data-reveal="scale" style="--i:2"><img src="assets/media/facility-racking.jpg" alt="ShipBay 3PL warehouse floor — pallet racking and pack stations, Hillsborough NJ" loading="lazy"><span class="cap">Racking</span></div>
-      <div data-reveal="scale" style="--i:3"><img src="assets/media/facility-pallets.jpg" alt="Client inventory received, wrapped and staged at ShipBay 3PL" loading="lazy"><span class="cap">Receiving</span></div>
-      <div data-reveal="scale" style="--i:4"><img src="assets/media/facility-entrance.jpg" alt="ShipBay 3PL entrance — 115 Stryker Ln, Bldg 4 Unit 10, Hillsborough Township NJ" loading="lazy"><span class="cap">115 Stryker Ln</span></div>
+    <div class="li-grid">
+      <article class="li-post" data-reveal="scale" style="--i:1">
+        <div class="li-head">
+          <img class="li-av" src="assets/brand/08-icon.svg" alt="">
+          <div class="li-who"><b>ShipBay 3PL</b><small>DTC fulfillment &middot; Hillsborough, NJ</small><small class="li-when">Posted on LinkedIn</small></div>
+          <svg class="li-in" viewBox="0 0 24 24" aria-label="LinkedIn"><path fill="currentColor" d="M20.45 20.45h-3.56v-5.57c0-1.33-.03-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.94v5.67H9.34V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.07 2.07 0 1 1 0-4.13 2.07 2.07 0 0 1 0 4.13zM7.12 20.45H3.55V9h3.57v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z"/></svg>
+        </div>
+        <p class="li-text">Same-day DTC fulfillment from Hillsborough, NJ. Orders in by 2pm ship today &mdash; $0 onboarding, $0 hidden fees.</p>
+        <div class="li-media">
+          <video autoplay muted loop playsinline preload="metadata" poster="assets/media/facility-floor-poster.jpg" aria-label="Inside the ShipBay facility — picking and packing">
+            <source src="assets/media/facility-floor.mp4" type="video/mp4">
+          </video>
+        </div>
+        <div class="li-foot">
+          <span class="li-react"><i class="r1"></i><i class="r2"></i><i class="r3"></i>Pick &amp; pack, live</span>
+          <span class="li-acts"><span>Like</span><span>Comment</span><span>Repost</span><span>Send</span></span>
+        </div>
+      </article>
+      <article class="li-post" data-reveal="scale" style="--i:2">
+        <div class="li-head">
+          <img class="li-av" src="assets/brand/08-icon.svg" alt="">
+          <div class="li-who"><b>ShipBay 3PL</b><small>DTC fulfillment &middot; Hillsborough, NJ</small><small class="li-when">Posted on LinkedIn</small></div>
+          <svg class="li-in" viewBox="0 0 24 24" aria-label="LinkedIn"><path fill="currentColor" d="M20.45 20.45h-3.56v-5.57c0-1.33-.03-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.94v5.67H9.34V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.07 2.07 0 1 1 0-4.13 2.07 2.07 0 0 1 0 4.13zM7.12 20.45H3.55V9h3.57v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z"/></svg>
+        </div>
+        <p class="li-text">Receiving day. Off the truck, counted and verified, live in your dashboard before the doors close.</p>
+        <div class="li-media">
+          <video autoplay muted loop playsinline preload="metadata" poster="assets/media/facility-floor-2-poster.jpg" aria-label="Receiving inbound inventory at the ShipBay dock">
+            <source src="assets/media/facility-floor-2.mp4" type="video/mp4">
+          </video>
+        </div>
+        <div class="li-foot">
+          <span class="li-react"><i class="r1"></i><i class="r2"></i><i class="r3"></i>Receiving, dock to stock</span>
+          <span class="li-acts"><span>Like</span><span>Comment</span><span>Repost</span><span>Send</span></span>
+        </div>
+      </article>
     </div>
-    <div class="gal-cap" data-reveal>115 Stryker Ln, Bldg 4 Unit 10 &middot; Hillsborough Township, NJ &middot; as seen on our Google listing</div>
+    <div class="photo-strip">
+      <div data-reveal="scale" style="--i:1"><img src="assets/media/facility-racking.jpg" alt="ShipBay 3PL warehouse floor — pallet racking and pack stations, Hillsborough NJ" loading="lazy"><span class="cap">Racking</span></div>
+      <div data-reveal="scale" style="--i:2"><img src="assets/media/facility-pallets.jpg" alt="Client inventory received, wrapped and staged at ShipBay 3PL" loading="lazy"><span class="cap">Receiving</span></div>
+      <div data-reveal="scale" style="--i:3"><img src="assets/media/facility-entrance.jpg" alt="ShipBay 3PL entrance — 115 Stryker Ln, Hillsborough Township NJ" loading="lazy"><span class="cap">The entrance</span></div>
+    </div>
+    <div class="gal-cap" data-reveal>115 Stryker Ln &middot; Hillsborough Township, NJ &middot; as seen on our Google listing</div>
   </div>
 </section>
 
@@ -792,7 +839,7 @@
   <div class="wrap">
     <div class="foot-top">
       <div class="foot-slogan">Fulfillment that<br>grows with you<span class="dot">.</span>
-        <small>115 Stryker Ln, Bldg 4 Unit 10, Hillsborough Township, NJ 08844</small>
+        <small>115 Stryker Ln, Hillsborough Township, NJ 08844</small>
       </div>
       <a class="btn btn-orange" href="book.html">Book a call</a>
     </div>
@@ -820,7 +867,7 @@
       </div>
       <div>
         <h4>The warehouse</h4>
-        <a href="facility.html">115 Stryker Ln, Bldg 4 Unit 10</a>
+        <a href="facility.html">115 Stryker Ln</a>
         <a href="facility.html">Hillsborough Township, NJ 08844</a>
         <a href="facility.html">Mon&ndash;Sat &middot; 9&ndash;6</a>
       </div>

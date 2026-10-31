@@ -31,7 +31,9 @@
   .btn-outline:hover{background:var(--ink);color:#fff}
   header{position:sticky;top:0;z-index:100;background:rgba(255,255,255,.92);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
   nav{display:flex;align-items:center;justify-content:space-between;height:76px}
-  .nav-logo img{height:38px;width:auto}
+  .nav-logo{display:grid;justify-items:start;gap:2px}
+  .nav-logo img{height:34px;width:auto}
+  .nav-logo small{font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2);padding-left:46px;line-height:1}
   .nav-links{display:flex;gap:34px;font-size:15px;font-weight:500;color:var(--muted)}
   .nav-links a:hover{color:var(--ink)}
   .nav-links a.on{color:var(--ink);font-weight:600}
@@ -176,7 +178,7 @@
 <header>
   <div class="wrap">
     <nav>
-      <a class="nav-logo" href="index.html"><img src="assets/brand/01-horizontal.svg" alt="shipbay."></a>
+      <a class="nav-logo" href="index.html"><img src="assets/brand/01-horizontal.svg" alt="shipbay."><small>Hillsborough, NJ</small></a>
       <div class="nav-links">
         <a href="facility.html" class="on">Facility</a>
         <a href="pricing.html">Pricing</a>
@@ -203,11 +205,11 @@
     <div class="emb-grid">
       <div class="emb-card">
         <iframe src="https://www.google.com/maps/embed?pb=!4v1789359596696!6m8!1m7!1s9WXCUxLJyzQwf4sf5MAQbA!2m2!1d40.49094579267823!2d-74.64481130666128!3f11.836043!4f0!5f0.7820865974627469" loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" title="Google Street View — 115 Stryker Ln, Hillsborough Township NJ"></iframe>
-        <div class="cap"><span><b>Street view</b> — Building 4 is inside the complex, Unit 10</span><a href="https://www.google.com/maps/dir/?api=1&destination=115+Stryker+Ln,+Hillsborough+Township,+NJ+08844" target="_blank" rel="noopener">Get directions →</a></div>
+        <div class="cap"><span><b>Street view</b> — Building 4 is inside the complex</span><a href="https://www.google.com/maps/dir/?api=1&destination=115+Stryker+Ln,+Hillsborough+Township,+NJ+08844" target="_blank" rel="noopener">Get directions →</a></div>
       </div>
       <div class="addr-card">
         <span class="lbl">FLAGSHIP &mdash; WAREHOUSE &amp; OFFICE</span>
-        <div class="adr">115 Stryker Ln<br>Building 4 · Unit 10<br>Hillsborough Township, NJ <em>08844</em></div>
+        <div class="adr">115 Stryker Ln<br>Building 4<br>Hillsborough Township, NJ <em>08844</em></div>
         <div class="addr-row"><span>County</span><b>Somerset, Central NJ</b></div>
         <div class="addr-row"><span>NYC / Philadelphia</span><b>~1 hr / ~1 hr drive</b></div>
         <div class="addr-row"><span>Port Newark–Elizabeth</span><b>~45 min for inbound containers</b></div>
