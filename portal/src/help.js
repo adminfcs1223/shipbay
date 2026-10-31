@@ -76,4 +76,9 @@ export const HELP = {
       'Strategies: one card per play with its live numbers and a log. Add a note when something changes.',
     ],
   },
+  salesdesk: {
+    title: 'Sales',
+    what: 'Your booked calls and the leads handed to you.',
+    steps: ['Booked calls come from Calendly; the join link is on the row. After the call, pick how it went.', 'Your leads: change the stage, log a call outcome, keep notes and a follow-up date. Derek hands leads over from the owner area.'],
+  },
 };

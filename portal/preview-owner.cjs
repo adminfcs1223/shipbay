@@ -48,7 +48,13 @@ const strategies = [
   { id: uid(), name: 'Lead-gen agency (Alex Makowski)', channel: 'agency', lists: [], status: 'paused', hypothesis: 'Outsourced appointment setting.', target: 'Booked calls delivered vs the $7,500 paid', monthly_cost: 0, started: day(59), notes: '', log: [{ at: iso(5), note: 'No leads logged yet — chase for a status report.' }], created_at: iso(59), updated_at: iso(5) },
 ];
 
-const TABLES = { fin_transactions: tx, fin_qbo_reports: [], fin_settings: [{ key: 'cash_on_hand', value: { amount: 0 } }], sales_leads: leads, sales_sources: sources, sales_email_sends: sends, sales_calls: calls, sales_call_sessions: sessions, sales_strategies: strategies, profiles: [{ id: UID, email: 'derekh@shipbay3pl.com', full_name: 'Derek Harrison', role: 'shipbay_admin', is_owner: true, org_id: null, active: true }], orgs: [] };
+const meetings = [
+  { id: uid(), external_id: 'ev1', source: 'calendly', name: 'ShipBay intro call', starts_at: iso(-1.2), ends_at: iso(-1.18), status: 'active', invitee_name: 'David Shamouelian', invitee_email: 'david@livecostabrazil.com', location: 'https://meet.google.com/abc-defg-hij', lead_id: leads[11].id, assigned_to: UID },
+  { id: uid(), external_id: 'ev2', source: 'calendly', name: 'ShipBay intro call', starts_at: iso(-3), ends_at: iso(-2.98), status: 'active', invitee_name: 'Mark Labbe', invitee_email: 'euship@attakpik.com', location: 'https://meet.google.com/xyz', lead_id: leads[10].id, assigned_to: '740c00d8-9056-49de-9649-4f23f01ffda5' },
+  { id: uid(), external_id: 'ev3', source: 'calendly', name: 'ShipBay intro call', starts_at: iso(2), ends_at: iso(1.98), status: 'active', invitee_name: 'Jordan Lee', invitee_email: 'hello@oakolive.com', location: null, lead_id: null, assigned_to: UID },
+];
+leads[10].answered_at = iso(0.5); leads[10].assigned_to = '740c00d8-9056-49de-9649-4f23f01ffda5'; leads[11].assigned_to = UID; leads[7].assigned_to = UID;
+const TABLES = { fin_transactions: tx, fin_qbo_reports: [], fin_settings: [{ key: 'cash_on_hand', value: { amount: 0 } }], sales_leads: leads, sales_sources: sources, sales_email_sends: sends, sales_calls: calls, sales_call_sessions: sessions, sales_strategies: strategies, profiles: [{ id: UID, email: 'derekh@shipbay3pl.com', full_name: 'Derek Harrison', role: 'shipbay_admin', is_owner: true, is_sales: true, org_id: null, active: true }, { id: '740c00d8-9056-49de-9649-4f23f01ffda5', email: 'xavierd@shipbay3pl.com', full_name: 'Xavier Delmonte', role: 'shipbay_admin', is_sales: true, active: true }], orgs: [], sales_meetings: meetings };
 
 (async () => {
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1243/chrome-linux64/chrome' }).catch(() => chromium.launch());
@@ -69,7 +75,8 @@ const TABLES = { fin_transactions: tx, fin_qbo_reports: [], fin_settings: [{ key
   await ctx.route(/\/functions\/v1\/owner/, async (route) => {
     const b = route.request().postDataJSON?.() || {};
     const status = { passphrase_set: true, unlocked: true, qbo: { connected_at: iso(0.2), company_name: 'ShipBay 3PL', last_sync_at: iso(0.1), last_error: null }, smartlead_key_set: true, smartlead_campaigns: '4039101', qbo_keys_set: true, smartlead_last_sync: { at: iso(0.3) } };
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b.action === 'status' ? status : { ok: true }) });
+    const campaign = { ok: true, campaigns: [{ id: '4039101', name: 'ShipBay — self-ship NJ brands', status: 'ACTIVE', daily_limit: 150, sent_today: 68, replied_today: 1, analytics: { sent: 525, unique_sent: 405, replies: 8, bounces: 7, total_leads: 551, completed: 12, in_progress: 380, not_started: 150, stopped: 9 } }] };
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b.action === 'status' ? { ...status, calendly_set: true, calendly_last_sync: { at: iso(0.1) } } : b.action === 'smartlead_campaign' ? campaign : { ok: true }) });
   });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('PAGE ERROR', e.message));
@@ -79,12 +86,14 @@ const TABLES = { fin_transactions: tx, fin_qbo_reports: [], fin_settings: [{ key
   fs.mkdirSync('shots', { recursive: true });
   await page.screenshot({ path: 'shots/01-financials.png', fullPage: true });
   await page.getByRole('button', { name: '+ Add expense' }).click(); await page.waitForTimeout(300); await page.screenshot({ path: 'shots/02-add-expense.png' }); await page.keyboard.press('Escape'); await page.getByRole('button', { name: 'Cancel' }).click().catch(() => {});
-  await page.getByRole('button', { name: 'Sales', exact: true }).click(); await page.waitForTimeout(1200); await page.screenshot({ path: 'shots/03-sales-overview.png', fullPage: true });
+  await page.locator('.ownertabs .tabs button', { hasText: /^Sales$/ }).click(); await page.waitForTimeout(1200); await page.screenshot({ path: 'shots/03-sales-overview.png', fullPage: true });
   await page.getByRole('button', { name: 'All leads', exact: true }).click(); await page.waitForTimeout(600); await page.screenshot({ path: 'shots/04-sales-leads.png' });
   await page.locator('.ownertabs .tabs button', { hasText: /^Email/ }).click(); await page.waitForTimeout(1000); await page.screenshot({ path: 'shots/05-sales-email.png', fullPage: true });
   await page.getByRole('button', { name: 'Calls', exact: true }).click(); await page.waitForTimeout(1000); await page.screenshot({ path: 'shots/06-sales-calls.png', fullPage: true });
+  await page.getByRole('button', { name: 'Calendar' }).click(); await page.waitForTimeout(800); await page.screenshot({ path: 'shots/06b-sales-calendar.png', fullPage: true });
   await page.getByRole('button', { name: 'Third party' }).click(); await page.waitForTimeout(600); await page.screenshot({ path: 'shots/07-sales-third.png', fullPage: true });
   await page.getByRole('button', { name: 'Strategies', exact: true }).click(); await page.waitForTimeout(1200); await page.screenshot({ path: 'shots/08-strategies.png', fullPage: true });
   await page.getByRole('button', { name: 'Settings', exact: true }).click(); await page.waitForTimeout(600); await page.screenshot({ path: 'shots/09-settings.png', fullPage: true });
+  await page.locator('.sidenav .navitem', { hasText: /^Sales$/ }).click(); await page.waitForTimeout(1200); await page.screenshot({ path: 'shots/10-salesdesk.png', fullPage: true });
   await browser.close(); srv.close(); console.log('done');
 })();

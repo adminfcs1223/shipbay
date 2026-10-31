@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../lib';
 import { ownerFn, fetchAll, money, pct, num, ago, mmss, hhmm, STAGES, stageLabel, stageClass, parseCsv, guessColumns } from './util';
 
-const SUB = [['overview', 'Overview'], ['master', 'All leads'], ['email', 'Email'], ['calls', 'Calls'], ['third', 'Third party']];
+const SUB = [['overview', 'Overview'], ['master', 'All leads'], ['email', 'Email'], ['calls', 'Calls'], ['calendar', 'Calendar'], ['third', 'Third party']];
 // Storeleads list codes → what they are (hover text)
 export const LIST_NAMES = { A1: 'Self-ship brands · NJ metro', A2: 'Already on a 3PL · NJ metro', A3: 'Self-ship brands · Northeast', A4: 'Shopify Plus upgrades', B1: 'Founder-run · NJ metro', C1: 'Amazon sellers · Northeast', C2: 'Q4 overflow', X0: 'Control group' };
 export const listName = (code) => (code && LIST_NAMES[code] ? `${code} · ${LIST_NAMES[code]}` : code || '—');
@@ -30,6 +30,7 @@ export default function Sales({ me, status, refreshStatus }) {
       {sub === 'master' && <Master leads={leads} sources={sources} reload={load} say={say} />}
       {sub === 'email' && <Email leads={leads} status={status} reload={load} refreshStatus={refreshStatus} say={say} />}
       {sub === 'calls' && <Calls me={me} leads={leads} reload={load} say={say} />}
+      {sub === 'calendar' && <Calendar me={me} leads={leads} status={status} reload={load} say={say} refreshStatus={refreshStatus} />}
       {sub === 'third' && <Third leads={leads} sources={sources} reload={load} say={say} />}
     </>
   );
@@ -47,14 +48,17 @@ function Overview({ leads, sources, counts, go }) {
   // "reached" = at this stage or further along
   const order = ['new', 'contacted', 'replied', 'call_booked', 'quoted', 'signed']; const reached = (k) => leads.filter((l) => order.indexOf(l.stage) >= order.indexOf(k) && l.stage !== 'lost' && l.stage !== 'dnc').length + (k === 'new' ? leads.filter((l) => l.stage === 'lost' || l.stage === 'dnc').length : 0);
   const by = (key, labelOf) => { const g = {}; for (const l of leads) { const k = key(l) || '—'; g[k] = g[k] || { k, label: labelOf(k), leads: 0, contacted: 0, replied: 0, booked: 0, signed: 0 }; g[k].leads++; if (l.stage !== 'new') g[k].contacted++; if (['replied', 'call_booked', 'quoted', 'signed'].includes(l.stage)) g[k].replied++; if (['call_booked', 'quoted', 'signed'].includes(l.stage)) g[k].booked++; if (l.stage === 'signed') g[k].signed++; } return Object.values(g).sort((a, b) => b.leads - a.leads); };
-  const byChannel = by((l) => l.source, (k) => srcLabel(sources, k)); const byList = by((l) => l.filter_id, (k) => listName(k));
-  const attention = leads.filter((l) => l.stage === 'replied' || l.stage === 'call_booked' || (l.next_action_at && new Date(l.next_action_at) <= new Date() && l.stage !== 'lost' && l.stage !== 'dnc' && l.attempts > 0)).sort((a, b) => ({ replied: 0, call_booked: 1 }[a.stage] ?? 2) - ({ replied: 0, call_booked: 1 }[b.stage] ?? 2) || (a.next_action_at || '').localeCompare(b.next_action_at || '')).slice(0, 12);
+  const byChannelRaw = by((l) => l.source, (k) => srcLabel(sources, k));
+  const byChannel = [...byChannelRaw, ...sources.filter((sc) => !byChannelRaw.some((r) => r.k === sc.key)).map((sc) => ({ k: sc.key, label: sc.label, leads: 0, contacted: 0, replied: 0, booked: 0, signed: 0 }))];
+  const byList = by((l) => l.filter_id, (k) => listName(k));
+  const waiting = leads.filter((l) => l.stage === 'replied' && !l.answered_at).length;
+  const attention = leads.filter((l) => (l.stage === 'replied' && !l.answered_at) || l.stage === 'call_booked' || (l.next_action_at && new Date(l.next_action_at) <= new Date() && l.stage !== 'lost' && l.stage !== 'dnc' && l.attempts > 0)).sort((a, b) => ({ replied: 0, call_booked: 1 }[a.stage] ?? 2) - ({ replied: 0, call_booked: 1 }[b.stage] ?? 2) || (a.next_action_at || '').localeCompare(b.next_action_at || '')).slice(0, 12);
   const wk = { dials: calls.filter((c) => new Date(c.started_at) > week).length, booked: calls.filter((c) => c.outcome === 'booked' && new Date(c.started_at) > week).length, emails: sends.filter((e) => new Date(e.sent_at) > week).length, replies: sends.filter((e) => e.replied && new Date(e.sent_at) > week).length };
   return (
     <>
       <div className="kpis fin">
         <div className="tile"><small>Leads in the system</small><b>{num(counts.total)}</b><span>{num(counts.new || 0)} not touched yet</span></div>
-        <div className="tile warn"><small>Waiting on you</small><b className="hot">{num(counts.replied || 0)}</b><span>replied, no answer from us yet</span></div>
+        <div className="tile warn"><small>Waiting on you</small><b className="hot">{num(waiting)}</b><span>replied, no answer from us yet</span></div>
         <div className="tile ok"><small>Calls booked</small><b>{num(counts.call_booked || 0)}</b><span>{num(counts.quoted || 0)} quoted · {num(counts.signed || 0)} signed</span></div>
         <div className="tile"><small>This week</small><b>{num(wk.dials)} dials · {num(wk.emails)} emails</b><span>{num(wk.replies)} replies · {num(wk.booked)} booked</span></div>
       </div>
@@ -101,10 +105,17 @@ function ChannelTable({ rows, mono }) {
 
 /* =================== Master =================== */
 function Master({ leads, sources, reload, say }) {
-  const [q, setQ] = useState(''); const [src, setSrc] = useState(''); const [stage, setStage] = useState(''); const [list, setList] = useState(''); const [phoneOnly, setPhoneOnly] = useState(false);
+  const [q, setQ] = useState(''); const [src, setSrc] = useState(''); const [stage, setStage] = useState(''); const [list, setList] = useState(''); const [phoneOnly, setPhoneOnly] = useState(false); const [showOut, setShowOut] = useState(false); const [pushing, setPushing] = useState(false);
   const [open, setOpen] = useState(null); const [adding, setAdding] = useState(false); const [importing, setImporting] = useState(false);
-  const rows = useMemo(() => leads.filter((l) => (!src || l.source === src) && (!stage || l.stage === stage) && (!list || l.filter_id === list) && (!phoneOnly || l.phone)
-    && (!q || [l.company, l.domain, l.contact_name, l.email, l.phone, l.city, l.state, l.notes].filter(Boolean).some((s) => s.toLowerCase().includes(q.toLowerCase())))), [leads, q, src, stage, list, phoneOnly]);
+  const rows = useMemo(() => leads.filter((l) => (!src || l.source === src) && (stage ? l.stage === stage : (showOut || (l.stage !== 'dnc' && l.stage !== 'lost'))) && (!list || l.filter_id === list) && (!phoneOnly || l.phone)
+    && (!q || [l.company, l.domain, l.contact_name, l.email, l.phone, l.city, l.state, l.notes].filter(Boolean).some((s) => s.toLowerCase().includes(q.toLowerCase())))), [leads, q, src, stage, list, phoneOnly, showOut]);
+  const pushable = rows.filter((l) => l.email && !l.in_email && !['dnc', 'lost', 'signed'].includes(l.stage));
+  const pushToCampaign = async () => {
+    const ids = pushable.slice(0, 500).map((l) => l.id);
+    if (!window.confirm(`Add ${ids.length} lead${ids.length === 1 ? '' : 's'} with an email to the Smartlead campaign? They start getting the sequence on the next send window.`)) return;
+    setPushing(true); const r = await ownerFn({ action: 'smartlead_add_leads', lead_ids: ids }); setPushing(false);
+    say(r, r.error ? null : `Added ${r.added} to the campaign${r.dup ? ` · ${r.dup} already there` : ''}${r.blocked ? ` · ${r.blocked} blocked/unsubscribed` : ''}.`); reload();
+  };
   const order = { replied: 0, call_booked: 1, quoted: 2, contacted: 3, new: 4, signed: 5, lost: 6, dnc: 7 };
   const sorted = useMemo(() => [...rows].sort((a, b) => (order[a.stage] ?? 9) - (order[b.stage] ?? 9) || (b.last_touch_at || '').localeCompare(a.last_touch_at || '') || (b.est_sales_usd || 0) - (a.est_sales_usd || 0)), [rows]);
   return (
@@ -115,7 +126,9 @@ function Master({ leads, sources, reload, say }) {
         <select value={stage} onChange={(e) => setStage(e.target.value)}><option value="">All stages</option>{STAGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
         <select value={list} onChange={(e) => setList(e.target.value)}><option value="">All lists</option>{lists(leads).map((f) => <option key={f} value={f}>{listName(f)}</option>)}</select>
         <label className="chk sm"><input type="checkbox" checked={phoneOnly} onChange={(e) => setPhoneOnly(e.target.checked)} /> has phone</label>
+        <label className="chk sm"><input type="checkbox" checked={showOut} onChange={(e) => setShowOut(e.target.checked)} /> show lost / do-not-contact</label>
         <div className="spacer" />
+        {pushable.length > 0 && <button className="btn-sm" disabled={pushing} onClick={pushToCampaign}>{pushing ? 'Adding…' : `Add ${num(Math.min(500, pushable.length))} to email campaign`}</button>}
         <button className="btn-sm" onClick={() => setImporting(true)}>Import CSV</button>
         <button className="btn-sm primary" onClick={() => setAdding(true)}>+ Add lead</button>
       </div>
@@ -147,8 +160,9 @@ function Master({ leads, sources, reload, say }) {
 
 /* ---------- one lead: edit, history ---------- */
 function LeadDrawer({ lead, sources, onClose, reload, say }) {
-  const [f, setF] = useState(lead); const [calls, setCalls] = useState([]); const [sends, setSends] = useState([]); const [busy, setBusy] = useState(false);
+  const [f, setF] = useState(lead); const [calls, setCalls] = useState([]); const [sends, setSends] = useState([]); const [busy, setBusy] = useState(false); const [people, setPeople] = useState([]);
   useEffect(() => { setF(lead); }, [lead.id]);
+  useEffect(() => { supabase.from('profiles').select('id, full_name, email').like('role', 'shipbay%').eq('active', true).then(({ data }) => setPeople(data || [])); }, []);
   useEffect(() => { (async () => {
     const [c, s] = await Promise.all([supabase.from('sales_calls').select('*').eq('lead_id', lead.id).order('started_at', { ascending: false }), supabase.from('sales_email_sends').select('*').eq('lead_id', lead.id).order('sent_at', { ascending: false })]);
     setCalls(c.data || []); setSends(s.data || []);
@@ -156,9 +170,11 @@ function LeadDrawer({ lead, sources, onClose, reload, say }) {
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const save = async () => {
     setBusy(true);
-    const patch = { company: f.company, domain: f.domain, contact_name: f.contact_name, email: f.email, phone: f.phone, title: f.title, city: f.city, state: f.state, est_sales_usd: f.est_sales_usd ? Number(f.est_sales_usd) : null, stage: f.stage, source: f.source, filter_id: f.filter_id, notes: f.notes, next_action_at: f.next_action_at ? new Date(f.next_action_at).toISOString() : null, in_calls: f.in_calls, in_email: f.in_email };
+    const patch = { company: f.company, domain: f.domain, contact_name: f.contact_name, email: f.email, phone: f.phone, title: f.title, city: f.city, state: f.state, est_sales_usd: f.est_sales_usd ? Number(f.est_sales_usd) : null, stage: f.stage, source: f.source, filter_id: f.filter_id, notes: f.notes, next_action_at: f.next_action_at ? new Date(f.next_action_at).toISOString() : null, in_calls: f.in_calls, in_email: f.in_email, assigned_to: f.assigned_to || null, answered_at: f.answered_at || null };
     const { error } = await supabase.from('sales_leads').update(patch).eq('id', lead.id); setBusy(false);
-    if (error) return say({ error: error.message }); say(null, 'Saved.'); reload();
+    if (error) return say({ error: error.message });
+    if (f.stage === 'dnc' && lead.stage !== 'dnc' && f.email) { const r = await ownerFn({ action: 'smartlead_stop_lead', email: f.email }); if (r.error) say(r); }
+    say(null, f.stage === 'dnc' ? 'Saved — removed from the email campaign and the call queue.' : 'Saved.'); reload();
   };
   const del = async () => { if (!window.confirm(`Delete ${lead.company || lead.email}? Call and email history stays but loses its link.`)) return; await supabase.from('sales_leads').delete().eq('id', lead.id); reload(); onClose(); };
   return (
@@ -169,6 +185,8 @@ function LeadDrawer({ lead, sources, onClose, reload, say }) {
         <label>Channel<select value={f.source} onChange={set('source')}>{sources.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></label>
         <label>List / filter<input value={f.filter_id || ''} onChange={set('filter_id')} /></label>
         <label>Next action<input type="datetime-local" value={toLocalInput(f.next_action_at)} onChange={set('next_action_at')} /></label>
+        <label>Handled by<select value={f.assigned_to || ''} onChange={set('assigned_to')}><option value="">— nobody —</option>{people.map((p) => <option key={p.id} value={p.id}>{p.full_name || p.email}</option>)}</select></label>
+        {f.stage === 'replied' && <label className="chk"><input type="checkbox" checked={!!f.answered_at} onChange={(e) => setF({ ...f, answered_at: e.target.checked ? new Date().toISOString() : null })} /> we answered their reply</label>}
         <label>Company<input value={f.company || ''} onChange={set('company')} /></label>
         <label>Domain<input value={f.domain || ''} onChange={set('domain')} /></label>
         <label>Contact<input value={f.contact_name || ''} onChange={set('contact_name')} /></label>
@@ -284,8 +302,15 @@ function Email({ leads, status, reload, refreshStatus, say }) {
   const load = async () => setSends(await fetchAll('sales_email_sends', '*', (q) => q.order('sent_at', { ascending: false })));
   useEffect(() => { load(); if (!status.smartlead_last_sync && status.smartlead_key_set) sync(); }, []);   // first visit: pull the campaign automatically
   const sync = async () => { setBusy(true); const r = await ownerFn({ action: 'smartlead_sync' }); setBusy(false); say(r, r.error ? null : 'Smartlead synced.'); load(); reload(); refreshStatus(); };
+  const [camp, setCamp] = useState(null); const [cbusy, setCbusy] = useState(false); const [assignees, setAssignees] = useState([]);
+  const loadCamp = async () => { const r = await ownerFn({ action: 'smartlead_campaign' }); if (!r.error) setCamp(r.campaigns || []); };
+  useEffect(() => { loadCamp(); supabase.from('profiles').select('id, full_name, email').like('role', 'shipbay%').eq('active', true).then(({ data }) => setAssignees(data || [])); }, []);
+  const setCampStatus = async (c, status) => { if (status !== 'START' && !window.confirm(`${status === 'PAUSED' ? 'Pause' : 'Stop'} the campaign “${c.name}”? Nothing more goes out until you resume.`)) return; setCbusy(true); const r = await ownerFn({ action: 'smartlead_status', campaign_id: c.id, status }); setCbusy(false); say(r, r.error ? null : status === 'START' ? 'Campaign running.' : status === 'PAUSED' ? 'Campaign paused.' : 'Campaign stopped.'); loadCamp(); };
+  const markAnswered = async (s, on) => { if (!s.lead_id) return; await supabase.from('sales_leads').update({ answered_at: on ? new Date().toISOString() : null, last_touch_at: new Date().toISOString() }).eq('id', s.lead_id); reload(); };
+  const assign = async (s, uid) => { if (!s.lead_id) return; await supabase.from('sales_leads').update({ assigned_to: uid || null }).eq('id', s.lead_id); reload(); };
   const setReply = async (s, reply_type) => {
     await supabase.from('sales_email_sends').update({ reply_type }).eq('id', s.id);
+    if (reply_type === 'Negative') { const r = await ownerFn({ action: 'smartlead_stop_lead', email: s.lead_email }); say(r, r.error ? null : 'Marked do-not-contact — unsubscribed in Smartlead, blocked, and out of the call queue.'); }
     const { data: cur } = await supabase.from('fin_settings').select('value').eq('key', 'reply_tags').maybeSingle();   // remembered by email so a re-sync keeps the tag
     await supabase.from('fin_settings').upsert({ key: 'reply_tags', value: { ...(cur?.value || {}), [s.lead_email.toLowerCase()]: reply_type } }); if (s.lead_id && reply_type === 'Negative') await supabase.from('sales_leads').update({ stage: 'dnc' }).eq('id', s.lead_id).eq('stage', 'replied'); load(); reload(); };
   const m = useMemo(() => {
@@ -297,11 +322,30 @@ function Email({ leads, status, reload, refreshStatus, say }) {
   if (sends === null) return <div className="card"><div className="empty">Loading…</div></div>;
   return (
     <>
-      <div className="opsbar">
-        <div><b>Smartlead campaign{status.smartlead_campaigns?.includes(',') ? 's' : ''} {status.smartlead_campaigns || '—'}</b><div className="sm">Last sync {ago(status.smartlead_last_sync?.at)}</div></div>
-        <div className="spacer" />
-        <button className="btn-sm primary" disabled={busy || !status.smartlead_key_set} onClick={sync}>{busy ? 'Syncing…' : 'Sync from Smartlead'}</button>
-      </div>
+      {(camp || []).map((c) => { const lim = c.daily_limit || 0; const p = lim ? Math.min(100, (c.sent_today / lim) * 100) : 0; const running = c.status === 'ACTIVE' || c.status === 'START'; return (
+        <div key={c.id} className="card campaign">
+          <div className="cardhead">
+            <div><h3>{c.name}</h3><div className="sm">Smartlead campaign {c.id} · synced {ago(status.smartlead_last_sync?.at)}</div></div>
+            <span className={`statuspill ${running ? 'ok' : c.status === 'PAUSED' ? 'warn' : 'muted'}`}>{running ? 'Running' : c.status === 'PAUSED' ? 'Paused' : c.status === 'COMPLETED' ? 'Completed' : c.status}</span>
+            <div className="spacer" />
+            {running ? <button className="btn-sm" disabled={cbusy} onClick={() => setCampStatus(c, 'PAUSED')}>Pause</button> : <button className="btn-sm primary" disabled={cbusy} onClick={() => setCampStatus(c, 'START')}>{c.status === 'PAUSED' ? 'Resume' : 'Start'}</button>}
+            <button className="btn-sm" disabled={busy || !status.smartlead_key_set} onClick={() => { sync(); loadCamp(); }}>{busy ? 'Syncing…' : 'Sync'}</button>
+          </div>
+          <div className="today">
+            <div className="prog"><div className="lbl"><b>Today</b><span>{num(c.sent_today)}{lim ? ` of ${num(lim)}` : ''} sent · {num(c.replied_today)} replied</span></div><div className="bar"><i style={{ width: `${p}%` }} /></div></div>
+            {c.analytics && <div className="board camp">
+              <div><b>{num(c.analytics.total_leads)}</b><small>leads in campaign</small></div>
+              <div><b>{num(c.analytics.in_progress)}</b><small>in sequence</small></div>
+              <div><b>{num(c.analytics.not_started)}</b><small>not started</small></div>
+              <div><b>{num(c.analytics.completed)}</b><small>finished</small></div>
+              <div><b>{num(c.analytics.sent)}</b><small>emails sent</small></div>
+              <div><b>{num(c.analytics.replies)}</b><small>replies</small></div>
+            </div>}
+          </div>
+        </div>
+      ); })}
+      {camp === null && <div className="card"><div className="empty">Checking the campaign…</div></div>}
+      {camp && camp.length === 0 && <div className="opsbar"><div className="spacer" /><button className="btn-sm primary" disabled={busy || !status.smartlead_key_set} onClick={sync}>{busy ? 'Syncing…' : 'Sync from Smartlead'}</button></div>}
       <div className="kpis fin">
         <div className="tile"><small>Emails sent</small><b>{num(m.sent)}</b><span>to {num(m.leads)} people</span></div>
         <div className="tile"><small>Reply rate</small><b>{pct(m.repliedLeads / (m.leads || 1), 1)}</b><span>{num(m.repliedLeads)} people replied</span></div>
@@ -319,6 +363,8 @@ function Email({ leads, status, reload, refreshStatus, say }) {
                 <div className="replyacts">
                   <select className="statusselect" value={s.reply_type || ''} onChange={(e) => setReply(s, e.target.value)}><option value="">tag it</option>{['Positive', 'Neutral', 'Negative', 'Auto-reply', 'Bounce-back'].map((t) => <option key={t}>{t}</option>)}</select>
                   {l && <span className={`statuspill ${stageClass(l.stage)}`}>{stageLabel(l.stage)}</span>}
+                  {l && l.stage !== 'dnc' && (l.answered_at ? <button className="btn-xs ok" title="Click to undo" onClick={() => markAnswered(s, false)}>✓ Answered {new Date(l.answered_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</button> : <button className="btn-xs primary" onClick={() => markAnswered(s, true)}>Mark answered</button>)}
+                  {l && assignees.length > 1 && <select className="statusselect" value={l.assigned_to || ''} onChange={(e) => assign(s, e.target.value)} title="Hand this lead to"><option value="">unassigned</option>{assignees.map((a) => <option key={a.id} value={a.id}>{(a.full_name || a.email).split(' ')[0]}</option>)}</select>}
                   {l && <button className="btn-xs" onClick={() => setOpenLead(l)}>Open lead</button>}
                 </div>
               </div>
@@ -388,6 +434,7 @@ function Calls({ me, leads, reload, say }) {
     if (note) patch.notes = [lead.notes, `${new Date().toLocaleDateString()} ${outcome.replace('_', ' ')}: ${note}`].filter(Boolean).join('\n');
     if ((lead.attempts || 0) + 1 >= 4 && !['booked', 'connected', 'gatekeeper'].includes(outcome)) patch.in_calls = false;   // 4 tries with no human → park it
     await supabase.from('sales_leads').update(patch).eq('id', lead.id);
+    if (outcome === 'dnc' && lead.email) ownerFn({ action: 'smartlead_stop_lead', email: lead.email });
     setCallStart(null); setNote(''); setCur(null); reload(); loadCalls();
   };
   const skip = () => { if (lead) setSkipped([...skipped, lead.id]); setCur(null); setCallStart(null); };
@@ -457,6 +504,48 @@ function Board({ s, time }) {
       <div><b>{s.minPerConn.toFixed(1)}</b><small>min / connect</small></div>
       <div><b>{pct(s.dials ? s.bad / s.dials : 0)}</b><small>bad numbers</small></div>
     </div>
+  );
+}
+
+/* =================== Calendar: booked calls from Calendly, handed to whoever takes them =================== */
+export function Calendar({ me, leads, status, reload, say, refreshStatus, mineOnly }) {
+  const [mtgs, setMtgs] = useState(null); const [people, setPeople] = useState([]); const [busy, setBusy] = useState(false); const [open, setOpen] = useState(null); const [past, setPast] = useState(false);
+  const load = async () => { const [m, p] = await Promise.all([fetchAll('sales_meetings', '*', (q) => q.order('starts_at', { ascending: false })), supabase.from('profiles').select('id, full_name, email').like('role', 'shipbay%').eq('active', true)]); setMtgs(m); setPeople(p.data || []); };
+  useEffect(() => { load(); }, []);
+  const sync = async () => { setBusy(true); const r = await ownerFn({ action: 'calendly_sync' }); setBusy(false); say(r, r.error ? null : `Calendly synced · ${r.events} event${r.events === 1 ? '' : 's'}.`); load(); reload?.(); refreshStatus?.(); };
+  const upd = async (m, patch) => { await supabase.from('sales_meetings').update(patch).eq('id', m.id); load(); };
+  const who = (id) => { const p = people.find((x) => x.id === id); return p ? (p.full_name || p.email).split(' ')[0] : '—'; };
+  if (mtgs === null) return <div className="card"><div className="empty">Loading…</div></div>;
+  const now = Date.now();
+  const list = mtgs.filter((m) => (!mineOnly || m.assigned_to === me?.id) && (past ? true : (new Date(m.ends_at || m.starts_at).getTime() >= now - 3600000 && m.status !== 'canceled')));
+  const mine = mtgs.filter((m) => m.assigned_to === me?.id && new Date(m.starts_at) >= now && m.status === 'active');
+  return (
+    <>
+      <div className="opsbar wrap">
+        <div><b>{num(list.filter((m) => new Date(m.starts_at) >= now && m.status === 'active').length)} upcoming</b><span className="sm"> · {num(mine.length)} yours{status?.calendly_last_sync?.at ? ` · Calendly synced ${ago(status.calendly_last_sync.at)}` : ''}</span></div>
+        <label className="chk sm"><input type="checkbox" checked={past} onChange={(e) => setPast(e.target.checked)} /> show past & canceled</label>
+        <div className="spacer" />
+        {!mineOnly && (status?.calendly_set ? <button className="btn-sm primary" disabled={busy} onClick={sync}>{busy ? 'Syncing…' : 'Sync Calendly'}</button> : <span className="sm">Add your Calendly token under Settings to pull booked calls in.</span>)}
+      </div>
+      <div className="card">
+        {list.length === 0 ? <div className="empty">No booked calls{past ? '' : ' coming up'}.</div> : (
+          <div className="tablewrap"><table className="ordertable leads">
+            <thead><tr><th>When</th><th>Who</th><th>Call</th><th>Taken by</th><th>Status</th><th /></tr></thead>
+            <tbody>{list.map((m) => { const l = leads?.find((x) => x.id === m.lead_id); const d = new Date(m.starts_at); const isPast = d.getTime() < now; return (
+              <tr key={m.id} className={m.status === 'canceled' ? 'muted' : ''}>
+                <td><b>{d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</b><div className="sm">{d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}{m.ends_at ? `–${new Date(m.ends_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : ''}</div></td>
+                <td><b>{m.invitee_name || m.invitee_email || '—'}</b><div className="sm">{l?.company ? `${l.company} · ` : ''}{m.invitee_email}</div></td>
+                <td className="sm">{m.name}{m.location && /^https?:/.test(m.location) ? <div><a href={m.location} target="_blank" rel="noreferrer">Join link ↗</a></div> : m.location ? <div>{m.location}</div> : null}</td>
+                <td>{mineOnly ? who(m.assigned_to) : <select className="statusselect" value={m.assigned_to || ''} onChange={(e) => upd(m, { assigned_to: e.target.value || null })}><option value="">— nobody —</option>{people.map((p) => <option key={p.id} value={p.id}>{(p.full_name || p.email).split(' ')[0]}</option>)}</select>}</td>
+                <td>{m.status === 'canceled' ? <span className="statuspill bad">Canceled</span> : isPast ? <select className="statusselect" value={m.outcome || ''} onChange={(e) => upd(m, { outcome: e.target.value || null, status: 'done' })}><option value="">— how did it go? —</option><option value="quoted">Quoted</option><option value="follow_up">Follow up</option><option value="signed">Signed</option><option value="not_fit">Not a fit</option><option value="no_show">No-show</option></select> : <span className="statuspill ok">Booked</span>}</td>
+                <td className="n">{l && <button className="btn-xs" onClick={() => setOpen(l)}>Lead</button>}</td>
+              </tr>
+            ); })}</tbody>
+          </table></div>
+        )}
+      </div>
+      {open && <LeadDrawer lead={open} sources={[]} onClose={() => setOpen(null)} reload={reload || (() => {})} say={say} />}
+    </>
   );
 }
 

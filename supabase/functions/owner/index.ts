@@ -19,7 +19,8 @@ const json = (b: unknown, status = 200) => Response.json(b, { status, headers: c
 const DASH = 'https://dashboard.shipbay3pl.com/';
 const QBO_REDIRECT = 'https://dashboard.shipbay3pl.com/oauth/qbo';
 const QBO_API = 'https://quickbooks.api.intuit.com';
-const SECRET_KEYS = new Set(['QBO_CLIENT_ID', 'QBO_CLIENT_SECRET', 'SMARTLEAD_API_KEY', 'SMARTLEAD_CAMPAIGNS']);
+const SECRET_KEYS = new Set(['QBO_CLIENT_ID', 'QBO_CLIENT_SECRET', 'SMARTLEAD_API_KEY', 'SMARTLEAD_CAMPAIGNS', 'CALENDLY_TOKEN']);
+const SL = 'https://server.smartlead.ai/api/v1';
 const enc = new TextEncoder();
 
 // ---------- secrets ----------
@@ -102,7 +103,7 @@ function replyText(html: string) {
 async function smartleadSync(uid: string) {
   const key = await secret('SMARTLEAD_API_KEY'); if (!key) return { error: 'Add the Smartlead API key under Owner → Settings first.' };
   const campaigns = (await secret('SMARTLEAD_CAMPAIGNS') || '4039101').split(',').map((s) => s.trim()).filter(Boolean);
-  const base = 'https://server.smartlead.ai/api/v1';
+  const base = SL;
   const out: Record<string, unknown> = {};
   for (const cid of campaigns) {
     const camp = await (await fetch(`${base}/campaigns/${cid}?api_key=${key}`)).json().catch(() => ({}));
@@ -166,6 +167,90 @@ async function smartleadSync(uid: string) {
   }
   await setSetting('smartlead_last_sync', { at: new Date().toISOString(), by: uid, out });
   return { ok: true, campaigns: out };
+}
+
+// ---------- Smartlead: campaign control, stop a lead, push leads ----------
+async function slCampaigns(key: string) { return (await secret('SMARTLEAD_CAMPAIGNS') || '4039101').split(',').map((x) => x.trim()).filter(Boolean); }
+async function smartleadCampaignStatus() {
+  const key = await secret('SMARTLEAD_API_KEY'); if (!key) return { error: 'No Smartlead key.' };
+  const out: any[] = [];
+  const dayStart = new Date(); dayStart.setUTCHours(4, 0, 0, 0); if (dayStart.getTime() > Date.now()) dayStart.setUTCDate(dayStart.getUTCDate() - 1);   // midnight ET ≈ 04:00 UTC
+  for (const cid of await slCampaigns(key)) {
+    const camp = await (await fetch(`${SL}/campaigns/${cid}?api_key=${key}`)).json().catch(() => ({}));
+    const an = await (await fetch(`${SL}/campaigns/${cid}/analytics?api_key=${key}`)).json().catch(() => null);
+    const label = `${cid} ${camp?.name || ''}`.trim();
+    const { count: sentToday } = await admin.from('sales_email_sends').select('id', { count: 'exact', head: true }).eq('campaign', label).gte('sent_at', dayStart.toISOString());
+    const { count: repliedToday } = await admin.from('sales_email_sends').select('id', { count: 'exact', head: true }).eq('campaign', label).eq('replied', true).gte('sent_at', dayStart.toISOString());
+    out.push({ id: cid, name: camp?.name || cid, status: camp?.status || 'UNKNOWN', daily_limit: camp?.max_leads_per_day ?? null, sent_today: sentToday || 0, replied_today: repliedToday || 0, analytics: an ? { sent: an.sent_count, unique_sent: an.unique_sent_count, replies: an.reply_count, bounces: an.bounce_count, total_leads: an.campaign_lead_stats?.total, completed: an.campaign_lead_stats?.completed, in_progress: an.campaign_lead_stats?.inprogress, not_started: an.campaign_lead_stats?.notStarted, stopped: an.campaign_lead_stats?.stopped } : null });
+  }
+  return { ok: true, campaigns: out };
+}
+async function smartleadSetStatus(cid: string, status: string) {
+  const key = await secret('SMARTLEAD_API_KEY'); if (!key) return { error: 'No Smartlead key.' };
+  if (!['START', 'PAUSED', 'STOPPED'].includes(status)) return { error: 'status must be START, PAUSED or STOPPED' };
+  const r = await fetch(`${SL}/campaigns/${cid}/status?api_key=${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+  const j = await r.json().catch(() => ({})); if (!r.ok || j.ok === false) return { error: `Smartlead said: ${JSON.stringify(j).slice(0, 160)}` };
+  return { ok: true, status };
+}
+// Do-not-contact: unsubscribe from every campaign + global block list, and park the lead here.
+async function smartleadStopLead(email: string) {
+  const key = await secret('SMARTLEAD_API_KEY'); const e = email.toLowerCase().trim(); const done: string[] = [];
+  if (key) {
+    const found = await (await fetch(`${SL}/leads/?api_key=${key}&email=${encodeURIComponent(e)}`)).json().catch(() => null);
+    const slid = found?.id;
+    for (const cid of await slCampaigns(key)) {
+      if (slid) { const r = await fetch(`${SL}/campaigns/${cid}/leads/${slid}/unsubscribe?api_key=${key}`, { method: 'POST' }); if (r.ok) done.push(`unsubscribed ${cid}`); }
+    }
+    const b = await fetch(`${SL}/leads/add-domain-block-list?api_key=${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domain_block_list: [e], client_id: null }) });
+    if (b.ok) done.push('block list');
+  }
+  await admin.from('sales_leads').update({ stage: 'dnc', in_calls: false, in_email: false, next_action_at: null }).ilike('email', e);
+  const tags = (await getSetting('reply_tags')) || {}; tags[e] = 'Negative'; await setSetting('reply_tags', tags);
+  return { ok: true, done };
+}
+async function smartleadAddLeads(ids: string[], cid?: string) {
+  const key = await secret('SMARTLEAD_API_KEY'); if (!key) return { error: 'No Smartlead key.' };
+  const campaign = cid || (await slCampaigns(key))[0];
+  const { data: leads } = await admin.from('sales_leads').select('id, email, contact_name, company, domain, phone, filter_id, city, state').in('id', ids.slice(0, 2000));
+  const rows = (leads || []).filter((l) => l.email).map((l) => { const [first, ...rest] = String(l.contact_name || '').split(' '); return { email: l.email, first_name: first || '', last_name: rest.join(' '), company_name: l.company || '', website: l.domain ? `https://${l.domain}` : '', phone_number: l.phone || '', location: [l.city, l.state].filter(Boolean).join(', '), custom_fields: { list_source: l.filter_id || '' } }; });
+  let added = 0, dup = 0, blocked = 0;
+  for (let i = 0; i < rows.length; i += 100) {
+    const r = await fetch(`${SL}/campaigns/${campaign}/leads?api_key=${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lead_list: rows.slice(i, i + 100), settings: { ignore_global_block_list: false, ignore_unsubscribe_list: false, ignore_duplicate_leads_in_other_campaign: false } }) });
+    const j = await r.json().catch(() => ({}));
+    added += Number(j.upload_count || 0); dup += Number(j.duplicate_count || 0); blocked += Number(j.block_count || 0) + Number(j.unsubscribed_lead_count || 0);
+  }
+  await admin.from('sales_leads').update({ in_email: true }).in('id', (leads || []).filter((l) => l.email).map((l) => l.id));
+  return { ok: true, added, dup, blocked, skipped_no_email: ids.length - rows.length };
+}
+
+// ---------- Calendly ----------
+async function calendlySync(uid: string) {
+  const tok = await secret('CALENDLY_TOKEN'); if (!tok) return { error: 'Paste a Calendly personal access token under Settings first.' };
+  const H = { Authorization: `Bearer ${tok}` };
+  const me = await (await fetch('https://api.calendly.com/users/me', { headers: H })).json();
+  const org = me?.resource?.current_organization; const user = me?.resource?.uri; if (!user) return { error: `Calendly token rejected: ${JSON.stringify(me).slice(0, 160)}` };
+  const since = new Date(Date.now() - 30 * 86400000).toISOString();
+  const events: any[] = [];
+  for (const status of ['active', 'canceled']) {
+    let url: string | null = `https://api.calendly.com/scheduled_events?${new URLSearchParams({ organization: org, min_start_time: since, status, count: '100', sort: 'start_time:asc' })}`;
+    for (let n = 0; url && n < 10; n++) { const j = await (await fetch(url, { headers: H })).json(); events.push(...(j.collection || [])); url = j.pagination?.next_page || null; }
+  }
+  let n = 0;
+  for (const ev of events) {
+    const uuid = String(ev.uri).split('/').pop();
+    const inv = await (await fetch(`https://api.calendly.com/scheduled_events/${uuid}/invitees?count=5`, { headers: H })).json().catch(() => ({}));
+    const first = (inv.collection || [])[0] || {};
+    const email = String(first.email || '').toLowerCase() || null;
+    let lead_id: string | null = null;
+    if (email) { const { data: l } = await admin.from('sales_leads').select('id, stage').ilike('email', email).maybeSingle(); if (l) { lead_id = l.id; if (ev.status === 'active' && ['new', 'contacted', 'replied'].includes(l.stage)) await admin.from('sales_leads').update({ stage: 'call_booked', last_touch_at: new Date().toISOString() }).eq('id', l.id); } }
+    const { data: ex } = await admin.from('sales_meetings').select('id, assigned_to').eq('external_id', ev.uri).maybeSingle();
+    const row: any = { external_id: ev.uri, source: 'calendly', name: ev.name, starts_at: ev.start_time, ends_at: ev.end_time, status: ev.status === 'canceled' ? 'canceled' : (ex ? undefined : 'active'), invitee_name: first.name || null, invitee_email: email, location: ev.location?.join_url || ev.location?.location || ev.location?.type || null, lead_id };
+    if (!ex) row.assigned_to = uid;
+    Object.keys(row).forEach((k) => row[k] === undefined && delete row[k]);
+    await admin.from('sales_meetings').upsert(row, { onConflict: 'external_id' }); n++;
+  }
+  await setSetting('calendly_last_sync', { at: new Date().toISOString(), events: n });
+  return { ok: true, events: n };
 }
 
 // QuickBooks TransactionList → fin_transactions (source 'qbo'). Invoices/sales receipts = money in; expenses/checks/bills/card charges = money out.
@@ -232,7 +317,7 @@ Deno.serve(async (req) => {
 
   if (b.action === 'status') {
     const { data: qbo } = await admin.from('fin_qbo_status').select('*').eq('id', 1).maybeSingle();
-    return json({ passphrase_set: !!stored, unlocked, qbo, smartlead_key_set: !!(await secret('SMARTLEAD_API_KEY')), smartlead_campaigns: await secret('SMARTLEAD_CAMPAIGNS'), qbo_keys_set: !!(await secret('QBO_CLIENT_ID')) && !!(await secret('QBO_CLIENT_SECRET')), smartlead_last_sync: await getSetting('smartlead_last_sync') });
+    return json({ passphrase_set: !!stored, unlocked, qbo, smartlead_key_set: !!(await secret('SMARTLEAD_API_KEY')), smartlead_campaigns: await secret('SMARTLEAD_CAMPAIGNS'), qbo_keys_set: !!(await secret('QBO_CLIENT_ID')) && !!(await secret('QBO_CLIENT_SECRET')), smartlead_last_sync: await getSetting('smartlead_last_sync'), calendly_set: !!(await secret('CALENDLY_TOKEN')), calendly_last_sync: await getSetting('calendly_last_sync') });
   }
 
   if (b.action === 'set_passphrase') {
@@ -262,6 +347,11 @@ Deno.serve(async (req) => {
     await setSecret(b.key, String(b.value || '').trim(), me.id); return json({ ok: true });
   }
   if (b.action === 'smartlead_sync') { try { return json(await smartleadSync(me.id)); } catch (e) { return json({ error: String(e) }, 500); } }
+  if (b.action === 'smartlead_campaign') { try { return json(await smartleadCampaignStatus()); } catch (e) { return json({ error: String(e) }, 500); } }
+  if (b.action === 'smartlead_status') { try { return json(await smartleadSetStatus(String(b.campaign_id || ''), String(b.status || ''))); } catch (e) { return json({ error: String(e) }, 500); } }
+  if (b.action === 'smartlead_stop_lead') { try { return json(await smartleadStopLead(String(b.email || ''))); } catch (e) { return json({ error: String(e) }, 500); } }
+  if (b.action === 'smartlead_add_leads') { try { return json(await smartleadAddLeads(Array.isArray(b.lead_ids) ? b.lead_ids : [], b.campaign_id)); } catch (e) { return json({ error: String(e) }, 500); } }
+  if (b.action === 'calendly_sync') { try { return json(await calendlySync(me.id)); } catch (e) { return json({ error: String(e) }, 500); } }
 
   if (b.action === 'qbo_connect') {
     const id = await secret('QBO_CLIENT_ID'); if (!id) return json({ error: 'Paste the QuickBooks app Client ID and Client Secret first (Owner → Settings).' }, 400);

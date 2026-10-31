@@ -16,6 +16,7 @@ import Quotes from './pages/Quotes';
 import ClientOrders from './pages/ClientOrders';
 import AdminSettings from './pages/AdminSettings';
 import Owner from './pages/owner/Owner';
+import SalesDesk from './pages/SalesDesk';
 import { PageHelp } from './shared';
 
 const STAFF = ['shipbay_admin', 'shipbay_staff'];
@@ -217,6 +218,7 @@ const Ico = {
   pack: svg(<><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4"/><path d="M12 11v10"/><path d="M7.5 5l9 4"/></>),
   admin: svg(<><path d="M16 11a4 4 0 1 0-8 0 4 4 0 0 0 8 0z"/><path d="M4 21v-1a5 5 0 0 1 5-5h6a5 5 0 0 1 5 5v1"/><path d="M19 3v4M17 5h4"/></>),
   owner: svg(<><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><circle cx="12" cy="16" r="1.5"/></>),
+  sales: svg(<><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></>),
   quotes: svg(<><path d="M12 2v20"/><path d="M17 6.5c0-1.9-2.2-3-5-3s-5 1.1-5 3 2.2 2.5 5 3 5 1.3 5 3.5-2.2 3.5-5 3.5-5-1.3-5-3"/></>),
 };
 // Grouped so the station screens sit together, client admin together, and setup at the bottom.
@@ -234,6 +236,8 @@ const STAFF_NAV = [
   { group: 'Setup' },
   { key: 'markets', label: 'Integrations', icon: Ico.markets, page: Marketplaces },
   { key: 'admin', label: 'Admin settings', icon: Ico.admin, page: AdminSettings, adminOnly: true },
+  { group: 'Sales', salesOnly: true },
+  { key: 'salesdesk', label: 'Sales', icon: Ico.sales, page: SalesDesk, salesOnly: true },
   { group: 'Owner', ownerOnly: true },
   { key: 'owner', label: 'Financials & sales', icon: Ico.owner, page: Owner, ownerOnly: true },
 ];
@@ -246,7 +250,7 @@ const CLIENT_NAV = [
 ];
 
 function Shell({ me }) {
-  const nav = (!me ? [] : me.isStaff ? STAFF_NAV : CLIENT_NAV).filter((n) => (!n.adminOnly || me?.role === 'shipbay_admin') && (!n.ownerOnly || me?.is_owner));
+  const nav = (!me ? [] : me.isStaff ? STAFF_NAV : CLIENT_NAV).filter((n) => (!n.adminOnly || me?.role === 'shipbay_admin') && (!n.ownerOnly || me?.is_owner) && (!n.salesOnly || me?.is_sales));
   const items = nav.filter((n) => n.key);
   const [page, setPage] = useState(null);
   const [params, setParams] = useState({});

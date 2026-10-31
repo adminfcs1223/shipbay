@@ -78,7 +78,7 @@ function Settings({ status, refreshStatus }) {
   const [msg, setMsg] = useState(null);
   const [cur, setCur] = useState(''); const [n1, setN1] = useState(''); const [n2, setN2] = useState('');
   const [qid, setQid] = useState(''); const [qsec, setQsec] = useState('');
-  const [slk, setSlk] = useState(''); const [slc, setSlc] = useState(status.smartlead_campaigns || '');
+  const [slk, setSlk] = useState(''); const [slc, setSlc] = useState(status.smartlead_campaigns || ''); const [cal, setCal] = useState('');
   const [busy, setBusy] = useState(null);
 
   const say = (r, ok) => { if (r.error) setMsg({ kind: 'err', text: r.error }); else { setMsg({ kind: 'ok', text: ok }); refreshStatus(); } };
@@ -101,6 +101,12 @@ function Settings({ status, refreshStatus }) {
         <div className="field"><label>API key</label><input type="password" value={slk} onChange={(e) => setSlk(e.target.value)} placeholder={status.smartlead_key_set ? '•••••••• (saved — paste to replace)' : ''} autoComplete="off" /></div>
         <div className="field"><label>Campaign IDs</label><input value={slc} onChange={(e) => setSlc(e.target.value)} placeholder="4039101" /></div>
         <div className="row"><button className="btn-sm primary" disabled={!!busy} onClick={async () => { if (slk) await saveSecret('SMARTLEAD_API_KEY', slk, 'Smartlead key'); if (slc && slc !== status.smartlead_campaigns) await saveSecret('SMARTLEAD_CAMPAIGNS', slc, 'Campaigns'); setSlk(''); }}>Save</button></div>
+      </div>
+      <div className="card">
+        <h3>Calendly</h3>
+        <p className="hint">Personal access token from Calendly → Integrations → API & webhooks. Booked calls then show under Sales → Calendar. {status.calendly_set ? 'Token saved.' : 'Not set yet.'}</p>
+        <div className="field"><label>Access token</label><input type="password" value={cal} onChange={(e) => setCal(e.target.value)} placeholder={status.calendly_set ? '•••••••• (saved — paste to replace)' : ''} autoComplete="off" /></div>
+        <div className="row"><button className="btn-sm primary" disabled={!cal || !!busy} onClick={async () => { await saveSecret('CALENDLY_TOKEN', cal, 'Calendly token'); setCal(''); }}>Save</button></div>
       </div>
       <form className="card" onSubmit={changePass}>
         <h3>Change passphrase</h3>

@@ -923,3 +923,15 @@ select.statuspill { border: 0; cursor: pointer; }
 .owner .ordertable td:last-child, .owner .ordertable th:last-child { padding-right: 18px; }
 .owner .replyre { margin-top: 4px; }
 .owner .card .opsbar { margin: 0 0 12px; }
+.helpdot { position: absolute; top: 18px; right: 22px; width: 26px; height: 26px; border-radius: 50%; border: 0; background: var(--orange); color: #fff; font: 800 13px var(--font-body); cursor: pointer; box-shadow: 0 2px 8px rgba(255,107,21,.35); z-index: 5; }
+.helpdot:hover { transform: scale(1.06); }
+.content { position: relative; }
+.campaign .today { display: grid; gap: 12px; }
+.campaign .prog .lbl { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+.campaign .prog .bar { height: 10px; margin: 0; }
+.board.camp { grid-template-columns: repeat(6, 1fr); }
+.btn-xs.ok { border-color: rgba(30,158,111,.5); color: #177A56; }
+.btn-xs.primary { background: var(--orange); color: #fff; border-color: var(--orange); }
+@media (max-width: 900px) { .board.camp { grid-template-columns: repeat(3, 1fr); } }
+.secthead { font-family: var(--font-display); font-size: 16px; font-weight: 700; margin: 6px 0 10px; }
+select.statuspill.ok, select.statuspill.warn, select.statuspill.bad, select.statuspill.muted, select.statuspill.navy { appearance: auto; padding-right: 6px; }

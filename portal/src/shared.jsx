@@ -4,18 +4,17 @@ import { supabase } from './lib';
 import { HELP } from './help';
 
 /* ---------- Quick help: collapsed by default after the first look, per screen, per browser ---------- */
-const hkey = (k) => `shipbay-help:${k}`;
 export function PageHelp({ page }) {
   const h = HELP[page];
-  const [open, setOpen] = useState(() => { try { return !localStorage.getItem(hkey(page)); } catch { return true; } });
+  const [open, setOpen] = useState(false);   // collapsed to the orange ? until tapped
   if (!h) return null;
-  const toggle = () => { const n = !open; setOpen(n); try { if (!n) localStorage.setItem(hkey(page), '1'); else localStorage.removeItem(hkey(page)); } catch { /* ignore */ } };
+  if (!open) return <button className="helpdot" onClick={() => setOpen(true)} title={`How ${h.title} works`} aria-label={`How ${h.title} works`}>?</button>;
   return (
-    <div className={`help ${open ? 'open' : ''}`}>
-      <button className="helphead" onClick={toggle} aria-expanded={open}>
-        <span className="q">?</span><b>How {h.title} works</b><span className="what">{h.what}</span><span className="chev">{open ? '▴' : '▾'}</span>
+    <div className="help open">
+      <button className="helphead" onClick={() => setOpen(false)} aria-expanded>
+        <span className="q">?</span><b>How {h.title} works</b><span className="what">{h.what}</span><span className="chev">▴</span>
       </button>
-      {open && <ol>{h.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>}
+      <ol>{h.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
     </div>
   );
 }
