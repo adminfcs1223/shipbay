@@ -25,22 +25,41 @@ export const DEFAULT_INPUTS = {
   packaging: 'shipbay', box_share: 0.2, avg_postage: 7.5, current_cost: null,
   b2b_orders: 0, b2b_units_per_order: 24, pallets_out: 0, cartons_out: 0, pallet_moves: 0,
   batch_share: 0, batch_days: 0, drops_per_month: 1, storage_months: 1, kits: 0, materials: 0,
+  // rate card v2 (2026-10-30): storage by pallet size, receiving per SKU, labeling
+  pallets_60: 0, pallets_72: 0, half_pallets: 0, inbound_addl_skus: 0, inbound_mixed_pallets: 0, label_units: 0, skus: 0,
 };
 export const DEFAULT_COSTS = {
   labor_rate: 22.40, min_per_order: 3.5, min_per_addl_unit: 0.5, min_per_pallet_in: 30, min_per_carton_in: 3, min_per_return: 6,
   min_per_b2b_order: 12, min_per_b2b_unit: 0.15, min_assembly_per_box: 1.5, min_per_pallet_build: 20, min_per_fba_unit: 0.6, min_per_carton_out: 4, min_per_pallet_move: 10, min_per_kit: 3,
   pack_cost_mailer: 0.12, pack_cost_box_single: 0.62, pack_cost_box_double: 0.90, dunnage_per_order: 0.06, pallet_wrap_cost: 2.5, fba_material: 0.06,
   space_cost_pallet: 26, space_cost_shelf: 5, space_cost_bin: 1.25, overhead_per_month: 60, postage_cost_avg: 7.5,
+  min_per_addl_sku_in: 5, min_per_mixed_pallet_in: 45, min_per_label: 0.3,
 };
 
+/** Rate card v2 — "only pay for what you use" (2026-10-30). Mirrors the row in rate_cards; used when no card is loaded. */
+export const RATE_CARD_V2 = {
+  label: 'ShipBay rate card v2', scope: 'standard', status: 'current',
+  tiers: [{ label: 'Launch', max_orders: 1000, pick_first: 1.95, pick_addl: 0.45 }, { label: 'Growth', max_orders: 5000, pick_first: 1.80, pick_addl: 0.45 }, { label: 'Scale', max_orders: null, pick_first: 1.65, pick_addl: 0.45 }],
+  pick_pack_first: 1.95, pick_pack_addl: 0.45, storage_pallet: 18, storage_shelf: 4, storage_bin: 1, receiving_pallet: 10, receiving_carton: 2.5, returns_fee: 3,
+  packaging_mailer: 0, packaging_box_single: 2.5, packaging_box_double: 2.5, intl_surcharge: 2.5, monthly_minimum: 0, postage_markup_pct: 0, storage_waived_months: 0, minimum_waived_months: 0,
+  extras: { mailer_included: true, box_packout: 2.5, returns_addl: 0.5, b2b_order: 5.5, b2b_unit: 0.4, pallet_build: 18, fba_prep: 0.6, fba_carton: 2.5, kitting_hr: 40, kit_rate: 1.5, insert: 0.1, gift_wrap: 2.5, fragile: 1,
+    storage_pallet_60: 20, storage_pallet_72: 24, storage_half: 12, storage_min: 10, storage_aged_cuft: 0.1, receiving_addl_sku: 5, receiving_mixed: 60, receiving_carton_min: 10, blind_receipt: 15, sku_label: 0.25,
+    batch_drop: 0.95, batch_drop_small: 1.10, batch_drop_large: 0.85, batch_addl: 0.15, container_20: 350, container_40: 500, floor_loaded: 150, counts_hr: 40, setup: 0 },
+};
+/** batch-drop rate for a drop size (boxes in one drop) */
+export const batchRate = (ex, boxesPerDrop) => (boxesPerDrop >= 5000 ? n(ex.batch_drop_large, 0.85) : boxesPerDrop < 3000 ? n(ex.batch_drop_small, 1.10) : n(ex.batch_drop, 0.95));
+
 /** Rates from a rate_cards row (standard card) for a given monthly volume: picks the tier and copies the line items. */
-export function ratesFromCard(card, orders) {
+export function ratesFromCard(card, orders, model = 'dtc', drops = 1) {
   const tiers = Array.isArray(card.tiers) && card.tiers.length ? card.tiers : [{ label: 'Standard', max_orders: null, pick_first: Number(card.pick_pack_first), pick_addl: Number(card.pick_pack_addl) }];
   const t = tiers.find((x) => x.max_orders == null || orders <= x.max_orders) || tiers[tiers.length - 1];
   const ex = card.extras || {};
+  const sub = model === 'subscription' && ex.batch_drop != null;
   return {
-    tier: t.label, pick_first: Number(t.pick_first), pick_addl: Number(t.pick_addl),
-    mailer: ex.mailer_included ? 0 : Number(card.packaging_mailer ?? 0.20), box_single: Number(card.packaging_box_single), box_double: Number(card.packaging_box_double),
+    tier: sub ? 'Batch drop' : t.label, pick_first: sub ? batchRate(ex, Math.round(orders / Math.max(1, drops))) : Number(t.pick_first), pick_addl: sub ? n(ex.batch_addl, 0.15) : Number(t.pick_addl),
+    mailer: ex.mailer_included ? 0 : Number(card.packaging_mailer ?? 0.20), box_single: Number(card.packaging_box_single), box_double: Number(card.packaging_box_double), box_packout: ex.box_packout != null ? Number(ex.box_packout) : undefined,
+    storage_pallet_60: ex.storage_pallet_60 != null ? Number(ex.storage_pallet_60) : undefined, storage_pallet_72: ex.storage_pallet_72 != null ? Number(ex.storage_pallet_72) : undefined, storage_half: ex.storage_half != null ? Number(ex.storage_half) : undefined, storage_min: n(ex.storage_min, 0),
+    receiving_addl_sku: n(ex.receiving_addl_sku, 0), receiving_mixed: n(ex.receiving_mixed, 0), sku_label: n(ex.sku_label, 0),
     storage_pallet: Number(card.storage_pallet), storage_shelf: Number(card.storage_shelf), storage_bin: Number(card.storage_bin), storage_waived_months: Number(card.storage_waived_months ?? 0),
     receiving_pallet: Number(card.receiving_pallet), receiving_carton: Number(card.receiving_carton), receiving_waived_months: 0,
     returns: Number(card.returns_fee), returns_addl: Number(ex.returns_addl ?? 0.5), intl: Number(card.intl_surcharge),
@@ -165,6 +184,7 @@ export function compute(q, volume = n(q.inputs?.orders), phase = 'standard') {
   const boxes = shipbayPack ? Math.round(dtc * n(i.box_share)) : 0;
   const mailers = shipbayPack ? dtc - boxes : 0;
   const pallets = model === 'storage' ? orders : n(i.pallets), shelves = n(i.shelves), bins = n(i.bins);
+  const p60 = n(i.pallets_60), p72 = n(i.pallets_72), half = n(i.half_pallets); const addlSkus = n(i.inbound_addl_skus), mixedP = n(i.inbound_mixed_pallets), labelU = n(i.label_units);
   const inP = n(i.inbound_pallets), inC = n(i.inbound_cartons);
   const rets = parcel ? n(i.returns) : 0;
   const months = oneTime ? Math.max(1, n(i.storage_months, 1)) : 1;
@@ -187,14 +207,24 @@ export function compute(q, volume = n(q.inputs?.orders), phase = 'standard') {
   if (hours) add('hours', 'Project labor', hours, n(r.project_hr));
   if (kits) add('kits', 'Kits assembled', kits, n(r.kit_rate));
   if (model === 'project' && n(i.materials) > 0) add('materials', 'Materials — at cost', 1, n(i.materials));
-  if (shipbayPack) { if (mailers && n(r.mailer) > 0) add('mailer', 'Poly mailers', mailers, n(r.mailer)); if (boxes) add('box', 'Shipper boxes', boxes, n(r.box_single)); }
+  if (shipbayPack) { if (mailers && n(r.mailer) > 0) add('mailer', 'Poly mailers', mailers, n(r.mailer)); if (boxes) add('box', r.box_packout != null ? 'Box pack-out — box, fill & tape' : 'Shipper boxes', boxes, n(r.box_packout, n(r.box_single))); }
   else if (parcel) lines.push({ key: 'pack', label: 'Packaging — client-supplied', qty: 0, rate: 0, amount: 0 });
   const mo = oneTime && months > 1 ? ` (${months} months)` : '';
   if (waived('storage')) lines.push({ key: 'storage', label: `Storage — waived (first ${n(r.storage_waived_months)} months)`, qty: pallets + shelves + bins, rate: 0, amount: 0 });
-  else { if (pallets || model === 'storage') add('storage_p', `Storage — pallets${mo}`, pallets * months, n(r.storage_pallet)); if (shelves) add('storage_s', `Storage — shelves${mo}`, shelves * months, n(r.storage_shelf)); if (bins) add('storage_b', `Storage — bins${mo}`, bins * months, n(r.storage_bin)); }
+  else {
+    const before = lines.length;
+    if (pallets || model === 'storage') add('storage_p', `Storage — standard pallets${p60 || p72 ? ' (≤48")' : ''}${mo}`, pallets * months, n(r.storage_pallet));
+    if (p60) add('storage_p60', `Storage — pallets ≤60"${mo}`, p60 * months, n(r.storage_pallet_60, n(r.storage_pallet)));
+    if (p72) add('storage_p72', `Storage — tall pallets ≤72"${mo}`, p72 * months, n(r.storage_pallet_72, n(r.storage_pallet)));
+    if (half) add('storage_half', `Storage — half pallets${mo}`, half * months, n(r.storage_half, n(r.storage_pallet) / 2));
+    if (shelves) add('storage_s', `Storage — shelves${mo}`, shelves * months, n(r.storage_shelf)); if (bins) add('storage_b', `Storage — bins${mo}`, bins * months, n(r.storage_bin));
+    const stor = lines.slice(before).reduce((a, l) => a + l.amount, 0); const smin = n(r.storage_min);
+    if (!oneTime && smin > 0 && stor > 0 && stor < smin) add('storage_min', 'Storage — account minimum top-up', 1, r2(smin - stor));
+  }
   if (moves) add('moves', 'Pallet in / out handling', moves, n(r.pallet_move));
   if (waived('receiving')) lines.push({ key: 'receiving', label: `Receiving — waived (first ${n(r.receiving_waived_months)} months)`, qty: inP + inC, rate: 0, amount: 0 });
-  else { if (inP) add('recv_p', 'Receiving — pallets', inP, n(r.receiving_pallet)); if (inC) add('recv_c', 'Receiving — loose cartons', inC, n(r.receiving_carton)); }
+  else { if (inP) add('recv_p', n(r.receiving_addl_sku) > 0 ? 'Receiving — pallets (1 SKU)' : 'Receiving — pallets', inP, n(r.receiving_pallet)); if (addlSkus && n(r.receiving_addl_sku) > 0) add('recv_sku', 'Receiving — additional SKUs on a pallet', addlSkus, n(r.receiving_addl_sku)); if (mixedP && n(r.receiving_mixed) > 0) add('recv_mixed', 'Receiving — mixed / unsorted pallets', mixedP, n(r.receiving_mixed)); if (inC) add('recv_c', 'Receiving — loose cartons', inC, n(r.receiving_carton)); }
+  if (labelU && n(r.sku_label) > 0) add('label', 'SKU labeling', labelU, n(r.sku_label));
   if (rets) add('returns', 'Returns processed', rets, n(r.returns));
   if (intl) add('intl', 'International surcharge', intl, n(r.intl));
 
@@ -226,11 +256,12 @@ export function compute(q, volume = n(q.inputs?.orders), phase = 'standard') {
   // ShipBay side
   const minutes = dtc * c.min_per_order + addlUnits * c.min_per_addl_unit + (model === 'subscription' ? dtc * c.min_assembly_per_box : 0)
     + b2b * c.min_per_b2b_order + b2b * b2bUpo * c.min_per_b2b_unit + palletsOut * c.min_per_pallet_build + fbaUnits * c.min_per_fba_unit + cartonsOut * c.min_per_carton_out
-    + moves * c.min_per_pallet_move + hours * 60 + kits * c.min_per_kit + inP * c.min_per_pallet_in + inC * c.min_per_carton_in + rets * c.min_per_return + vasMinutes;
+    + moves * c.min_per_pallet_move + hours * 60 + kits * c.min_per_kit + inP * c.min_per_pallet_in + inC * c.min_per_carton_in + rets * c.min_per_return + vasMinutes
+    + addlSkus * n(c.min_per_addl_sku_in, 5) + mixedP * n(c.min_per_mixed_pallet_in, 45) + labelU * n(c.min_per_label, 0.3);
   const laborHours = minutes / 60;
   const labor = r2(laborHours * c.labor_rate);
   const packaging = r2(mailers * c.pack_cost_mailer + boxes * c.pack_cost_box_single + dtc * c.dunnage_per_order + palletsOut * c.pallet_wrap_cost + fbaUnits * c.fba_material + vasMaterials + (model === 'project' ? n(i.materials) : 0));
-  const space = r2((pallets * c.space_cost_pallet + shelves * c.space_cost_shelf + bins * c.space_cost_bin) * months);
+  const space = r2(((pallets + p60 * 1.1 + p72 * 1.25 + half * 0.5) * c.space_cost_pallet + shelves * c.space_cost_shelf + bins * c.space_cost_bin) * months);
   const overhead = n(c.overhead_per_month);
   const postageCost = parcel ? r2(orders * n(c.postage_cost_avg, postageRate)) : 0;
   const postageMargin = r2(postage - postageCost);

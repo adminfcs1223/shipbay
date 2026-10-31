@@ -7,6 +7,8 @@ import { supabase } from '../../lib';
 import { useTeamData, teamStats, TeamTable, useGoals, goalsFor, GoalBars, bonusFor, bonusProgress, BonusBar, BONUS_METRICS } from './Team';
 import { ownerFn, fetchAll, money, pct, num, ago, mmss, hhmm, STAGES, stageLabel, stageClass, parseCsv, guessColumns } from './util';
 import { compute, phases } from '../../quote';
+import Quotes from '../Quotes';
+import Onboarding from '../Onboarding';
 
 /** the quotes that belong to an account (by the account row, or its client org) — best first */
 const QRANK = { accepted: 0, sent: 1, draft: 2, declined: 3, superseded: 4 };
@@ -16,7 +18,7 @@ export const quoteMonthly = (q) => { try { const ph = phases(q); const p = ph.fi
 /** expected services $/month for an account: its quote if it has one, else the hand-typed deal value */
 export const expectedMonthly = (lead, quotes) => { const q = quotesFor(lead, quotes).find((x) => !x.internal_only && x.status !== 'declined' && x.status !== 'superseded'); const v = q ? quoteMonthly(q) : null; return v != null ? { value: v, from: q } : { value: lead?.deal_value ? Number(lead.deal_value) : null, from: null }; };
 
-const SUB = [['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['calendar', 'Calendar'], ['bonus', 'Bonus'], ['settings', 'Settings']];
+const SUB = [['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['calendar', 'Calendar'], ['quotes', 'Quotes'], ['onboarding', 'Onboarding'], ['bonus', 'Bonus'], ['settings', 'Settings']];
 export const LIST_NAMES = { A1: 'Self-ship brands · NJ metro', A2: 'Already on a 3PL · NJ metro', A3: 'Self-ship brands · Northeast', A4: 'Shopify Plus upgrades', B1: 'Founder-run · NJ metro', C1: 'Amazon sellers · Northeast', C2: 'Q4 overflow', X0: 'Control group' };
 export const listName = (code) => (code && LIST_NAMES[code] ? `${code} · ${LIST_NAMES[code]}` : code || '—');
 export const srcLabel = (sources, k) => sources.find((s) => s.key === k)?.label || k;
@@ -75,7 +77,10 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
   };
   useEffect(() => { load(); }, []);
   const say = (r, ok) => { if (r?.error) setMsg({ kind: 'err', text: r.error }); else if (ok) setMsg({ kind: 'ok', text: ok }); };
+  const [subParams, setSubParams] = useState({});
   const go = (tab, focusId = null) => { setFocus(focusId); setSub(tab); };
+  /** jump to a subtab with parameters (open a quote, start a quote for an account, open a brand's onboarding) */
+  const goTab = (tab, p = {}) => { setSubParams({ ...p, _t: Date.now() }); setSub(tab); };
   const openLead = (idOrLead) => setPanel(typeof idOrLead === 'string' ? idOrLead : idOrLead?.id || null);
   // a rep's Dashboard / Pipeline / Contacts / Conversations are their own leads; Calls also sees the untouched pool
   const mine = useMemo(() => (rep ? (leads || []).filter((l) => l.assigned_to === me.id) : leads || []), [leads, rep, me.id]);
@@ -86,7 +91,7 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
   const unread = mySends.filter((s) => s.replied && !s.read_at && !s.bounced && !s.mailbox && !stopped.has(s.lead_id)).length + mail.filter((m) => m.user_id === me.id && !m.is_sent && !m.read_at && !m.hidden).length;
   const hits = useMemo(() => { const t = q.trim().toLowerCase(); if (t.length < 2) return []; return (leads || []).filter((l) => [l.company, l.domain, l.contact_name, l.email, l.phone, l.city].filter(Boolean).some((v) => v.toLowerCase().includes(t))).slice(0, 8); }, [q, leads]);
   const panelLead = panel ? (leads || []).find((l) => l.id === panel) : null;
-  const ctx = { me, rep, sources, people, reload: load, say, openLead, go, nav, quotes, orgs };
+  const ctx = { me, rep, sources, people, reload: load, say, openLead, go, goTab, nav, quotes, orgs };
 
   if (leads === null) return <div className="card"><div className="empty">Loading…</div></div>;
   return (
@@ -100,6 +105,8 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
         </div>
       </div>
       {sub === 'settings' && <RepSettings {...ctx} status={status} />}
+      {sub === 'quotes' && <div className="embed"><Quotes me={me} params={subParams} embedded /></div>}
+      {sub === 'onboarding' && <div className="embed"><Onboarding me={me} params={subParams} embedded /></div>}
       {sub === 'overview' && <Overview {...ctx} leads={mine} pool={leads} sends={mySends} counts={counts} />}
       {sub === 'pipeline' && <Pipeline {...ctx} leads={mine} />}
       {sub === 'master' && <Master {...ctx} leads={mine} />}
@@ -113,7 +120,7 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
 }
 
 /* =================== Dashboard =================== */
-function Overview({ me, rep, leads, pool, sends, sources, counts, go, openLead, nav }) {
+function Overview({ me, rep, leads, pool, sends, sources, counts, go, goTab, openLead, nav }) {
   const [calls, setCalls] = useState([]);
   useEffect(() => { fetchAll('sales_calls', 'id, lead_id, outcome, started_at, seconds, by_user').then((c) => setCalls(rep ? c.filter((x) => x.by_user === me.id) : c)); }, []);
   const available = (pool || leads).filter((l) => l.stage === 'new' && !l.assigned_to && l.phone).length;
@@ -164,7 +171,7 @@ function Overview({ me, rep, leads, pool, sends, sources, counts, go, openLead, 
             ); })}</ul>
           )}
         </div>
-        <Accounts me={me} rep={rep} nav={nav} />
+        <Accounts me={me} rep={rep} nav={goTab} />
       </div>
       {!rep && <div className="ownergrid">
         <div className="card">
@@ -341,7 +348,7 @@ function Master({ me, rep, leads, sources, reload, say, openLead }) {
 
 /* =================== Contact panel: slides in from the right; everything about one lead =================== */
 const PANEL_OUT = [['connected', 'Connected', 'ok'], ['voicemail', 'Voicemail', ''], ['no_answer', 'No answer', ''], ['gatekeeper', 'Gatekeeper', 'warn'], ['booked', 'Booked a call', 'ok solid'], ['not_fit', 'Not a fit', 'bad'], ['wrong_number', 'Wrong number', 'bad']];
-export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say, go, nav, quotes, orgs }) {
+export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say, go, goTab, nav, quotes, orgs }) {
   const exp = expectedMonthly(lead, quotes); const myQuotes = quotesFor(lead, quotes); const org = lead.org_id ? (orgs || []).find((o) => o.id === lead.org_id) : null;
   const [tab, setTab] = useState('activity'); const kit = useReplyKit(me); const booking = kit.booking; const [touches, setTouches] = useState([]); const [f, setF] = useState(lead); const [calls, setCalls] = useState([]); const [people, setPeople] = useState([]); const [meetings, setMeetings] = useState([]);
   const [note, setNote] = useState(''); const [busy, setBusy] = useState(false); const [logging, setLogging] = useState(false);
@@ -422,13 +429,13 @@ export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say,
             <div className="acctrow">
               <div><small>Client account</small>{org ? <b>{org.name} <span className={`statuspill ${org.status === 'active' ? 'ok' : 'navy'}`}>{org.status}</span></b> : <b className="sm">not a client yet</b>}</div>
               <div className="spacer" />
-              {org ? <><button className="btn-xs" onClick={() => { nav?.('onboarding', { org: org.id }); onClose(); }}>Onboarding →</button><button className="btn-xs" onClick={() => { nav?.('clientsettings', { org: org.id }); onClose(); }}>Client settings →</button></>
+              {org ? <><button className="btn-xs" onClick={() => { goTab?.('onboarding', { org: org.id }); onClose(); }}>Onboarding →</button>{!rep && <button className="btn-xs" onClick={() => { nav?.('owner', { tab: 'admin', section: 'clients', org: org.id }); onClose(); }}>Client settings →</button>}</>
                 : lead.stage !== 'dnc' && <button className="btn-xs primary" onClick={() => setStage('signed')}>Won — make them a client</button>}
             </div>
             <div className="acctrow">
-              <div><small>Quotes</small>{myQuotes.length ? <div className="qlist">{myQuotes.map((q) => <button key={q.id} className="qchip" onClick={() => { nav?.('quotes', { quote: q.id }); onClose(); }}><b>{q.label}</b><span className={`pill ${q.status === 'accepted' ? 'ok' : q.status === 'sent' ? 'navy' : 'muted'}`}>{q.status}</span>{quoteMonthly(q) != null && <span>{money(quoteMonthly(q))}/mo</span>}{q.internal_only ? <span className="sm">internal</span> : null}</button>)}</div> : <b className="sm">no quote yet</b>}</div>
+              <div><small>Quotes</small>{myQuotes.length ? <div className="qlist">{myQuotes.map((q) => <button key={q.id} className="qchip" onClick={() => { goTab?.('quotes', { quote: q.id }); onClose(); }}><b>{q.label}</b><span className={`pill ${q.status === 'accepted' ? 'ok' : q.status === 'sent' ? 'navy' : 'muted'}`}>{q.status}</span>{quoteMonthly(q) != null && <span>{money(quoteMonthly(q))}/mo</span>}{q.internal_only ? <span className="sm">internal</span> : null}</button>)}</div> : <b className="sm">no quote yet</b>}</div>
               <div className="spacer" />
-              <button className="btn-xs" onClick={() => { nav?.('quotes', { lead: lead.id }); onClose(); }}>+ New quote</button>
+              <button className="btn-xs" onClick={() => { goTab?.('quotes', { lead: lead.id }); onClose(); }}>+ New quote</button>
             </div>
           </div>
           {tab === 'activity' && (

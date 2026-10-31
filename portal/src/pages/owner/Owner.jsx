@@ -6,13 +6,19 @@ import { ownerFn, getToken, setToken } from './util';
 import Financials from './Financials';
 import Sales from './Sales';
 import Strategies from './Strategies';
+import Compliance from '../Compliance';
+import AdminSettings from '../AdminSettings';
+import ClientSettings from '../ClientSettings';
+import Marketplaces from '../Marketplaces';
 import Team from './Team';
 
-const TABS = [['fin', 'Financials'], ['sales', 'Sales'], ['team', 'Team'], ['strat', 'Strategies'], ['settings', 'Settings']];
+const TABS = [['sales', 'Sales'], ['fin', 'Financials'], ['team', 'Team'], ['strat', 'Strategies'], ['docs', 'Documents review'], ['admin', 'Admin settings']];
+const ADMIN_SECTIONS = [['staff', 'Staff & access'], ['clients', 'Client settings'], ['integrations', 'Integrations'], ['connections', 'Connections & keys']];
 
-export default function Owner({ me, go: nav }) {
+export default function Owner({ me, go: nav, params }) {
   const [status, setStatus] = useState(null);     // from action:status
-  const [tab, setTab] = useState('fin');
+  const [tab, setTab] = useState(params?.tab || 'sales'); const [section, setSection] = useState(params?.section || 'staff');
+  useEffect(() => { if (params?.tab) setTab(params.tab); if (params?.section) setSection(params.section); }, [params?.tab, params?.section]);
   const [flash, setFlash] = useState(() => {       // QuickBooks round-trip lands with #owner=qbo|ok|msg
     const h = window.location.hash; if (!h.startsWith('#owner=qbo')) return null;
     const [, ok, msg] = h.slice(7).split('|'); history.replaceState(null, '', window.location.pathname);
@@ -32,7 +38,7 @@ export default function Owner({ me, go: nav }) {
   return (
     <div className="owner">
       <div className="pagehead">
-        <div><h1>Owner<span className="dot">.</span></h1><p className="sub">Money, leads and the plays behind them. Only you can open this.</p></div>
+        <div><h1>Admin<span className="dot">.</span></h1><p className="sub">Sales, money, the team, and every setting — in one place. Only you can open this.</p></div>
         <div className="glance">
           <div><small>QuickBooks</small><b>{status.qbo?.connected_at ? <span className="statuspill ok">Connected</span> : <span className="statuspill muted">Not connected</span>}</b></div>
           <div><small>Smartlead</small><b>{status.smartlead_key_set ? <span className="statuspill ok">Key saved</span> : <span className="statuspill muted">No key</span>}</b></div>
@@ -45,7 +51,16 @@ export default function Owner({ me, go: nav }) {
       {tab === 'sales' && <Sales me={me} status={status} refreshStatus={refresh} nav={nav} />}
       {tab === 'team' && <Team />}
       {tab === 'strat' && <Strategies status={status} />}
-      {tab === 'settings' && <Settings status={status} refreshStatus={refresh} />}
+      {tab === 'docs' && <div className="embed"><Compliance me={me} /></div>}
+      {tab === 'admin' && (
+        <>
+          <div className="card ownertabs sub"><div className="tabs">{ADMIN_SECTIONS.map(([k, l]) => <button key={k} className={section === k ? 'on' : ''} onClick={() => setSection(k)}>{l}</button>)}</div></div>
+          {section === 'staff' && <div className="embed"><AdminSettings me={me} /></div>}
+          {section === 'clients' && <div className="embed"><ClientSettings params={params} /></div>}
+          {section === 'integrations' && <div className="embed"><Marketplaces /></div>}
+          {section === 'connections' && <Settings status={status} refreshStatus={refresh} />}
+        </>
+      )}
     </div>
   );
 }

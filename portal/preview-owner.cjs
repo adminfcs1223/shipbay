@@ -97,9 +97,10 @@ const TABLES = { sales_rep_settings: [], v_gmail_accounts: [{ user_id: UID, emai
   page.on('pageerror', (e) => console.log('PAGE ERROR', e.message));
   page.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE', m.text().slice(0, 200)); });
   await page.goto('http://localhost:4173/'); await page.waitForTimeout(1200);
-  await page.getByRole('button', { name: 'Financials & sales' }).click(); await page.waitForTimeout(1500);
+  await page.getByRole('button', { name: 'Admin' }).click(); await page.waitForTimeout(1500);
   fs.mkdirSync('shots', { recursive: true });
-  await page.screenshot({ path: 'shots/01-financials.png', fullPage: true });
+  await page.screenshot({ path: 'shots/00-admin-landing.png', fullPage: true });
+  await page.locator('.ownertabs .tabs button', { hasText: /^Financials$/ }).first().click(); await page.waitForTimeout(1200); await page.screenshot({ path: 'shots/01-financials.png', fullPage: true });
   await page.getByRole('button', { name: '+ New ▾' }).click(); await page.waitForTimeout(200); await page.getByRole('button', { name: 'Expense', exact: true }).click(); await page.waitForTimeout(300); await page.screenshot({ path: 'shots/02-add-expense.png' }); await page.getByRole('button', { name: 'Cancel' }).click().catch(() => {});
   await page.locator('.ownertabs .tabs button', { hasText: /^Sales$/ }).click(); await page.waitForTimeout(1200); await page.screenshot({ path: 'shots/03-sales-overview.png', fullPage: true });
   await page.getByRole('button', { name: 'Pipeline', exact: true }).click(); await page.waitForTimeout(800); await page.screenshot({ path: 'shots/03b-pipeline.png', fullPage: true });
@@ -111,11 +112,13 @@ const TABLES = { sales_rep_settings: [], v_gmail_accounts: [{ user_id: UID, emai
   await page.locator('.ownertabs .tabs button', { hasText: /^Team$/ }).click(); await page.waitForTimeout(1200); await page.screenshot({ path: 'shots/07b-team.png', fullPage: true });
   await page.getByRole('button', { name: 'Strategies', exact: true }).click(); await page.waitForTimeout(1200); await page.screenshot({ path: 'shots/08-strategies.png', fullPage: true });
   await page.getByRole('button', { name: 'Email campaign' }).click(); await page.waitForTimeout(800); await page.screenshot({ path: 'shots/08b-strategies-email.png', fullPage: true });
-  await page.getByRole('button', { name: 'Settings', exact: true }).click(); await page.waitForTimeout(600); await page.screenshot({ path: 'shots/09-settings.png', fullPage: true });
-  await page.locator('.sidenav .navitem', { hasText: /^Sales$/ }).click(); await page.waitForTimeout(1200); await page.screenshot({ path: 'shots/10-salesdesk.png', fullPage: true });
+  await page.getByRole('button', { name: 'Admin settings', exact: true }).click(); await page.waitForTimeout(600); await page.screenshot({ path: 'shots/09-admin-settings.png', fullPage: true }); await page.getByRole('button', { name: 'Connections & keys' }).click(); await page.waitForTimeout(500); await page.screenshot({ path: 'shots/09b-connections.png', fullPage: true });
+  await page.locator('.sidenav .navitem', { hasText: /^CRM$/ }).click(); await page.waitForTimeout(1200); await page.screenshot({ path: 'shots/10-salesdesk.png', fullPage: true });
   await page.getByRole('button', { name: 'Bonus', exact: true }).click(); await page.waitForTimeout(800); await page.screenshot({ path: 'shots/11-bonus.png', fullPage: true });
   await page.locator('.ownertabs .tabs button', { hasText: /^Settings$/ }).click(); await page.waitForTimeout(800); await page.screenshot({ path: 'shots/12-rep-settings.png', fullPage: true });
   await page.locator('.ownertabs .tabs button', { hasText: /^Conversations/ }).click(); await page.waitForTimeout(800); await page.selectOption('.srcpick', 'email'); await page.waitForTimeout(600); await page.screenshot({ path: 'shots/13-email-inbox.png', fullPage: true });
   await page.locator('.mrow').nth(1).click(); await page.waitForTimeout(700); await page.getByRole('button', { name: 'This is a lead' }).click(); await page.waitForTimeout(300); await page.screenshot({ path: 'shots/14-email-thread.png', fullPage: true });
+  await page.locator('.ownertabs .tabs button', { hasText: /^Quotes$/ }).click(); await page.waitForTimeout(900); await page.screenshot({ path: 'shots/15-crm-quotes.png', fullPage: true });
+  await page.getByRole('button', { name: '+ New quote' }).click(); await page.waitForTimeout(500); await page.locator('#acctlist').evaluate(() => {}); await page.locator('input[list=acctlist]').fill('Northfork Candle'); await page.waitForTimeout(300); await page.screenshot({ path: 'shots/16-quick-quote.png', fullPage: true });
   await browser.close(); srv.close(); console.log('done');
 })();

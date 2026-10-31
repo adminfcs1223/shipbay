@@ -1198,3 +1198,33 @@ select.statuspill.ok, select.statuspill.warn, select.statuspill.bad, select.stat
 .owner .duprow .dmain .sm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .owner .dupgroup .row { display: flex; align-items: center; gap: 8px; padding-top: 4px; }
 .quotes .field small.ok { color: #177A56; }
+
+/* ---- pages embedded as subtabs (CRM → Quotes / Onboarding, Admin → settings): compact head, keep the buttons ---- */
+.embed > .pagehead { margin: 0 0 12px; padding: 0; border: 0; }
+.embed > .pagehead h1 { font-size: 18px; }
+.embed > .pagehead .sub { display: none; }
+.embed > .pagehead .glance { display: none; }
+.owner .ownertabs.sub { padding: 4px 8px; }
+.owner .ownertabs.sub .tabs button { font-size: 13px; }
+/* model picker + quick quote */
+.modelrow { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.modelrow button { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 6px 12px; font: 600 13px var(--font-body); color: var(--navy); cursor: pointer; }
+.modelrow button.on { background: var(--navy); color: #fff; border-color: var(--navy); }
+.modal.xwide { width: min(1120px, 100%); }
+.quickgrid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.9fr); gap: 22px; align-items: start; }
+.quickgrid.detailquick { padding: 16px 18px 20px; }
+.quickform .lbl { margin-top: 12px; }
+.quickform .qrow { flex-wrap: wrap; }
+.quickbill { position: sticky; top: 12px; display: grid; gap: 12px; }
+.quickbill .actions { justify-content: flex-end; margin: 0; }
+.billcard { background: #f7f8fa; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.billhead { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 15px; }
+table.bill { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.bill td { padding: 5px 0; border-bottom: 1px solid #e8ecf1; vertical-align: top; }
+table.bill td.n { text-align: right; white-space: nowrap; }
+table.bill tfoot td { border-bottom: 0; }
+table.bill tr.tot td { font-weight: 800; font-size: 15px; padding-top: 10px; color: var(--navy); }
+.billnote { margin-top: 10px; }
+.billmargin { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 12.5px; color: var(--muted); }
+.billmargin b { font-size: 15px; } .billmargin b.pos { color: #177A56; } .billmargin b.neg { color: #B03A33; }
+@media (max-width: 960px) { .quickgrid { grid-template-columns: minmax(0, 1fr); } .quickbill { position: static; } }

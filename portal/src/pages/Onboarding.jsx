@@ -55,7 +55,7 @@ export const PhaseIcon = ({ kind }) => {
   }
 };
 
-export default function Onboarding({ me, params }) {
+export default function Onboarding({ me, params, embedded = false }) {
   const [accounts, setAccounts] = useState(null);
   const [selected, setSelected] = useState(null);
   const [adding, setAdding] = useState(false);

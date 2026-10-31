@@ -6,7 +6,6 @@ import Compliance from './pages/Compliance';
 import ClientHome from './pages/ClientHome';
 import ClientDocuments from './pages/ClientDocuments';
 import ClientSettings from './pages/ClientSettings';
-import Skus from './pages/Skus';
 import Marketplaces from './pages/Marketplaces';
 import ClientProducts from './pages/ClientProducts';
 import Orders from './pages/Orders';
@@ -227,20 +226,14 @@ const STAFF_NAV = [
   { key: 'orders', label: 'Orders', icon: Ico.orders, page: Orders, brandFirst: true },
   { key: 'receiving', label: 'Receiving', icon: Ico.receiving, page: Receiving, brandFirst: true },
   { key: 'pack', label: 'Pack & Ship', icon: Ico.pack, page: PackShip, brandFirst: true },
-  { group: 'Clients' },
-  { key: 'onboarding', label: 'Onboarding', icon: Ico.onboarding, page: Onboarding },
-  { key: 'quotes', label: 'Quotes', icon: Ico.quotes, page: Quotes },
-  { key: 'compliance', label: 'Documents review', icon: Ico.compliance, page: Compliance },
-  { key: 'skus', label: 'SKUs', icon: Ico.skus, page: Skus },
-  { key: 'settings', label: 'Client settings', icon: Ico.settings, page: ClientSettings },
-  { group: 'Setup' },
-  { key: 'markets', label: 'Integrations', icon: Ico.markets, page: Marketplaces },
-  { key: 'admin', label: 'Admin settings', icon: Ico.admin, page: AdminSettings, adminOnly: true },
   { group: 'Sales', salesOnly: true },
-  { key: 'salesdesk', label: 'Sales', icon: Ico.sales, page: SalesDesk, salesOnly: true },
+  { key: 'salesdesk', label: 'CRM', icon: Ico.sales, page: SalesDesk, salesOnly: true },
   { group: 'Owner', ownerOnly: true },
-  { key: 'owner', label: 'Financials & sales', icon: Ico.owner, page: Owner, ownerOnly: true },
+  { key: 'owner', label: 'Admin', icon: Ico.owner, page: Owner, ownerOnly: true },
 ];
+// Onboarding, Quotes, Documents review, Client settings, Integrations and Admin settings live inside CRM / Admin now;
+// the pages stay importable so deep links (go('onboarding', …)) still resolve.
+const HIDDEN_PAGES = { onboarding: Onboarding, quotes: Quotes, compliance: Compliance, settings: ClientSettings, markets: Marketplaces, admin: AdminSettings };
 const CLIENT_NAV = [
   { group: 'Your account' },
   { key: 'home', label: 'Overview', icon: Ico.home, page: ClientHome },
@@ -262,7 +255,7 @@ function Shell({ me }) {
   const go = (key, p = {}) => { if (p.org) setBrand(p.org); setParams(p); setPage(key); };
   useEffect(() => { if (!page && items.length) setPage(window.location.hash.startsWith('#owner') && items.some((n) => n.key === 'owner') ? 'owner' : items[0].key); }, [items.length, page]);
   const active = items.find((n) => n.key === page);
-  const Page = active?.page;
+  const Page = active?.page || (me?.isStaff && HIDDEN_PAGES[page]) || null;
   const signOut = async () => { await supabase.auth.signOut(); if (splitMode) window.location.replace(authUrl()); };
 
   return (

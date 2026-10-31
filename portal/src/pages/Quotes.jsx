@@ -4,14 +4,14 @@
 // Math lives in ../quote.js, the printed document in ../proposal.js; a quote row is just the saved inputs.
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib';
-import { compute, scenarios, phases, ratesFromCard, serviceList, money, pct, fmtVol, MODELS, MODEL, modelOf, isOneTime, VAS_GROUPS, INCLUDED, DEFAULT_INCLUDED, DEFAULT_PROPOSAL, BENCHMARKS, BENCHMARK_SOURCES, DEFAULT_INPUTS, DEFAULT_COSTS } from '../quote';
+import { compute, scenarios, phases, ratesFromCard, serviceList, money, pct, fmtVol, MODELS, MODEL, modelOf, isOneTime, VAS_GROUPS, INCLUDED, DEFAULT_INCLUDED, DEFAULT_PROPOSAL, BENCHMARKS, BENCHMARK_SOURCES, DEFAULT_INPUTS, DEFAULT_COSTS, RATE_CARD_V2 } from '../quote';
 import { openProposal } from '../proposal';
 
 const STATUS = { draft: ['Draft', 'muted'], sent: ['Sent', 'navy'], accepted: ['Accepted', 'ok'], declined: ['Declined', 'bad'], superseded: ['Superseded', 'muted'] };
 const PACKAGING = [['client', 'Client-supplied'], ['shipbay', 'ShipBay supplies']];
 const PARCEL = ['dtc', 'hybrid', 'subscription', 'launch'];
 
-export default function Quotes({ me, params }) {
+export default function Quotes({ me, params, embedded = false }) {
   const [quotes, setQuotes] = useState(null); const [accounts, setAccounts] = useState([]); const [prefill, setPrefill] = useState(null);
   const [card, setCard] = useState(null);
   const [sel, setSel] = useState('card');
@@ -35,26 +35,28 @@ export default function Quotes({ me, params }) {
   const flash = (kind, text) => setMsg({ kind, text });
   const createQuote = async (f) => {
     const orders = Number(f.orders) || DEFAULT_INPUTS.orders;
-    const rates = card ? ratesFromCard(card, orders) : {};
-    const inputs = { ...DEFAULT_INPUTS, orders, ...(f.model === 'subscription' ? { batch_share: 1, batch_days: 3, drops_per_month: 1, units_per_order: 4 } : {}), ...(f.model === 'launch' ? { batch_days: 5, storage_months: 2, pallets: 6, inbound_pallets: 6 } : {}), ...(f.model === 'b2b' ? { pallets_out: Math.ceil(orders / 4) } : {}), ...(f.model === 'fba' ? { cartons_out: Math.ceil(orders / 24), pallets_out: Math.ceil(orders / 800) } : {}), ...(f.model === 'storage' ? { pallets: orders, pallet_moves: Math.ceil(orders / 2), shelves: 0 } : {}), ...(f.model === 'project' ? { kits: 0, materials: 0, pallets: 0, shelves: 0, inbound_pallets: 1, inbound_cartons: 0 } : {}) };
-    const { data, error } = await supabase.from('quotes').insert({ company: f.company.trim(), contact_name: f.contact_name || null, contact_email: f.contact_email || null, contact_phone: f.contact_phone || null, lead_id: f.lead_id || null, org_id: f.org_id || null, label: f.label || 'Quote', model: f.model, inputs, rates, costs: DEFAULT_COSTS, services: {}, proposal: { included: DEFAULT_INCLUDED }, scenarios: [orders, Math.round(orders * 1.5), orders * 2], created_by: me?.id }).select().single();
+    const c = card || RATE_CARD_V2;
+    const rates = ratesFromCard(c, orders, f.model, Number(f.inputs?.drops_per_month) || 1);
+    const inputs = { ...DEFAULT_INPUTS, ...(f.model === 'subscription' ? { batch_share: 1, batch_days: 3, drops_per_month: 1, units_per_order: 1 } : {}), ...(f.model === 'launch' ? { batch_days: 5, storage_months: 2, pallets: 6, inbound_pallets: 6 } : {}), ...(f.model === 'b2b' ? { pallets_out: 2 } : {}), ...(f.inputs || {}), orders };
+    const { data, error } = await supabase.from('quotes').insert({ company: f.company.trim(), contact_name: f.contact_name || null, contact_email: f.contact_email || null, contact_phone: f.contact_phone || null, lead_id: f.lead_id || null, org_id: f.org_id || null, label: f.label || 'Quote', model: f.model, inputs, rates, costs: DEFAULT_COSTS, services: {}, proposal: { included: DEFAULT_INCLUDED }, scenarios: [Math.round(orders * 0.75), orders, Math.round(orders * 1.5)], created_by: me?.id || null }).select('id').single();
     if (error) return flash('err', error.message);
     setAdding(false); setPrefill(null); await load(); setSel(data.id);
   };
+
 
   const groups = useMemo(() => { const g = {}; for (const q of quotes || []) (g[q.company] ||= []).push(q); return g; }, [quotes]);
   const current = sel !== 'card' ? (quotes || []).find((q) => q.id === sel) : null;
 
   return (
     <>
-      <div className="pagehead">
+      {!embedded && <div className="pagehead">
         <div><h1>Quotes<span className="dot">.</span></h1><p className="sub">What each prospect pays, what it costs us to serve them, and what’s left. Pick the model that fits how they sell, switch on the extras they need, and print a proposal they can sign.</p></div>
         <div className="glance">
           <div><small>Quotes</small><b>{(quotes || []).filter((q) => !q.internal_only).length}</b></div>
           <div><small>Sent</small><b>{(quotes || []).filter((q) => q.status === 'sent').length}</b></div>
           <div><small>Accepted</small><b>{(quotes || []).filter((q) => q.status === 'accepted').length}</b></div>
         </div>
-      </div>
+      </div>}
       {msg && <div className={`msg ${msg.kind} flash`}>{msg.text}<button onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
 
       <div className="ops quotes">
@@ -75,38 +77,94 @@ export default function Quotes({ me, params }) {
           : current ? <QuoteDetail key={current.id} q={current} card={card} onSaved={(t) => { load(); flash('ok', t || 'Quote saved.'); }} onErr={(t) => flash('err', t)} />
           : <div className="card detail"><div className="empty">Pick a quote on the left.</div></div>}
       </div>
-      {adding && <NewQuote onClose={() => { setAdding(false); setPrefill(null); }} onCreate={createQuote} prefill={prefill} accounts={accounts} />}
+      {adding && <NewQuote onClose={() => { setAdding(false); setPrefill(null); }} onCreate={createQuote} prefill={prefill} accounts={accounts} card={card} />}
     </>
   );
 }
 
-/* ---------- new quote: company + model ---------- */
-function NewQuote({ onClose, onCreate, prefill, accounts = [] }) {
-  const [f, setF] = useState({ company: '', contact_name: '', contact_email: '', contact_phone: '', lead_id: null, org_id: null, label: 'Quote', model: 'dtc', orders: 500, ...(prefill || {}) });
-  // typing a company that is already an account links the quote to it (one profile everywhere)
+/* ---------- new quote: the basics from the rate-card sheet → a quote, instantly ---------- */
+function NewQuote({ onClose, onCreate, prefill, accounts = [], card }) {
+  const [f, setF] = useState({ company: '', contact_name: '', contact_email: '', contact_phone: '', lead_id: null, org_id: null, label: 'Quote', model: 'dtc', orders: 500, inputs: { ...QUICK_DEFAULTS }, ...(prefill || {}) });
+  const [busy, setBusy] = useState(false);
+  const setI = (k, v) => setF((x) => ({ ...x, inputs: { ...x.inputs, [k]: v } }));
   const pickCompany = (v) => { const a = accounts.find((x) => (x.company || '').toLowerCase() === v.trim().toLowerCase()); setF(a ? { ...f, company: a.company, lead_id: a.id, org_id: a.org_id || null, contact_name: f.contact_name || a.contact_name || '', contact_email: f.contact_email || a.email || '', contact_phone: f.contact_phone || a.phone || '' } : { ...f, company: v, lead_id: null, org_id: null }); };
   const linked = f.lead_id ? accounts.find((x) => x.id === f.lead_id) : null;
-  const [busy, setBusy] = useState(false);
-  const m = MODEL[f.model];
+  // live bill from the standard card
+  const c = card || RATE_CARD_V2; const orders = Number(f.orders) || 0;
+  const draft = { model: f.model, inputs: { ...DEFAULT_INPUTS, ...(f.model === 'subscription' ? { batch_share: 1, batch_days: 3, units_per_order: 1 } : {}), ...f.inputs, orders }, rates: ratesFromCard(c, orders, f.model, Number(f.inputs.drops_per_month) || 1), costs: DEFAULT_COSTS, services: {} };
+  const m = useMemo(() => compute(draft), [JSON.stringify(draft)]);
   const submit = async (e) => { e.preventDefault(); if (!f.company.trim()) return; setBusy(true); await onCreate(f); setBusy(false); };
   return (
     <div className="overlay" onClick={onClose}>
-      <form className="modal wide" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
-        <h3>New quote<span className="dot">.</span></h3>
-        <p className="lead">Start from how they sell. Every number is editable afterwards and the quote starts from the standard rate card.</p>
-        <div className="grid2">
-          <div className="field"><label>Company</label><input list="acctlist" value={f.company} onChange={(e) => pickCompany(e.target.value)} autoFocus required /><datalist id="acctlist">{accounts.map((a) => <option key={a.id} value={a.company || ''}>{[a.contact_name, a.email].filter(Boolean).join(' · ')}</option>)}</datalist>{linked ? <small className="ok">Linked to the account in Sales{linked.org_id ? ' (already a client)' : ''}.</small> : f.company.trim() ? <small>New company — an account is created in Sales with it.</small> : null}</div>
-          <div className="field"><label>Quote label</label><input value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} /></div>
-          <div className="field"><label>Contact name</label><input value={f.contact_name} onChange={(e) => setF({ ...f, contact_name: e.target.value })} /></div>
-          <div className="field"><label>Contact email</label><input type="email" value={f.contact_email} onChange={(e) => setF({ ...f, contact_email: e.target.value })} /></div>
+      <form className="modal xwide quick" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <div className="cardhead"><h3>New quote<span className="dot">.</span></h3><span className="sm">Their basics in, a quote out — from the {c.label || 'standard rate card'}. Fine-tune anything afterwards under Advanced quote.</span><div className="spacer" /><button type="button" className="btn-xs" onClick={onClose}>×</button></div>
+        <div className="quickgrid">
+          <div className="quickform">
+            <div className="lbl">Who</div>
+            <div className="grid2">
+              <div className="field"><label>Company</label><input list="acctlist" value={f.company} onChange={(e) => pickCompany(e.target.value)} autoFocus required /><datalist id="acctlist">{accounts.map((a) => <option key={a.id} value={a.company || ''}>{[a.contact_name, a.email].filter(Boolean).join(' · ')}</option>)}</datalist>{linked ? <small className="ok">Linked to the account in Sales{linked.org_id ? ' (already a client)' : ''}.</small> : f.company.trim() ? <small>New company — an account is created in Sales with it.</small> : null}</div>
+              <div className="field"><label>Contact</label><input value={f.contact_name} onChange={(e) => setF({ ...f, contact_name: e.target.value })} /></div>
+              <div className="field"><label>Email</label><input type="email" value={f.contact_email} onChange={(e) => setF({ ...f, contact_email: e.target.value })} /></div>
+              <div className="field"><label>Phone</label><input value={f.contact_phone} onChange={(e) => setF({ ...f, contact_phone: e.target.value })} /></div>
+            </div>
+            <QuickForm model={f.model} setModel={(k) => setF({ ...f, model: k })} orders={f.orders} setOrders={(v) => setF({ ...f, orders: v })} inputs={f.inputs} setI={setI} />
+          </div>
+          <div className="quickbill">
+            <BillCard m={m} model={f.model} tier={draft.rates.tier} />
+            <div className="actions"><button type="button" className="btn-sm" onClick={onClose}>Cancel</button><button className="btn-sm primary" disabled={busy || !f.company.trim()}>{busy ? 'Creating…' : 'Create quote'}</button></div>
+          </div>
         </div>
-        <div className="lbl">Quote model</div>
-        <div className="modelgrid">
-          {MODELS.map((x) => <label key={x.key} className={f.model === x.key ? 'on' : ''}><input type="radio" name="model" checked={f.model === x.key} onChange={() => setF({ ...f, model: x.key })} /><b>{x.label}</b><span>{x.desc}</span></label>)}
-        </div>
-        <div className="field" style={{ maxWidth: 260 }}><label>{m.volume}</label><input type="number" min={1} value={f.orders} onChange={(e) => setF({ ...f, orders: e.target.value })} /></div>
-        <div className="actions"><button type="button" className="btn-sm" onClick={onClose}>Cancel</button><button className="btn-sm primary" disabled={busy || !f.company.trim()}>{busy ? 'Creating…' : 'Create quote'}</button></div>
       </form>
+    </div>
+  );
+}
+
+/** the inputs on the rate-card sheet, nothing else */
+const QUICK_DEFAULTS = { units_per_order: 1.2, packaging: 'client', box_share: 0.2, pallets: 2, pallets_60: 0, pallets_72: 0, half_pallets: 0, shelves: 4, bins: 0, inbound_pallets: 1, inbound_addl_skus: 0, inbound_mixed_pallets: 0, inbound_cartons: 5, returns: 5, intl_share: 0.02, label_units: 0, b2b_orders: 0, drops_per_month: 1, batch_days: 3, skus: 25 };
+export function QuickForm({ model, setModel, orders, setOrders, inputs, setI, compact = false }) {
+  const M = MODEL[model]; const parcel = PARCEL.includes(model); const oneTime = isOneTime(model);
+  return (
+    <>
+      <div className="lbl">How they sell</div>
+      <div className="modelrow">{MODELS.map((x) => <button type="button" key={x.key} className={model === x.key ? 'on' : ''} title={x.desc} onClick={() => setModel(x.key)}>{x.short}</button>)}</div>
+      <div className="lbl">Volume</div>
+      <div className="qrow"><Num label={M.volume} value={orders} onChange={setOrders} small />{parcel && <Num label={model === 'subscription' ? 'Items per box' : 'Units per order'} value={inputs.units_per_order} onChange={(v) => setI('units_per_order', v)} step={0.1} small />}<Num label="SKUs" value={inputs.skus ?? 0} onChange={(v) => setI('skus', v)} small help="first 100 free" />
+        {model === 'subscription' && <><Num label="Drops / month" value={inputs.drops_per_month ?? 1} onChange={(v) => setI('drops_per_month', v)} small /><Num label="Ship window (days)" value={inputs.batch_days ?? 3} onChange={(v) => setI('batch_days', v)} small /></>}
+        {model === 'hybrid' && <Num label="Wholesale orders / mo" value={inputs.b2b_orders ?? 0} onChange={(v) => setI('b2b_orders', v)} small />}
+        {(model === 'b2b' || model === 'hybrid' || model === 'fba') && <Num label="Pallets built / mo" value={inputs.pallets_out ?? 0} onChange={(v) => setI('pallets_out', v)} small />}
+        {model === 'fba' && <Num label="Cartons out / mo" value={inputs.cartons_out ?? 0} onChange={(v) => setI('cartons_out', v)} small />}
+        {model === 'launch' && <Num label="Ship window (days)" value={inputs.batch_days ?? 5} onChange={(v) => setI('batch_days', v)} small />}
+        {model === 'project' && <Num label="Kits" value={inputs.kits ?? 0} onChange={(v) => setI('kits', v)} small />}
+        {model === 'storage' && <Num label="Pallet moves / mo" value={inputs.pallet_moves ?? 0} onChange={(v) => setI('pallet_moves', v)} small />}
+      </div>
+      {parcel && <><div className="lbl">Packaging</div>
+        <div className="qrow"><label className="qf small"><span>Who supplies it</span><select value={inputs.packaging} onChange={(e) => setI('packaging', e.target.value)}><option value="client">They do — $0</option><option value="shipbay">ShipBay box pack-out — $2.50/box</option></select></label>{inputs.packaging !== 'client' && <Num label="Share that needs a box" value={inputs.box_share} onChange={(v) => setI('box_share', v)} step={0.05} min={0} small help="rest ships in their mailer" />}</div></>}
+      <div className="lbl">Space they need {oneTime ? '' : '(average positions held)'}</div>
+      <div className="qrow">{model !== 'storage' && <Num label={'Std pallets ≤48"'} value={inputs.pallets} onChange={(v) => setI('pallets', v)} small />}<Num label={'Pallets ≤60"'} value={inputs.pallets_60 ?? 0} onChange={(v) => setI('pallets_60', v)} small /><Num label={'Tall ≤72"'} value={inputs.pallets_72 ?? 0} onChange={(v) => setI('pallets_72', v)} small /><Num label="Half pallets" value={inputs.half_pallets ?? 0} onChange={(v) => setI('half_pallets', v)} small /><Num label="Shelves" value={inputs.shelves} onChange={(v) => setI('shelves', v)} small /><Num label="Bins" value={inputs.bins} onChange={(v) => setI('bins', v)} small /></div>
+      <div className="lbl">Inbound {oneTime ? '' : '/ month'}</div>
+      <div className="qrow"><Num label="Single-SKU pallets" value={inputs.inbound_pallets} onChange={(v) => setI('inbound_pallets', v)} small /><Num label="Extra SKUs on pallets" value={inputs.inbound_addl_skus ?? 0} onChange={(v) => setI('inbound_addl_skus', v)} small help="+$5 each" /><Num label="Mixed pallets" value={inputs.inbound_mixed_pallets ?? 0} onChange={(v) => setI('inbound_mixed_pallets', v)} small help="unsorted, ≤10 SKUs" /><Num label="Parcel cartons" value={inputs.inbound_cartons} onChange={(v) => setI('inbound_cartons', v)} small /><Num label="Units to label" value={inputs.label_units ?? 0} onChange={(v) => setI('label_units', v)} small help="$0.25 each" /></div>
+      {parcel && <><div className="lbl">Returns & international</div>
+        <div className="qrow"><Num label={oneTime ? 'Returns expected' : 'Returns / mo'} value={inputs.returns} onChange={(v) => setI('returns', v)} small /><Num label="International share" value={inputs.intl_share} onChange={(v) => setI('intl_share', v)} step={0.01} min={0} small help="0.02 = 2%" /></div></>}
+    </>
+  );
+}
+
+/** the client's bill, line by line */
+export function BillCard({ m, model, tier, title }) {
+  const M = MODEL[model] || MODEL.dtc; const unitWord = M.unit.replace(/s$/, '');
+  return (
+    <div className="billcard">
+      <div className="billhead"><b>{title || (m.oneTime ? 'Project total' : 'A typical month')}</b>{tier && <span className="pill tiny">{tier}</span>}</div>
+      <table className="bill"><tbody>
+        {m.lines.filter((l) => l.amount || l.key === 'pack').map((l) => <tr key={l.key}><td>{l.label}</td><td className="n sm">{l.qty ? `${l.qty.toLocaleString()} × ${money(l.rate)}` : ''}</td><td className="n">{l.amount ? money(l.amount, 2) : '$0'}</td></tr>)}
+        {m.vasLines.map((l) => <tr key={l.key}><td>{l.label}</td><td className="n sm">{l.qty ? `${l.qty.toLocaleString()} × ${money(l.rate)}` : ''}</td><td className="n">{money(l.amount, 2)}</td></tr>)}
+      </tbody><tfoot>
+        <tr className="tot"><td>Services{m.oneTime ? '' : ' / month'}</td><td></td><td className="n">{money(m.services, 0)}</td></tr>
+        <tr><td className="sm">Per {unitWord}</td><td></td><td className="n sm">{money(m.servicesPerOrder)}</td></tr>
+        {m.setupTotal ? <tr><td className="sm">One-time</td><td></td><td className="n sm">{money(m.setupTotal, 0)}</td></tr> : null}
+      </tfoot></table>
+      <div className="sm billnote">Postage goes on their own carrier account — never on our invoice. No setup fee, no monthly minimum.</div>
+      <div className="billmargin"><span>ShipBay keeps</span><b className={m.contribution < 0 ? 'neg' : 'pos'}>{money(m.contribution, 0)}</b><span>{pct(m.margin)} · {m.laborHours} labor hrs</span></div>
     </div>
   );
 }
@@ -133,7 +191,7 @@ const norm = (q) => ({ model: modelOf(q), inputs: { ...DEFAULT_INPUTS, ...(q.inp
 function QuoteDetail({ q, card, onSaved, onErr }) {
   const [d, setD] = useState(() => ({ ...q, ...norm(q) }));
   const [phase, setPhase] = useState(null);
-  const [tab, setTab] = useState('pricing');
+  const [tab, setTab] = useState('quote');
   const [busy, setBusy] = useState(false);
   const [showCosts, setShowCosts] = useState(true);
   const setI = (k, v) => setD((x) => ({ ...x, inputs: { ...x.inputs, [k]: v } }));
@@ -163,7 +221,7 @@ function QuoteDetail({ q, card, onSaved, onErr }) {
     if (error) return onErr(error.message);
     onSaved();
   };
-  const useStandard = () => { if (!card) return onErr('No standard rate card yet.'); const r = ratesFromCard(card, vol); setD((x) => ({ ...x, rates: { ...r, intro: x.rates.intro || { months: 0 } } })); };
+  const useStandard = () => { const r = ratesFromCard(card || RATE_CARD_V2, vol, d.model, Number(d.inputs.drops_per_month) || 1); setD((x) => ({ ...x, rates: { ...r, intro: x.rates.intro || { months: 0 } } })); };
   const duplicate = async () => {
     const { error } = await supabase.from('quotes').insert({ org_id: q.org_id, company: q.company, ...payload(), label: `${d.label} (copy)`, status: 'draft' });
     if (error) return onErr(error.message); onSaved('Copied — it’s in the list as a draft.');
@@ -216,9 +274,18 @@ function QuoteDetail({ q, card, onSaved, onErr }) {
       <div className="qtabs">
         {hasIntro && <div className="seg">{phs.map((p) => <button key={p.key} className={ph === p.key ? 'on' : ''} onClick={() => setPhase(p.key)}>{p.label}{p.key === 'waived' ? ' · waivers' : p.key === 'intro' ? ' · founding rates' : ' · standard'}</button>)}</div>}
         <div className="spacer" />
-        <div className="tabs">{[['pricing', 'Pricing & profit'], ['services', `Value-added services${svc.filter((s) => s.on).length ? ` · ${svc.filter((s) => s.on).length}` : ''}`], ['proposal', 'Proposal']].map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}</div>
+        <div className="tabs">{[['quote', 'Quote'], ['pricing', 'Advanced quote'], ['services', `Value-added services${svc.filter((s) => s.on).length ? ` · ${svc.filter((s) => s.on).length}` : ''}`], ['proposal', 'Proposal']].map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}</div>
       </div>
 
+      {tab === 'quote' && (
+        <div className="quickgrid detailquick">
+          <div className="quickform">
+            <QuickForm model={d.model} setModel={(k) => setD({ ...d, model: k })} orders={d.inputs.orders} setOrders={(v) => setI('orders', v)} inputs={d.inputs} setI={setI} />
+            <div className="row" style={{ marginTop: 12 }}><button className="btn-sm" onClick={useStandard}>Re-price from the standard card</button><span className="sm">Rates stay as saved when you change volumes; this re-pulls the tier and every line from the card.</span></div>
+          </div>
+          <div className="quickbill"><BillCard m={m} model={model} tier={d.rates.tier} title={hasIntro ? cur.label : undefined} /></div>
+        </div>
+      )}
       {tab === 'pricing' && <>
         <div className="qgrid">
           {/* prospect profile */}

@@ -7,7 +7,7 @@ export default function SalesDesk({ me, go }) {
   return (
     <div className="owner">
       <div className="pagehead">
-        <div><h1>Sales<span className="dot">.</span></h1><p className="sub">Your pipeline, your replies, your booked calls — and the shared pool of untouched leads.</p></div>
+        <div><h1>CRM<span className="dot">.</span></h1><p className="sub">Your pipeline, replies, calls, quotes and onboarding — and the shared pool of untouched leads.</p></div>
       </div>
       <Sales me={me} status={null} refreshStatus={() => {}} rep nav={go} />
     </div>
