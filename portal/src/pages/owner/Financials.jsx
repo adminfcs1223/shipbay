@@ -9,19 +9,19 @@ const INCATS = ['Services revenue', 'Storage', 'Receiving', 'Other income'];
 const PALETTE = ['#FF6B15', '#101C2B', '#1E9E6F', '#3B82F6', '#A855F7', '#F59E0B', '#EF4444', '#14B8A6', '#6B7280', '#EC4899', '#84CC16', '#0EA5E9'];
 
 export default function Financials({ status, refreshStatus }) {
-  const [tx, setTx] = useState(null); const [ar, setAr] = useState(null);
+  const [tx, setTx] = useState(null); const [ar, setAr] = useState(null); const [rec, setRec] = useState([]);
   const [period, setPeriod] = useState(() => ({ kind: 'month', key: monthKey(new Date()) }));
-  const [pie, setPie] = useState('out');
-  const [adding, setAdding] = useState(null); const [editing, setEditing] = useState(null);
+  const [adding, setAdding] = useState(null); const [editing, setEditing] = useState(null); const [nutOpen, setNutOpen] = useState(false); const [newOpen, setNewOpen] = useState(false);
   const [q, setQ] = useState(''); const [showDupes, setShowDupes] = useState(false);
   const [msg, setMsg] = useState(null); const [busy, setBusy] = useState(false);
 
   const load = async () => {
-    const [t, r] = await Promise.all([
+    const [t, r, rc] = await Promise.all([
       fetchAll('fin_transactions', '*', (qq) => qq.order('txn_date', { ascending: false }).order('created_at', { ascending: false })),
       supabase.from('fin_qbo_reports').select('data').eq('report', 'AgedReceivables').order('fetched_at', { ascending: false }).limit(1).maybeSingle(),
+      fetchAll('fin_recurring', '*', (qq) => qq.order('amount', { ascending: false })),
     ]);
-    setTx(t); setAr(r.data ? arTotal(r.data.data) : null);
+    setTx(t); setAr(r.data ? arTotal(r.data.data) : null); setRec(rc);
   };
   useEffect(() => { load(); }, []);
 
@@ -30,13 +30,17 @@ export default function Financials({ status, refreshStatus }) {
   const sync = async () => { setBusy(true); const r = await ownerFn({ action: 'qbo_sync' }); setBusy(false); say(r, r.error ? null : `QuickBooks synced · ${r.imported || 0} transactions.`); load(); refreshStatus(); };
 
   const m = useMemo(() => tx ? summarize(tx, period) : null, [tx, period]);
+  const nut = useMemo(() => { const k = period.kind === 'month' ? period.key : monthKey(new Date()); return rec.filter((r) => r.starts.slice(0, 7) <= k && (!r.ends || r.ends.slice(0, 7) >= k)); }, [rec, period]);
+  const nutTotal = nut.reduce((a, r) => a + Number(r.amount), 0);
   if (!m) return <div className="card"><div className="empty">Loading…</div></div>;
 
   const qbo = status.qbo || {};
   const shift = (d) => { const [y, mo] = period.key.split('-').map(Number); setPeriod({ kind: 'month', key: monthKey(new Date(y, mo - 1 + d, 1)) }); };
   const title = period.kind === 'year' ? `${period.key} · year to date` : new Date(Number(period.key.slice(0, 4)), Number(period.key.slice(5, 7)) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
-  const slices = pie === 'out' ? m.outByCat : m.inByWho;
   const rows = [...m.rows].sort((a, b) => b.txn_date.localeCompare(a.txn_date)).filter((t) => (showDupes || !t.dupe) && (!q || [t.counterparty, t.description, t.category].filter(Boolean).some((s) => s.toLowerCase().includes(q.toLowerCase()))));
+  const monthRev = period.kind === 'month' ? m.inn : m.trend[m.trend.length - 1].inn;
+  const covered = nutTotal ? Math.min(1, monthRev / nutTotal) : 0;
+  const plMax = Math.max(1, m.inn, m.out);
 
   return (
     <>
@@ -46,45 +50,60 @@ export default function Financials({ status, refreshStatus }) {
           <button className="btn-sm" onClick={() => shift(-1)} disabled={period.kind !== 'month'}>‹</button>
           <b>{title}</b>
           <button className="btn-sm" onClick={() => shift(1)} disabled={period.kind !== 'month' || period.key >= monthKey(new Date())}>›</button>
-          <span className="seg tight"><button className={period.kind === 'month' ? 'on' : ''} onClick={() => setPeriod({ kind: 'month', key: monthKey(new Date()) })}>This month</button><button className={period.kind === 'year' ? 'on' : ''} onClick={() => setPeriod({ kind: 'year', key: String(new Date().getFullYear()) })}>This year</button></span>
+          <span className="seg tight"><button className={period.kind === 'month' ? 'on' : ''} onClick={() => setPeriod({ kind: 'month', key: monthKey(new Date()) })}>Month</button><button className={period.kind === 'year' ? 'on' : ''} onClick={() => setPeriod({ kind: 'year', key: String(new Date().getFullYear()) })}>Year</button></span>
         </div>
         <div className="qbo">
           {qbo.connected_at
-            ? <><span className="dotok" /> QuickBooks · {qbo.company_name || 'connected'} · synced {ago(qbo.last_sync_at)} <button className="btn-sm primary" disabled={busy} onClick={sync}>{busy ? '…' : 'Sync now'}</button></>
+            ? <><span className="dotok" /> QuickBooks synced {ago(qbo.last_sync_at)} <button className="btn-sm" disabled={busy} onClick={sync}>{busy ? '…' : 'Sync'}</button><a className="btn-sm" href="https://app.qbo.intuit.com/app/homepage" target="_blank" rel="noreferrer">Open QuickBooks ↗</a></>
             : <><span className="dotoff" /> QuickBooks not connected {status.qbo_keys_set ? <button className="btn-sm primary" disabled={busy} onClick={connect}>Connect</button> : <span className="sm">· add the app keys under Settings</span>}</>}
-          {qbo.last_error && <div className="sm neg">{qbo.last_error}</div>}
+          <div className="newmenu">
+            <button className="btn-sm primary" onClick={() => setNewOpen((v) => !v)}>+ New ▾</button>
+            {newOpen && <div className="menu" onMouseLeave={() => setNewOpen(false)}>
+              <button onClick={() => { setNewOpen(false); setAdding('expense'); }}>Expense</button>
+              <button onClick={() => { setNewOpen(false); setAdding('revenue'); }}>Income / invoice paid</button>
+              <button onClick={() => { setNewOpen(false); setAdding('owner_contribution'); }}>Money I put in</button>
+              <button onClick={() => { setNewOpen(false); setAdding('capex'); }}>Equipment purchase</button>
+            </div>}
+          </div>
         </div>
       </div>
+      {qbo.last_error && <div className="msg err flash">{qbo.last_error}</div>}
 
       <div className="kpis fin">
-        <div className="tile"><small>Money in</small><b className="pos">{money(m.inn)}</b><span>{m.inCount} payment{m.inCount === 1 ? '' : 's'}</span></div>
-        <div className="tile"><small>Money out</small><b>{money(m.out)}</b><span>{m.outCount} transaction{m.outCount === 1 ? '' : 's'}</span></div>
-        <div className={`tile ${m.net < 0 ? 'bad' : 'ok'}`}><small>Bottom line</small><b>{money(m.net)}</b><span>{m.prevNet != null ? `${monthLabel(m.prevKey)}: ${money(m.prevNet)}` : ' '}</span></div>
-        <div className="tile"><small>Owed to you</small><b>{money(ar ?? m.owed)}</b><span>{ar != null ? 'open invoices in QuickBooks' : 'unpaid invoices'}</span></div>
-      </div>
-
-      <div className="opsbar wrap actions">
-        <button className="btn-sm primary" onClick={() => setAdding('expense')}>+ Add expense</button>
-        <button className="btn-sm" onClick={() => setAdding('revenue')}>+ Add income</button>
-        <button className="btn-sm" onClick={() => setAdding('owner_contribution')}>+ Money I put in</button>
-        <div className="spacer" />
-        <span className="sm">You’ve put in <b>{money(m.ownerAll)}</b> all-time · the business has spent <b>{money(m.spentAll)}</b> and earned <b>{money(m.earnedAll)}</b></span>
+        <div className="tile rev"><small>Revenue</small><b className="pos">{money(m.inn)}</b><span>{m.inCount} payment{m.inCount === 1 ? '' : 's'} in</span></div>
+        <div className="tile"><small>Expenses</small><b>{money(m.out)}</b><span>{m.outCount} transaction{m.outCount === 1 ? '' : 's'}</span></div>
+        <div className={`tile ${m.net < 0 ? 'bad' : 'ok'}`}><small>Net profit</small><b>{money(m.net)}</b><span>{m.prevNet != null ? `${monthLabel(m.prevKey)}: ${money(m.prevNet)}` : ' '}</span></div>
+        <div className="tile"><small>Open invoices</small><b>{money(ar ?? m.owed)}</b><span>{ar != null ? 'owed to you, per QuickBooks' : 'owed to you'}</span></div>
       </div>
 
       <div className="ownergrid">
+        <div className="card nutcard">
+          <div className="cardhead"><h3>Monthly nut</h3><span className="sm">what the business costs before a single order</span><div className="spacer" /><button className="btn-xs" onClick={() => setNutOpen(true)}>Edit</button></div>
+          <div className="nutnum"><b>{money(monthRev)}</b><span>of {money(nutTotal)} covered by this month’s revenue</span></div>
+          <div className="nutbar"><i style={{ width: `${covered * 100}%` }} /><em style={{ left: '100%' }} /></div>
+          <div className="nutfoot">{monthRev >= nutTotal && nutTotal > 0 ? <span className="pos">Nut covered · {money(monthRev - nutTotal)} over</span> : <span>{money(nutTotal - monthRev)} to go · {pct(covered)}</span>}<span className="sm">{nut.length} fixed costs</span></div>
+        </div>
         <div className="card">
-          <div className="cardhead"><h3>{pie === 'out' ? 'Where the money went' : 'Where the money came from'}</h3><span className="seg tight"><button className={pie === 'out' ? 'on' : ''} onClick={() => setPie('out')}>Out</button><button className={pie === 'in' ? 'on' : ''} onClick={() => setPie('in')}>In</button></span></div>
-          {slices.length === 0 ? <div className="empty">Nothing {pie === 'out' ? 'spent' : 'earned'} in this period.</div> : (
+          <div className="cardhead"><h3>Profit & loss</h3><span className="sm">{title}</span></div>
+          <div className="plbars">
+            <div className="plrow"><span>Income</span><div className="plbar"><i className="in" style={{ width: `${(m.inn / plMax) * 100}%` }} /></div><b className="pos">{money(m.inn)}</b></div>
+            <div className="plrow"><span>Expenses</span><div className="plbar"><i className="out" style={{ width: `${(m.out / plMax) * 100}%` }} /></div><b>{money(m.out)}</b></div>
+            <div className="plrow net"><span>Net profit</span><div /><b className={m.net < 0 ? 'neg' : 'pos'}>{money(m.net)}</b></div>
+          </div>
+        </div>
+        <div className="card">
+          <div className="cardhead"><h3>Expenses by category</h3></div>
+          {m.outByCat.length === 0 ? <div className="empty">Nothing spent in this period.</div> : (
             <div className="piewrap">
-              <Donut slices={slices} total={pie === 'out' ? m.out : m.inn} />
-              <ul className="legend">{slices.map((s, i) => (
-                <li key={s.name}><i style={{ background: PALETTE[i % PALETTE.length] }} /><span className="nm">{s.name}</span><b>{money(s.amount)}</b><span className="pc">{pct(s.amount / (pie === 'out' ? m.out : m.inn))}</span>{s.flag && <span className="flag" title={s.flag}>{s.flag}</span>}</li>
+              <Donut slices={m.outByCat} total={m.out} />
+              <ul className="legend">{m.outByCat.map((s, i) => (
+                <li key={s.name}><i style={{ background: PALETTE[i % PALETTE.length] }} /><span className="nm">{s.name}</span><b>{money(s.amount)}</b><span className="pc">{pct(s.amount / m.out)}</span>{s.flag && <span className="flag" title={s.flag}>{s.flag}</span>}</li>
               ))}</ul>
             </div>
           )}
         </div>
         <div className="card">
-          <div className="cardhead"><h3>Last 6 months</h3><span className="sm"><i className="sw in" /> in &nbsp; <i className="sw out" /> out</span></div>
+          <div className="cardhead"><h3>Last 6 months</h3><span className="sm"><i className="sw in" /> income &nbsp; <i className="sw out" /> expenses</span></div>
           <Trend months={m.trend} />
         </div>
       </div>
@@ -97,7 +116,7 @@ export default function Financials({ status, refreshStatus }) {
         </div>
         {rows.length === 0 ? <div className="empty">No transactions in this period.</div> : (
           <div className="tablewrap"><table className="ordertable fin txns">
-            <thead><tr><th>Date</th><th>Who</th><th>What</th><th>Category</th><th>From</th><th className="n">Amount</th></tr></thead>
+            <thead><tr><th>Date</th><th>Payee / customer</th><th>Memo</th><th>Category</th><th>Source</th><th className="n">Amount</th></tr></thead>
             <tbody>{rows.map((t) => (
               <tr key={t.id} className="click" onClick={() => setEditing(t)}>
                 <td className="sm mono">{t.txn_date.slice(5)}</td>
@@ -111,10 +130,33 @@ export default function Financials({ status, refreshStatus }) {
           </table></div>
         )}
       </div>
+      <div className="sm" style={{ margin: '8px 2px 0' }}>You’ve put in <b>{money(m.ownerAll)}</b> all-time · spent <b>{money(m.spentAll)}</b> · earned <b>{money(m.earnedAll)}</b></div>
 
       {adding && <TxModal kind={adding} onClose={() => setAdding(null)} onSaved={() => { setAdding(null); load(); }} say={say} />}
       {editing && <TxModal tx={editing} kind={editing.kind} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} say={say} />}
+      {nutOpen && <NutModal rec={rec} onClose={() => setNutOpen(false)} reload={load} say={say} />}
     </>
+  );
+}
+
+/* ---------- monthly nut: the fixed costs list ---------- */
+function NutModal({ rec, onClose, reload, say }) {
+  const [item, setItem] = useState(''); const [amt, setAmt] = useState('');
+  const k = monthKey(new Date()); const active = rec.filter((r) => r.starts.slice(0, 7) <= k && (!r.ends || r.ends.slice(0, 7) >= k));
+  const add = async (e) => { e.preventDefault(); if (!item.trim() || !amt) return; const { error } = await supabase.from('fin_recurring').insert({ item: item.trim(), category: 'Other', amount: Number(amt), starts: k + '-01' }); if (error) return say({ error: error.message }); setItem(''); setAmt(''); reload(); };
+  const stop = async (r) => { await supabase.from('fin_recurring').update({ ends: ymd(new Date()) }).eq('id', r.id); reload(); };
+  const setAmount = async (r, v) => { if (Number(v) === Number(r.amount)) return; await supabase.from('fin_recurring').update({ amount: Number(v) || 0 }).eq('id', r.id); reload(); };
+  return (
+    <div className="overlay" onClick={onClose}><div className="modal wide" onClick={(e) => e.stopPropagation()}>
+      <h3>Monthly nut</h3>
+      <p className="lead">Every cost that hits whether or not an order ships. Total right now: <b>{money(active.reduce((a, r) => a + Number(r.amount), 0))}</b> / month.</p>
+      <table className="ordertable fin"><tbody>{active.map((r) => <tr key={r.id}><td>{r.item}</td><td className="n"><input className="cellnum" type="number" step="0.01" defaultValue={r.amount} onBlur={(e) => setAmount(r, e.target.value)} /></td><td className="n"><button className="btn-xs" onClick={() => stop(r)}>Cancelled</button></td></tr>)}</tbody></table>
+      <form className="addgrid two" style={{ marginTop: 12 }} onSubmit={add}>
+        <label>New fixed cost<input value={item} onChange={(e) => setItem(e.target.value)} placeholder="e.g. Dialer" /></label>
+        <label>$ / month<input type="number" step="0.01" value={amt} onChange={(e) => setAmt(e.target.value)} /></label>
+        <div className="wide2 row" style={{ marginTop: 0 }}><div className="spacer" /><button className="btn-sm primary">Add</button><button type="button" className="btn-sm" onClick={onClose}>Done</button></div>
+      </form>
+    </div></div>
   );
 }
 
@@ -192,10 +234,10 @@ function Trend({ months }) {
 /* ---------- add / edit one transaction ---------- */
 function TxModal({ tx, kind, onClose, onSaved, say }) {
   const isQbo = tx?.source === 'qbo';
-  const [f, setF] = useState(tx ? { ...tx } : { txn_date: ymd(new Date()), kind, category: kind === 'revenue' ? 'Services revenue' : kind === 'owner_contribution' ? 'Owner contribution' : 'Software', counterparty: '', description: '', amount: '', paid: true });
+  const [f, setF] = useState(tx ? { ...tx } : { txn_date: ymd(new Date()), kind, category: kind === 'revenue' ? 'Services revenue' : kind === 'owner_contribution' ? 'Owner contribution' : kind === 'capex' ? 'Capex (racking, equipment)' : 'Software', counterparty: '', description: '', amount: '', paid: true });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
-  const titles = { expense: 'Add an expense', revenue: 'Add income', owner_contribution: 'Money you put in', capex: 'Equipment' };
+  const titles = { expense: 'Add an expense', revenue: 'Add income', owner_contribution: 'Money you put in', capex: 'Equipment purchase' };
   const save = async (e) => {
     e.preventDefault(); if (!f.amount || Number(f.amount) <= 0) return; setBusy(true);
     const row = { txn_date: f.txn_date, kind: f.kind, category: f.category, counterparty: f.counterparty || null, description: f.description || null, amount: Number(f.amount), paid: f.paid !== false };

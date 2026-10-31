@@ -35,7 +35,7 @@ export const ago = (iso) => {
 export const mmss = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
 export const hhmm = (sec) => (sec >= 3600 ? `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m` : `${Math.floor(sec / 60)}m`);
 
-export const STAGES = [['new', 'New'], ['contacted', 'Contacted'], ['replied', 'Replied'], ['call_booked', 'Call booked'], ['quoted', 'Quoted'], ['signed', 'Signed'], ['lost', 'Lost'], ['dnc', 'Do not contact']];
+export const STAGES = [['new', 'New'], ['contacted', 'Contacted'], ['replied', 'Replied'], ['call_booked', 'Call booked'], ['quoted', 'Quoted'], ['signed', 'Won'], ['lost', 'Lost'], ['dnc', 'Do not contact']];
 export const stageLabel = (s) => STAGES.find((x) => x[0] === s)?.[1] || s;
 export const stageClass = (s) => ({ signed: 'ok', call_booked: 'ok', quoted: 'ok', replied: 'warn', lost: 'bad', dnc: 'bad', new: 'muted', contacted: 'navy' }[s] || 'muted');
 

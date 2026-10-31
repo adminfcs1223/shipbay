@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../lib';
 import { ownerFn, fetchAll, money, pct, num, ago, mmss, hhmm, STAGES, stageLabel, stageClass, parseCsv, guessColumns } from './util';
 
-const SUB = [['overview', 'Overview'], ['master', 'All leads'], ['email', 'Email'], ['calls', 'Calls'], ['calendar', 'Calendar'], ['third', 'Third party']];
+const SUB = [['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['calendar', 'Calendar'], ['third', 'Partners']];
 // Storeleads list codes → what they are (hover text)
 export const LIST_NAMES = { A1: 'Self-ship brands · NJ metro', A2: 'Already on a 3PL · NJ metro', A3: 'Self-ship brands · Northeast', A4: 'Shopify Plus upgrades', B1: 'Founder-run · NJ metro', C1: 'Amazon sellers · Northeast', C2: 'Q4 overflow', X0: 'Control group' };
 export const listName = (code) => (code && LIST_NAMES[code] ? `${code} · ${LIST_NAMES[code]}` : code || '—');
@@ -27,6 +27,7 @@ export default function Sales({ me, status, refreshStatus }) {
       {msg && <div className={`msg ${msg.kind} flash`}>{msg.text}<button onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
       <div className="card ownertabs"><div className="tabs">{SUB.map(([k, l]) => <button key={k} className={sub === k ? 'on' : ''} onClick={() => setSub(k)}>{l}{k === 'email' && counts.replied ? <i>{counts.replied}</i> : null}</button>)}</div></div>
       {sub === 'overview' && <Overview leads={leads} sources={sources} counts={counts} go={setSub} />}
+      {sub === 'pipeline' && <Pipeline leads={leads} sources={sources} reload={load} say={say} />}
       {sub === 'master' && <Master leads={leads} sources={sources} reload={load} say={say} />}
       {sub === 'email' && <Email leads={leads} status={status} reload={load} refreshStatus={refreshStatus} say={say} />}
       {sub === 'calls' && <Calls me={me} leads={leads} reload={load} say={say} />}
@@ -103,6 +104,56 @@ function ChannelTable({ rows, mono }) {
   );
 }
 
+/* =================== Pipeline: the deals board =================== */
+const COLS = [['contacted', 'Contacted'], ['replied', 'Replied'], ['call_booked', 'Call booked'], ['quoted', 'Quoted'], ['signed', 'Won']];
+function Pipeline({ leads, sources, reload, say }) {
+  const [open, setOpen] = useState(null); const [adding, setAdding] = useState(false); const [src, setSrc] = useState(''); const [list, setList] = useState(''); const [more, setMore] = useState({}); const [drag, setDrag] = useState(null); const [over, setOver] = useState(null);
+  const pool = leads.filter((l) => (!src || l.source === src) && (!list || l.filter_id === list));
+  const col = (k) => pool.filter((l) => l.stage === k).sort((a, b) => (b.deal_value || 0) - (a.deal_value || 0) || (b.last_touch_at || '').localeCompare(a.last_touch_at || ''));
+  const move = async (l, stage) => {
+    if (!l || l.stage === stage) return;
+    const patch = { stage, last_touch_at: new Date().toISOString() };
+    if (stage === 'signed') { const v = window.prompt(`${l.company || l.email} is won. Expected services $ / month?`, l.deal_value || ''); if (v === null) return; patch.deal_value = Number(v) || null; patch.won_at = new Date().toISOString(); }
+    if (stage === 'lost') { const r = window.prompt('Why lost? (optional)', l.lost_reason || ''); if (r === null) return; patch.lost_reason = r || null; }
+    const { error } = await supabase.from('sales_leads').update(patch).eq('id', l.id); if (error) return say({ error: error.message }); reload();
+  };
+  const lost = pool.filter((l) => l.stage === 'lost').length; const dnc = pool.filter((l) => l.stage === 'dnc').length; const fresh = pool.filter((l) => l.stage === 'new').length;
+  const won = col('signed'); const wonVal = won.reduce((a, l) => a + Number(l.deal_value || 0), 0); const openVal = ['replied', 'call_booked', 'quoted'].flatMap(col).reduce((a, l) => a + Number(l.deal_value || 0), 0);
+  return (
+    <>
+      <div className="opsbar wrap">
+        <select value={src} onChange={(e) => setSrc(e.target.value)}><option value="">All channels</option>{sources.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</select>
+        <select value={list} onChange={(e) => setList(e.target.value)}><option value="">All lists</option>{lists(leads).map((f) => <option key={f} value={f}>{listName(f)}</option>)}</select>
+        <span className="sm">{num(fresh)} contacts not worked yet · {num(lost)} lost · {num(dnc)} do-not-contact</span>
+        <div className="spacer" />
+        <span className="sm">Open pipeline <b>{money(openVal)}/mo</b> · Won <b>{money(wonVal)}/mo</b></span>
+        <button className="btn-sm primary" onClick={() => setAdding(true)}>+ Add opportunity</button>
+      </div>
+      <div className="kanban">
+        {[...COLS, ['lost', 'Lost']].map(([k, label]) => { const items = col(k); const shown = items.slice(0, more[k] ? 500 : 40); const val = items.reduce((a, l) => a + Number(l.deal_value || 0), 0); return (
+          <div key={k} className={`kcol ${k} ${over === k ? 'over' : ''}`} onDragOver={(e) => { e.preventDefault(); setOver(k); }} onDragLeave={() => setOver(null)} onDrop={() => { setOver(null); move(drag, k); setDrag(null); }}>
+            <div className="khead"><b>{label}</b><span className="cnt">{num(items.length)}</span>{val > 0 && <span className="val">{money(val)}</span>}</div>
+            <div className="kcards">
+              {shown.map((l) => (
+                <div key={l.id} className={`kcard ${l.stage === 'replied' && !l.answered_at ? 'hot' : ''}`} draggable onDragStart={() => setDrag(l)} onDragEnd={() => setDrag(null)} onClick={() => setOpen(l)}>
+                  <div className="kt"><b>{l.company || l.domain || l.email}</b>{l.deal_value ? <span className="kv" title="expected services per month">{money(l.deal_value)}</span> : null}</div>
+                  <div className="sm">{[l.contact_name, l.city].filter(Boolean).join(' · ') || l.email}</div>
+                  <div className="kmeta"><span className="pill">{srcLabelPlain(l.source)}</span>{l.filter_id && <span className="pill">{l.filter_id}</span>}{l.assigned_to && <span className="pill connected">assigned</span>}<span className="sm">{ago(l.last_touch_at)}</span></div>
+                  {l.stage === 'replied' && !l.answered_at && <div className="sm neg">reply waiting</div>}
+                </div>
+              ))}
+              {items.length > shown.length && <button className="btn-xs" onClick={() => setMore({ ...more, [k]: true })}>Show all {num(items.length)}</button>}
+              {items.length === 0 && <div className="kempty">Drop a card here</div>}
+            </div>
+          </div>
+        ); })}
+      </div>
+      {open && <LeadDrawer lead={leads.find((x) => x.id === open.id) || open} sources={sources} onClose={() => setOpen(null)} reload={reload} say={say} />}
+      {adding && <LeadForm sources={sources} onClose={() => setAdding(false)} reload={reload} say={say} title="Add an opportunity" defaultStage="contacted" />}
+    </>
+  );
+}
+
 /* =================== Master =================== */
 function Master({ leads, sources, reload, say }) {
   const [q, setQ] = useState(''); const [src, setSrc] = useState(''); const [stage, setStage] = useState(''); const [list, setList] = useState(''); const [phoneOnly, setPhoneOnly] = useState(false); const [showOut, setShowOut] = useState(false); const [pushing, setPushing] = useState(false);
@@ -170,7 +221,7 @@ function LeadDrawer({ lead, sources, onClose, reload, say }) {
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const save = async () => {
     setBusy(true);
-    const patch = { company: f.company, domain: f.domain, contact_name: f.contact_name, email: f.email, phone: f.phone, title: f.title, city: f.city, state: f.state, est_sales_usd: f.est_sales_usd ? Number(f.est_sales_usd) : null, stage: f.stage, source: f.source, filter_id: f.filter_id, notes: f.notes, next_action_at: f.next_action_at ? new Date(f.next_action_at).toISOString() : null, in_calls: f.in_calls, in_email: f.in_email, assigned_to: f.assigned_to || null, answered_at: f.answered_at || null };
+    const patch = { company: f.company, domain: f.domain, contact_name: f.contact_name, email: f.email, phone: f.phone, title: f.title, city: f.city, state: f.state, est_sales_usd: f.est_sales_usd ? Number(f.est_sales_usd) : null, stage: f.stage, source: f.source, filter_id: f.filter_id, notes: f.notes, next_action_at: f.next_action_at ? new Date(f.next_action_at).toISOString() : null, in_calls: f.in_calls, in_email: f.in_email, assigned_to: f.assigned_to || null, answered_at: f.answered_at || null, deal_value: f.deal_value ? Number(f.deal_value) : null, won_at: f.stage === 'signed' ? (lead.won_at || new Date().toISOString()) : lead.won_at };
     const { error } = await supabase.from('sales_leads').update(patch).eq('id', lead.id); setBusy(false);
     if (error) return say({ error: error.message });
     if (f.stage === 'dnc' && lead.stage !== 'dnc' && f.email) { const r = await ownerFn({ action: 'smartlead_stop_lead', email: f.email }); if (r.error) say(r); }
@@ -196,6 +247,7 @@ function LeadDrawer({ lead, sources, onClose, reload, say }) {
         <label>City<input value={f.city || ''} onChange={set('city')} /></label>
         <label>State<input value={f.state || ''} onChange={set('state')} /></label>
         <label>Est. sales $/mo<input type="number" value={f.est_sales_usd || ''} onChange={set('est_sales_usd')} /></label>
+        <label>Deal value $ / mo<input type="number" value={f.deal_value || ''} onChange={set('deal_value')} placeholder="services if won" /></label>
         <label className="chk"><input type="checkbox" checked={!!f.in_calls} onChange={(e) => setF({ ...f, in_calls: e.target.checked })} /> in the call queue</label>
         <label className="chk"><input type="checkbox" checked={!!f.in_email} onChange={(e) => setF({ ...f, in_email: e.target.checked })} /> in email campaign</label>
         <label className="wide2">Notes<textarea rows={3} value={f.notes || ''} onChange={set('notes')} /></label>
@@ -212,13 +264,13 @@ function LeadDrawer({ lead, sources, onClose, reload, say }) {
 }
 
 /* ---------- add one lead (also used by Third party with a fixed source) ---------- */
-export function LeadForm({ sources, onClose, reload, say, fixedSource, title = 'Add a lead' }) {
-  const [f, setF] = useState({ source: fixedSource || 'other', filter_id: '', company: '', domain: '', contact_name: '', email: '', phone: '', title: '', city: '', state: '', est_sales_usd: '', notes: '', in_calls: true });
+export function LeadForm({ sources, onClose, reload, say, fixedSource, title = 'Add a lead', defaultStage = 'new' }) {
+  const [f, setF] = useState({ source: fixedSource || 'other', filter_id: '', company: '', domain: '', contact_name: '', email: '', phone: '', title: '', city: '', state: '', est_sales_usd: '', deal_value: '', stage: defaultStage, notes: '', in_calls: true });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const save = async (e) => {
     e.preventDefault(); if (!f.company && !f.email && !f.domain) return say({ error: 'Give at least a company, email or domain.' }); setBusy(true);
-    const row = { ...f, est_sales_usd: f.est_sales_usd ? Number(f.est_sales_usd) : null, domain: cleanDomain(f.domain), filter_id: f.filter_id || null };
+    const row = { ...f, est_sales_usd: f.est_sales_usd ? Number(f.est_sales_usd) : null, deal_value: f.deal_value ? Number(f.deal_value) : null, domain: cleanDomain(f.domain), filter_id: f.filter_id || null, won_at: f.stage === 'signed' ? new Date().toISOString() : null, last_touch_at: f.stage === 'new' ? null : new Date().toISOString() };
     const { error } = await supabase.from('sales_leads').insert(row); setBusy(false);
     if (error) return say({ error: /duplicate/i.test(error.message) ? 'That domain or email is already in the list.' : error.message });
     say(null, 'Lead added.'); reload(); onClose();
@@ -228,6 +280,8 @@ export function LeadForm({ sources, onClose, reload, say, fixedSource, title = '
       <h3>{title}</h3>
       <div className="addgrid lead">
         {!fixedSource && <label>Channel<select value={f.source} onChange={set('source')}>{sources.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></label>}
+        <label>Status<select value={f.stage} onChange={set('stage')}>{STAGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+        <label>Deal value $ / mo<input type="number" value={f.deal_value} onChange={set('deal_value')} placeholder="expected services" /></label>
         <label>List / partner name<input value={f.filter_id} onChange={set('filter_id')} placeholder="e.g. Fulfill.com Nov" /></label>
         <label>Company<input value={f.company} onChange={set('company')} autoFocus /></label>
         <label>Domain<input value={f.domain} onChange={set('domain')} placeholder="brand.com" /></label>

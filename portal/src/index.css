@@ -938,3 +938,47 @@ select.statuspill.ok, select.statuspill.warn, select.statuspill.bad, select.stat
 .portalsec .portalrow { display: flex; gap: 14px; align-items: center; justify-content: space-between; background: var(--orange-tint); border: 1px solid rgba(255,107,21,.3); border-radius: 10px; padding: 12px 14px; font-size: 13.5px; }
 /* help dot: sits in the page gutter, clear of page-head buttons */
 .helpdot { top: 6px; right: 8px; width: 24px; height: 24px; font-size: 12px; opacity: .85; }
+/* financials: QuickBooks-style cards */
+.tile.rev { border-color: rgba(30,158,111,.45); background: rgba(30,158,111,.04); }
+.newmenu { position: relative; }
+.newmenu .menu { position: absolute; right: 0; top: 36px; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.12); display: grid; min-width: 200px; z-index: 20; overflow: hidden; }
+.newmenu .menu button { text-align: left; padding: 10px 14px; border: 0; background: none; font: 13.5px var(--font-body); cursor: pointer; }
+.newmenu .menu button:hover { background: var(--bg-soft); }
+.nutnum b { font-family: var(--font-display); font-size: 26px; margin-right: 8px; }
+.nutnum span { color: var(--muted); font-size: 13px; }
+.nutbar { position: relative; height: 14px; background: #EEF0F3; border-radius: 99px; margin: 12px 0 8px; overflow: hidden; }
+.nutbar i { display: block; height: 100%; background: linear-gradient(90deg, #1E9E6F, #34C38F); border-radius: 99px; transition: width .3s; }
+.nutfoot { display: flex; justify-content: space-between; font-size: 13px; }
+.plbars { display: grid; gap: 10px; }
+.plrow { display: grid; grid-template-columns: 90px 1fr 100px; gap: 12px; align-items: center; font-size: 13.5px; }
+.plrow b { text-align: right; font-variant-numeric: tabular-nums; }
+.plbar { height: 18px; background: #F3F4F6; border-radius: 6px; overflow: hidden; }
+.plbar i { display: block; height: 100%; border-radius: 6px; } .plbar i.in { background: #1E9E6F; } .plbar i.out { background: var(--orange); }
+.plrow.net { border-top: 1px solid var(--line); padding-top: 10px; font-weight: 700; }
+/* pipeline board */
+.kanban { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; overflow-x: auto; padding-bottom: 6px; }
+.kcol { background: var(--bg-soft); border: 1px solid var(--line); border-radius: 12px; min-height: 320px; display: flex; flex-direction: column; }
+.kcol.over { border-color: var(--orange); background: var(--orange-tint); }
+.kcol.lost { opacity: .8; }
+.khead { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.khead .cnt { font: 600 11px var(--font-mono); background: #fff; border: 1px solid var(--line); border-radius: 99px; padding: 1px 7px; }
+.khead .val { margin-left: auto; font-size: 12px; color: #177A56; font-weight: 700; }
+.kcol.signed .khead { background: rgba(30,158,111,.1); border-radius: 12px 12px 0 0; }
+.kcards { padding: 8px; display: grid; gap: 8px; align-content: start; max-height: 70vh; overflow: auto; }
+.kcard { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; min-width: 0; cursor: grab; display: grid; gap: 3px; font-size: 13px; }
+.kcard:hover { border-color: var(--ink); box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.kcard.hot { border-left: 3px solid var(--orange); }
+.kcard .kt { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.kcard .kt b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kcard .kv { font: 700 12px var(--font-mono); color: #177A56; white-space: nowrap; }
+.kmeta { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; margin-top: 3px; }
+.kmeta .pill { font-size: 9.5px; padding: 1px 6px; }
+.kmeta .sm { margin-left: auto; }
+.kempty { color: var(--muted-2); font-size: 12px; text-align: center; padding: 24px 0; border: 1.5px dashed var(--line); border-radius: 10px; }
+@media (max-width: 1200px) { .kanban { grid-template-columns: repeat(6, 220px); } }
+.kcol { min-width: 0; }
+.kcard .kt b { min-width: 0; flex: 1; }
+.kcard .kv { flex: none; }
+.kmeta { min-width: 0; } .kmeta .sm { white-space: nowrap; }
+.kcards { grid-template-columns: minmax(0, 1fr); }
+.kcard { grid-template-columns: minmax(0, 1fr); }
