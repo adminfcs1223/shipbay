@@ -493,7 +493,7 @@ function BillingModal({ org, onClose, onSaved }) {
 }
 
 /* ---------- Client Portal: confirm → generate login → email ---------- */
-function PortalModal({ org, onClose }) {
+export function PortalModal({ org, onClose }) {
   const reset = !!org.portal_user_id;
   const [step, setStep] = useState('confirm'); // confirm | ready | sent
   const [name, setName] = useState(org.contact_name || '');

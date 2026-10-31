@@ -935,3 +935,6 @@ select.statuspill { border: 0; cursor: pointer; }
 @media (max-width: 900px) { .board.camp { grid-template-columns: repeat(3, 1fr); } }
 .secthead { font-family: var(--font-display); font-size: 16px; font-weight: 700; margin: 6px 0 10px; }
 select.statuspill.ok, select.statuspill.warn, select.statuspill.bad, select.statuspill.muted, select.statuspill.navy { appearance: auto; padding-right: 6px; }
+.portalsec .portalrow { display: flex; gap: 14px; align-items: center; justify-content: space-between; background: var(--orange-tint); border: 1px solid rgba(255,107,21,.3); border-radius: 10px; padding: 12px 14px; font-size: 13.5px; }
+/* help dot: sits in the page gutter, clear of page-head buttons */
+.helpdot { top: 6px; right: 8px; width: 24px; height: 24px; font-size: 12px; opacity: .85; }

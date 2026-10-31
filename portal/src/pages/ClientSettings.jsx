@@ -1,6 +1,7 @@
 // Staff: per-client settings — brand, contacts, team, operations, addresses, notes.
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib';
+import { PortalModal } from './Onboarding';
 
 const STATUS = [['onboarding', 'Onboarding'], ['active', 'Live'], ['paused', 'Paused'], ['churned', 'Churned']];
 const GO_LIVE = [['on_time', 'On time'], ['at_risk', 'At risk'], ['delayed', 'Delayed'], ['on_hold', 'On hold'], ['complete', 'Complete']];
@@ -70,6 +71,7 @@ function SettingsForm({ org, onSaved }) {
   const [f, setF] = useState(() => pick(org));
   const [saved, setSaved] = useState(pick(org));
   const [busy, setBusy] = useState(false);
+  const [portalOpen, setPortalOpen] = useState(false);
   const [msg, setMsg] = useState(null);
   const dirty = JSON.stringify(f) !== JSON.stringify(saved);
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
@@ -97,6 +99,16 @@ function SettingsForm({ org, onSaved }) {
         <button className="btn-sm primary" disabled={!dirty || busy} onClick={save}>{busy ? 'Saving…' : 'Save changes'}</button>
       </div>
 
+      <section className="portalsec">
+        <h4>Portal login</h4>
+        <div className="portalrow">
+          <div>{org.portal_user_id
+            ? <><b>{org.contact_email}</b> has a shipbay.dashboard login (created {new Date(org.portal_created_at).toLocaleDateString()}){org.portal_invited_at ? <> · welcome email sent {new Date(org.portal_invited_at).toLocaleDateString()}</> : <> · <span className="neg">welcome email not sent yet</span></>}</>
+            : <>No portal login yet. Creating one emails <b>{org.contact_email || 'their contact email'}</b> a temporary password.</>}</div>
+          <button className={`btn-sm ${org.portal_user_id ? '' : 'primary'}`} onClick={() => setPortalOpen(true)}>{org.portal_user_id ? 'Reset password & resend' : 'Create login & send'}</button>
+        </div>
+        {portalOpen && <PortalModal org={org} onClose={() => { setPortalOpen(false); onSaved(); }} />}
+      </section>
       <section>
         <h4>Brand</h4>
         <div className="grid2">
