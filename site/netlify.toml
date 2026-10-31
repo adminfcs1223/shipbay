@@ -64,10 +64,16 @@
   to = "/terms.html"
   status = 200
 
+# MigrateBay retired 2026-10-31 — the dashboard story took its place
 [[redirects]]
   from = "/migratebay"
-  to = "/migratebay.html"
-  status = 200
+  to = "/dashboard.html"
+  status = 301
+
+[[redirects]]
+  from = "/migratebay.html"
+  to = "/dashboard.html"
+  status = 301
 
 [[redirects]]
   from = "/start"
@@ -82,12 +88,12 @@
 # Legacy URLs from the shiphl / partner-network era
 [[redirects]]
   from = "/migratehl"
-  to = "/migratebay.html"
+  to = "/dashboard.html"
   status = 301
 
 [[redirects]]
   from = "/migratehl.html"
-  to = "/migratebay.html"
+  to = "/dashboard.html"
   status = 301
 
 [[redirects]]

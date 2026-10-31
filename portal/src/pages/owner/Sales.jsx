@@ -105,8 +105,8 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
         </div>
       </div>
       {sub === 'settings' && <RepSettings {...ctx} status={status} />}
-      {sub === 'quotes' && <div className="embed"><Quotes me={me} params={subParams} embedded /></div>}
-      {sub === 'onboarding' && <div className="embed"><Onboarding me={me} params={subParams} embedded /></div>}
+      {sub === 'quotes' && <div className="subpage"><Quotes me={me} params={subParams} /></div>}
+      {sub === 'onboarding' && <div className="subpage"><Onboarding me={me} params={subParams} /></div>}
       {sub === 'overview' && <Overview {...ctx} leads={mine} pool={leads} sends={mySends} counts={counts} />}
       {sub === 'pipeline' && <Pipeline {...ctx} leads={mine} />}
       {sub === 'master' && <Master {...ctx} leads={mine} />}

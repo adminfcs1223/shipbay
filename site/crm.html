@@ -7,7 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="assets/brand/08-icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#FFFFFF; --bg-soft:#F8F7F5; --line:#E8E6E1;
@@ -17,12 +17,12 @@
   }
   *{margin:0;padding:0;box-sizing:border-box}
   html{scroll-behavior:smooth}
-  body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  body{font-family:'Archivo',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
   a{color:inherit;text-decoration:none}
   img{max-width:100%;display:block}
   .wrap{max-width:1200px;margin:0 auto;padding:0 24px}
   h1,h2,h3{font-family:'Archivo',sans-serif;letter-spacing:-.01em}
-  .mono{font-family:'IBM Plex Mono',monospace}
+  .mono{font-family:'Archivo',sans-serif}
   .dot{color:var(--orange)}
   .eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:12.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--orange-soft);margin-bottom:16px}
   .eyebrow::before{content:"";width:22px;height:2px;background:var(--orange)}
@@ -57,13 +57,13 @@
   .wh-dot{fill:var(--orange);pointer-events:none}
   .wh-halo{fill:none;stroke:var(--orange);stroke-width:1.4;opacity:0;transform-origin:center;animation:pulse 3.4s ease-out infinite;pointer-events:none}
   @keyframes pulse{0%{opacity:.7;transform:scale(.4)}70%{opacity:0;transform:scale(2.4)}100%{opacity:0}}
-  .map-lab{font-family:'IBM Plex Mono',monospace;font-size:11px;fill:#8A93A3;pointer-events:none}
+  .map-lab{font-family:'Archivo',sans-serif;font-size:11px;fill:#8A93A3;pointer-events:none}
   .map-lab.hq{fill:var(--orange-soft);font-weight:600}
   footer{padding:70px 0 44px;border-top:1px solid var(--line);background:
     radial-gradient(760px 420px at 90% 0%, var(--orange-tint) 0%, transparent 58%), radial-gradient(560px 360px at 4% 100%, #F7D9C466 0%, transparent 60%), var(--bg-soft)}
   .foot-top{display:flex;justify-content:space-between;align-items:flex-end;gap:40px;margin-bottom:56px;flex-wrap:wrap}
   .foot-slogan{font-family:'Archivo',sans-serif;font-weight:700;font-size:clamp(32px,3.8vw,48px);line-height:1.1;color:var(--ink)}
-  .foot-slogan small{display:block;font-family:'Inter',sans-serif;font-weight:400;font-size:15.5px;color:var(--muted);margin-top:12px}
+  .foot-slogan small{display:block;font-family:'Archivo',sans-serif;font-weight:400;font-size:15.5px;color:var(--muted);margin-top:12px}
   .foot-cols{display:grid;grid-template-columns:repeat(4,1fr);gap:32px;padding-top:48px;border-top:1px solid var(--line)}
   .foot-cols h4{font-size:13.5px;color:var(--muted-2);font-weight:600;margin-bottom:16px}
   .foot-cols a{display:block;margin-bottom:11px;font-size:14.5px;color:var(--muted)}
@@ -92,7 +92,7 @@
   .topbar{background:#fff;border-bottom:1px solid var(--line);padding:14px 26px;display:flex;align-items:center;gap:16px}
   .topbar h1{font-size:19px;font-family:'Archivo',sans-serif;font-weight:700}
   .search{flex:1;max-width:340px;position:relative}
-  .search input{width:100%;padding:10px 14px 10px 38px;border:1.5px solid var(--line);border-radius:10px;font-size:14px;font-family:'Inter',sans-serif}
+  .search input{width:100%;padding:10px 14px 10px 38px;border:1.5px solid var(--line);border-radius:10px;font-size:14px;font-family:'Archivo',sans-serif}
   .search input:focus{outline:none;border-color:var(--orange)}
   .search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted-2)}
   .topbar .sp{flex:1}
@@ -120,10 +120,10 @@
   .lead b{font-size:14px;display:block}
   .lead .brand{font-size:12.5px;color:var(--muted);margin-bottom:8px}
   .lead .meta{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
-  .tag{font-family:'IBM Plex Mono',monospace;font-size:10px;padding:3px 8px;border-radius:99px;background:#F3F4F6;color:var(--muted)}
+  .tag{font-family:'Archivo',sans-serif;font-size:10px;padding:3px 8px;border-radius:99px;background:#F3F4F6;color:var(--muted)}
   .tag.hot{background:var(--orange-tint);color:var(--orange-soft)}
   .lead .l-foot{display:flex;justify-content:space-between;align-items:center}
-  .rep-sel{font-size:11.5px;border:1px solid var(--line);border-radius:8px;padding:4px 6px;font-family:'Inter',sans-serif;color:var(--muted);background:#fff;max-width:120px}
+  .rep-sel{font-size:11.5px;border:1px solid var(--line);border-radius:8px;padding:4px 6px;font-family:'Archivo',sans-serif;color:var(--muted);background:#fff;max-width:120px}
   .l-av{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff;font-family:'Archivo',sans-serif}
   .l-av.unassigned{background:#C9CED6;color:#5A6473}
   /* drawer */
@@ -143,7 +143,7 @@
   .note{background:#F8F7F5;border:1px solid var(--line);border-radius:10px;padding:10px 13px;font-size:13px;margin-bottom:8px}
   .note small{display:block;color:var(--muted-2);font-size:11px;margin-top:4px}
   .d-foot{padding:16px 24px;border-top:1px solid var(--line);display:flex;gap:10px}
-  .d-foot input{flex:1;padding:11px 13px;border:1.5px solid var(--line);border-radius:9px;font-size:13.5px;font-family:'Inter',sans-serif}
+  .d-foot input{flex:1;padding:11px 13px;border:1.5px solid var(--line);border-radius:9px;font-size:13.5px;font-family:'Archivo',sans-serif}
   .d-foot input:focus{outline:none;border-color:var(--orange)}
   /* modal add lead */
   .m-veil{position:fixed;inset:0;background:rgba(16,28,43,.5);z-index:170;display:none;align-items:center;justify-content:center;padding:20px}
@@ -153,7 +153,7 @@
   .m-card .frow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .m-card .field{margin-bottom:13px}
   .m-card label{display:block;font-size:12.5px;font-weight:600;margin-bottom:5px}
-  .m-card input,.m-card select{width:100%;padding:11px 13px;border:1.5px solid var(--line);border-radius:9px;font-size:14px;font-family:'Inter',sans-serif}
+  .m-card input,.m-card select{width:100%;padding:11px 13px;border:1.5px solid var(--line);border-radius:9px;font-size:14px;font-family:'Archivo',sans-serif}
   .m-card input:focus,.m-card select:focus{outline:none;border-color:var(--orange)}
   .m-card .actions{display:flex;justify-content:flex-end;gap:10px;margin-top:8px}
   .banner{margin:18px 26px 0;background:var(--orange-tint);border:1px solid var(--orange);border-radius:12px;padding:12px 18px;font-size:13px;color:var(--orange-soft)}
@@ -169,7 +169,7 @@
 <div class="m-veil" id="loginModal" style="background:rgba(16,28,43,.92);backdrop-filter:blur(6px)">
   <div class="m-card" style="max-width:400px;text-align:center">
     <h3 style="margin-bottom:4px">shipbay<span class="dot">.</span>salesdesk</h3>
-    <p style="font-size:12.5px;color:#8A93A3;margin-bottom:20px;font-family:'IBM Plex Mono',monospace;letter-spacing:.1em">SALES TEAM SIGN IN</p>
+    <p style="font-size:12.5px;color:#8A93A3;margin-bottom:20px;font-family:'Archivo',sans-serif;letter-spacing:.1em">SALES TEAM SIGN IN</p>
     <form onsubmit="return doLogin(event)">
       <div class="field"><input id="login-email" type="email" required placeholder="you@shipbay" autocomplete="username"></div>
       <div class="field"><input id="login-pass" type="password" required placeholder="Password" autocomplete="current-password"></div>

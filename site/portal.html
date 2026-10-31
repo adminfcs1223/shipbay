@@ -7,7 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="assets/brand/08-icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="js/config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
@@ -18,7 +18,7 @@
     --green:#1E9E6F;
   }
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.55;-webkit-font-smoothing:antialiased;min-height:100vh}
+  body{font-family:'Archivo',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.55;-webkit-font-smoothing:antialiased;min-height:100vh}
   a{color:inherit;text-decoration:none}
   .split{display:grid;grid-template-columns:1fr 1fr;min-height:100vh}
   /* brand side */
@@ -27,14 +27,14 @@
     radial-gradient(560px 420px at 0% 105%, rgba(255,107,21,.16) 0%, transparent 55%), #101C2B;
     color:#F6F5F1;padding:56px 60px;display:flex;flex-direction:column;overflow:hidden}
   .brandside .logo img{height:44px;width:auto}
-  .brandside .tagline{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#8A93A3;margin-top:10px}
+  .brandside .tagline{font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#8A93A3;margin-top:10px}
   .brandside h1{font-family:'Archivo',sans-serif;font-size:clamp(28px,3vw,38px);font-weight:700;line-height:1.15;margin-top:auto}
   .brandside h1 em{font-style:normal;color:#E87A33}
   .brandside p.sub{color:#8A93A3;font-size:15px;margin-top:14px;max-width:420px}
   .mock{margin-top:36px;background:#1B212B;border:1px solid #242C38;border-radius:14px;padding:18px;box-shadow:0 30px 70px rgba(0,0,0,.4)}
   .mock .mh{display:flex;justify-content:space-between;align-items:center;margin-bottom:13px}
   .mock .mh b{font-family:'Archivo',sans-serif;font-size:12.5px}
-  .mock .pill{font-family:'IBM Plex Mono',monospace;font-size:10px;padding:3px 10px;border-radius:99px;background:rgba(30,158,111,.2);color:#5ED4A5}
+  .mock .pill{font-family:'Archivo',sans-serif;font-size:10px;padding:3px 10px;border-radius:99px;background:rgba(30,158,111,.2);color:#5ED4A5}
   .mock .mstats{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
   .mock .ms{background:#101C2B;border-radius:10px;padding:11px 13px}
   .mock .ms b{display:block;font-family:'Archivo',sans-serif;font-size:17px;color:#fff}
@@ -50,7 +50,7 @@
   .formbox p.lead{color:var(--muted);font-size:15px;margin:8px 0 30px}
   .field{margin-bottom:16px}
   .field label{display:block;font-size:13px;font-weight:600;margin-bottom:7px}
-  .field input{width:100%;padding:13px 15px;border:1.5px solid var(--line);border-radius:10px;font-family:'Inter',sans-serif;font-size:15px;color:var(--ink);background:#fff;transition:border-color .15s}
+  .field input{width:100%;padding:13px 15px;border:1.5px solid var(--line);border-radius:10px;font-family:'Archivo',sans-serif;font-size:15px;color:var(--ink);background:#fff;transition:border-color .15s}
   .field input:focus{outline:none;border-color:var(--orange)}
   .row-between{display:flex;justify-content:space-between;align-items:center;margin:4px 0 22px;font-size:13.5px}
   .row-between label{display:flex;align-items:center;gap:8px;color:var(--muted);cursor:pointer}
@@ -75,7 +75,7 @@
   .welcome p{color:var(--muted);font-size:15px;margin:10px 0 24px}
   .welcome .card{background:var(--bg-soft);border:1px solid var(--line);border-radius:14px;padding:22px;text-align:left;font-size:14px;color:var(--muted);line-height:1.7}
   .welcome .card b{color:var(--ink)}
-  .welcome .out{display:inline-block;margin-top:22px;font-size:14px;color:var(--orange-soft);font-weight:600;cursor:pointer;background:none;border:none;font-family:'Inter',sans-serif}
+  .welcome .out{display:inline-block;margin-top:22px;font-size:14px;color:var(--orange-soft);font-weight:600;cursor:pointer;background:none;border:none;font-family:'Archivo',sans-serif}
   @media(max-width:900px){
     .split{grid-template-columns:1fr}
     .brandside{padding:40px 28px;min-height:280px}

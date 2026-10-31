@@ -9,14 +9,14 @@
 <link rel="icon" type="image/svg+xml" href="assets/brand/08-icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="js/config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
   :root{--bg:#FFFFFF;--bg-soft:#F6F7F9;--line:#E6E8EC;--ink:#101C2B;--muted:#5A6473;--muted-2:#8A93A3;
     --orange:#FF6B15;--orange-soft:#D14E00;--orange-tint:#FFF0E4;--orange-hover:#E85E0A;--green:#1E9E6F}
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.55;-webkit-font-smoothing:antialiased}
+  body{font-family:'Archivo',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.55;-webkit-font-smoothing:antialiased}
   a{color:inherit;text-decoration:none}
   /* top bar */
   .topbar{position:sticky;top:0;z-index:100;background:rgba(255,255,255,.94);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
@@ -42,7 +42,7 @@
   .qhint{font-size:14px;color:var(--muted-2);margin-bottom:12px}
   .qhead{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
   .count{flex:none;font-size:13px;color:var(--muted);background:var(--bg-soft);border:1px solid var(--line);border-radius:99px;padding:4px 13px}
-  input.txt,textarea.txt,select.txt{width:100%;padding:14px 16px;border:1.5px solid var(--line);border-radius:11px;font-family:'Inter',sans-serif;font-size:15.5px;color:var(--ink);background:#fff;transition:border-color .15s}
+  input.txt,textarea.txt,select.txt{width:100%;padding:14px 16px;border:1.5px solid var(--line);border-radius:11px;font-family:'Archivo',sans-serif;font-size:15.5px;color:var(--ink);background:#fff;transition:border-color .15s}
   input.txt:focus,textarea.txt:focus,select.txt:focus{outline:none;border-color:var(--orange)}
   textarea.txt{min-height:110px;resize:vertical}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -63,7 +63,7 @@
   .chan.sel .chan-h .ic{background:var(--orange);color:#fff}
   .chan-h b{font-family:'Archivo',sans-serif;font-size:16px}
   .chan.sel .chan-h b{color:var(--orange-soft)}
-  .chan-h .tagb{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.05em;padding:3px 9px;border-radius:6px;margin:3px 0 4px}
+  .chan-h .tagb{display:inline-block;font-family:'Archivo',sans-serif;font-size:10px;letter-spacing:.05em;padding:3px 9px;border-radius:6px;margin:3px 0 4px}
   .tagb.ship{background:#FFF0E4;color:var(--orange-soft)}
   .tagb.bulk{background:#FDF6E3;color:#8A6D1A}
   .chan-h p{font-size:13.5px;color:var(--muted)}
@@ -75,11 +75,11 @@
   .chan-b label:first-child{margin-top:0}
   .chan-b small{display:block;font-size:12px;color:var(--muted-2);margin-bottom:6px}
   .yesno{display:flex;gap:8px;margin-top:6px}
-  .yn{padding:9px 22px;border:1.5px solid var(--line);border-radius:9px;background:#fff;font-family:'Inter',sans-serif;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer}
+  .yn{padding:9px 22px;border:1.5px solid var(--line);border-radius:9px;background:#fff;font-family:'Archivo',sans-serif;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer}
   .yn.sel{border-color:var(--orange);color:var(--orange-soft);background:#FFFBF8}
   /* chips */
   .chips{display:flex;flex-wrap:wrap;gap:9px}
-  .chip{padding:9px 17px;border:1.5px solid var(--line);border-radius:99px;background:#fff;font-size:14px;font-weight:500;color:var(--muted);cursor:pointer;transition:all .13s;font-family:'Inter',sans-serif}
+  .chip{padding:9px 17px;border:1.5px solid var(--line);border-radius:99px;background:#fff;font-size:14px;font-weight:500;color:var(--muted);cursor:pointer;transition:all .13s;font-family:'Archivo',sans-serif}
   .chip:hover{border-color:var(--muted-2)}
   .chip.sel{border-color:var(--orange);background:var(--orange);color:#fff;font-weight:600}
   /* value-add cards */
@@ -106,7 +106,7 @@
   .rev-h{display:flex;align-items:center;gap:12px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--line)}
   .rev-h i{font-style:normal;width:28px;height:28px;border-radius:50%;background:var(--orange-tint);color:var(--orange-soft);display:grid;place-items:center;font-weight:700;font-size:13.5px;font-family:'Archivo',sans-serif}
   .rev-h b{font-family:'Archivo',sans-serif;font-size:16.5px;flex:1}
-  .rev-h button{border:1.5px solid var(--line);background:#fff;border-radius:8px;padding:6px 16px;font-family:'Inter',sans-serif;font-size:13px;font-weight:600;color:var(--orange-soft);cursor:pointer}
+  .rev-h button{border:1.5px solid var(--line);background:#fff;border-radius:8px;padding:6px 16px;font-family:'Archivo',sans-serif;font-size:13px;font-weight:600;color:var(--orange-soft);cursor:pointer}
   .rev dl{display:grid;grid-template-columns:150px 1fr;gap:7px 16px;font-size:14px}
   .rev dt{color:var(--muted-2)}
   .rev dd{color:var(--ink);word-break:break-word}
@@ -131,13 +131,13 @@
   .sd.on{border-color:var(--orange)}
   .sd .ic{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--orange);color:#fff;font-size:14px}
   .sd.pending .ic{background:#fff;border:2px solid var(--orange);color:var(--orange)}
-  .sd small{display:block;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:var(--muted-2)}
+  .sd small{display:block;font-family:'Archivo',sans-serif;font-size:10px;letter-spacing:.1em;color:var(--muted-2)}
   .sd b{font-family:'Archivo',sans-serif;font-size:15.5px}
   .next-card{border:1px solid var(--line);border-radius:16px;padding:24px;background:var(--bg-soft)}
   .next-card h3{font-family:'Archivo',sans-serif;font-size:18px;margin-bottom:16px}
   .nx{margin-bottom:16px}
   .nx:last-child{margin-bottom:0}
-  .nx .when{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.08em;background:var(--orange-tint);color:var(--orange-soft);border-radius:99px;padding:4px 12px;margin-bottom:6px}
+  .nx .when{display:inline-block;font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.08em;background:var(--orange-tint);color:var(--orange-soft);border-radius:99px;padding:4px 12px;margin-bottom:6px}
   .nx p{font-size:14.5px;color:var(--muted)}
   .nx p b{color:var(--ink)}
   @media(max-width:700px){
@@ -423,7 +423,7 @@ function doneScreen(){
       <h3>What happens next</h3>
       <div class="nx"><span class="when">TODAY</span><p>A <b>US-based specialist</b> reaches out to confirm your details.</p></div>
       <div class="nx"><span class="when">WITHIN 24H</span><p>We review your profile against our floor — <b>fit, capacity, and your exact rates</b> from the published rate card.</p></div>
-      <div class="nx"><span class="when">WITHIN 48H</span><p>You get your <b>quote and onboarding plan</b>: line-item pricing from the published rate card, and — if you're switching — your free MigrateBay switching plan.</p></div>
+      <div class="nx"><span class="when">WITHIN 48H</span><p>You get your <b>quote and onboarding plan</b>: line-item pricing from the published rate card, and — if you're switching — a free switching plan with no downtime.</p></div>
     </div>
     <p style="margin-top:26px"><a href="index.html" style="color:var(--orange-soft);font-weight:600">← Back to shipbay</a></p>
   `;
@@ -501,7 +501,7 @@ async function submit(){
   const lead = {
     name:S.name.trim(), email:S.email.trim(), brand:S.biz.trim(), phone:S.phone.trim(),
     volume: volLabel, current_setup: S.current, notes: S.shipdesc || S.notes,
-    slot: null, source: 'MigrateBay — Get started', stage: 'new',
+    slot: null, source: 'Website — Get started', stage: 'new',
     activity: [{t:'Match request submitted from Get started intake', when:new Date().toISOString()}],
     intake: S
   };

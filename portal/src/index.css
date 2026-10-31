@@ -1228,3 +1228,6 @@ table.bill tr.tot td { font-weight: 800; font-size: 15px; padding-top: 10px; col
 .billmargin { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 12.5px; color: var(--muted); }
 .billmargin b { font-size: 15px; } .billmargin b.pos { color: #177A56; } .billmargin b.neg { color: #B03A33; }
 @media (max-width: 960px) { .quickgrid { grid-template-columns: minmax(0, 1fr); } .quickbill { position: static; } }
+
+/* full pages hosted inside the CRM (Quotes, Onboarding) — their own page head stays, just tucked under the tabs */
+.owner .subpage > .pagehead { margin-top: 4px; }
