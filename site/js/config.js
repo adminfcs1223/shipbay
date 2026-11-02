@@ -10,3 +10,13 @@ window.SHIPBAY_CONFIG = {
   SUPABASE_URL: "https://poxlczzkpztmoiixyrth.supabase.co",
   SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBveGxjenprcHp0bW9paXh5cnRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc2MTAyNDYsImV4cCI6MjEwMzE4NjI0Nn0.Jo9epu0FhaSHhLs9ChL1-zNYoGKSxroM47PuAY5pD00"
 };
+
+/* Social links shown in every footer. Leave an entry empty and its icon is not rendered. */
+window.SHIPBAY_SOCIAL = {
+  linkedin: "",
+  instagram: "",
+  tiktok: "",
+  youtube: "",
+  x: "",
+  facebook: ""
+};

@@ -11,7 +11,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
-  :root{--bg:#FFFFFF;--bg-soft:#F8F7F5;--line:#E8E6E1;--ink:#101C2B;--muted:#5A6473;--muted-2:#8A93A3;
+  :root{
+    --ease:cubic-bezier(.2,.7,.2,1);--shadow-1:0 1px 2px rgba(15,27,42,.04),0 8px 24px -12px rgba(15,27,42,.18);--shadow-2:0 2px 4px rgba(15,27,42,.05),0 24px 48px -16px rgba(15,27,42,.28);--bg:#FFFFFF;--bg-soft:#F8F7F5;--line:#E8E6E1;--ink:#101C2B;--muted:#5A6473;--muted-2:#8A93A3;
     --orange:#FF6B15;--orange-soft:#D14E00;--orange-tint:#FFF0E4;--orange-hover:#E85E0A;--green:#1E9E6F}
   *{margin:0;padding:0;box-sizing:border-box}
   html{scroll-behavior:smooth}
@@ -136,10 +137,41 @@
       radial-gradient(60% 90% at 0% 110%, #FFF0E480 0%, transparent 55%), #fff;
     padding:64px 56px;text-align:center;box-shadow:0 30px 80px rgba(16,28,43,.08)}
   .cta-card p{font-size:17px;color:var(--muted);max-width:560px;margin:0 auto 30px}
-  footer{padding:60px 0 44px;border-top:1px solid var(--line);background:
-    radial-gradient(700px 380px at 90% 0%, var(--orange-tint) 0%, transparent 60%), var(--bg-soft)}
-  .foot-legal{font-size:12.5px;color:var(--muted-2);line-height:1.7;display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;align-items:center}
+  /* floor videos — the LinkedIn clips, shown whole, captions under them */
+  .floor{padding:96px 0;border-top:1px solid var(--line)}
+  .floor-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .floor-card{margin:0;border-radius:20px;overflow:hidden;background:#fff;border:1px solid var(--line);box-shadow:var(--shadow-2)}
+  .floor-card video{display:block;width:100%;aspect-ratio:1/1;object-fit:cover;object-position:center 18%;background:#0F1B2A}
+  .floor-card figcaption{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:16px 20px;border-top:1px solid var(--line)}
+  .floor-card figcaption b{font-size:16px;letter-spacing:-.02em}
+  .floor-card figcaption span{font-size:13.5px;color:var(--muted);text-align:right}
+  .floor-facts{grid-column:1 / -1;display:grid;grid-template-columns:repeat(4,1fr);background:#fff;border:1px solid var(--line);border-radius:20px;padding:6px 28px}
+  .floor-facts div{padding:22px 0;border-right:1px solid var(--line);padding-right:24px;margin-right:24px}
+  .floor-facts div:last-child{border-right:0;margin-right:0;padding-right:0}
+  .floor-facts b{display:block;font-size:34px;font-weight:800;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums}
+  .floor-facts span{display:block;font-size:13.5px;color:var(--muted);margin-top:8px}
+  @media(max-width:960px){.floor-grid{grid-template-columns:1fr}.floor-facts{grid-template-columns:1fr 1fr;padding:6px 20px}.floor-facts div:nth-child(2){border-right:0;margin-right:0;padding-right:0}.floor-facts div:nth-child(-n+2){border-bottom:1px solid var(--line)}}
+
+  /* ============ footer ============ */
+  footer{position:relative;padding:80px 0 40px;border-top:1px solid var(--line);background:var(--bg-soft);overflow:hidden}
+  footer .wm{position:absolute;left:50%;bottom:-16vw;transform:translateX(-50%);width:min(96vw,1320px);opacity:.045;pointer-events:none;z-index:0}
+  .foot-top,.foot-cols,.foot-legal{position:relative;z-index:1}
+  .foot-top{display:flex;justify-content:space-between;align-items:flex-end;gap:40px;margin-bottom:56px;flex-wrap:wrap;position:relative}
+  .foot-slogan{font-weight:800;font-size:clamp(34px,4vw,52px);line-height:1.02;color:var(--ink);letter-spacing:-.035em}
+  .foot-slogan small{display:block;font-weight:500;font-size:15px;color:var(--muted);margin-top:14px;letter-spacing:0;line-height:1.5}
+  .foot-cols{display:grid;grid-template-columns:repeat(4,1fr);gap:32px;padding-top:44px;border-top:1px solid var(--line);position:relative}
+  .foot-cols h4{font-size:13.5px;letter-spacing:-.01em;color:var(--ink);font-weight:700;margin-bottom:16px}
+  .foot-cols a{display:block;margin-bottom:11px;font-size:14.5px;color:var(--muted);font-weight:500;transition:color .2s,transform .3s var(--ease)}
+  .foot-cols a:hover{color:var(--ink);transform:translateX(3px)}
+  .foot-legal{margin-top:52px;padding-top:26px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted-2);line-height:1.7;display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;align-items:center;position:relative}
   .foot-logo img{height:26px;width:auto}
+
+  /* social row (footer) — links come from js/config.js SHIPBAY_SOCIAL; empty entries are not rendered */
+  .foot-social{display:flex;gap:8px;align-items:center}
+  .foot-social a{display:inline-grid;place-items:center;width:38px;height:38px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--ink);transition:transform .35s var(--ease),box-shadow .35s var(--ease),border-color .2s}
+  .foot-social a:hover{transform:translateY(-2px);box-shadow:var(--shadow-1);border-color:var(--ink)}
+  .foot-social svg{width:18px;height:18px;fill:currentColor}
+  @media(max-width:960px){.foot-cols{grid-template-columns:1fr 1fr}}
   @media(max-width:960px){
     .nav-links,.nav-cta .login{display:none}
     .hero-grid,.why-grid,.md-grid,.mode-grid{grid-template-columns:1fr}
@@ -156,7 +188,7 @@
   .emb-card .cap b{color:var(--ink);font-family:'Archivo',sans-serif}
   .emb-card .cap a{color:var(--orange-soft);font-weight:600}
   .addr-card{background:var(--ink);color:#F4F5F3;border-radius:20px;padding:32px;display:flex;flex-direction:column;gap:14px}
-  .addr-card .lbl{font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.14em;color:#8A93A3}
+  .addr-card .lbl{font-family:'Archivo',sans-serif;font-size:13px;font-weight:600;color:#A7B0BE}
   .addr-card .adr{font-family:'Archivo',sans-serif;font-size:24px;font-weight:700;line-height:1.25}
   .addr-card .adr em{font-style:normal;color:var(--orange)}
   .addr-row{display:flex;justify-content:space-between;gap:10px;border-top:1px solid #24334a;padding-top:12px;font-size:14px;color:#B7C0CC}
@@ -204,11 +236,11 @@
     </div>
     <div class="emb-grid">
       <div class="emb-card">
-        <iframe src="https://www.google.com/maps/embed?pb=!4v1789359596696!6m8!1m7!1s9WXCUxLJyzQwf4sf5MAQbA!2m2!1d40.49094579267823!2d-74.64481130666128!3f11.836043!4f0!5f0.7820865974627469" loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" title="Google Street View — 115 Stryker Ln, Hillsborough Township NJ"></iframe>
-        <div class="cap"><span><b>Street view</b> — Building 4 is inside the complex</span><a href="https://www.google.com/maps/dir/?api=1&destination=115+Stryker+Ln,+Hillsborough+Township,+NJ+08844" target="_blank" rel="noopener">Get directions →</a></div>
+        <iframe src="https://maps.google.com/maps?q=115%20Stryker%20Ln%2C%20Hillsborough%20Township%2C%20NJ%2008844&t=k&z=19&output=embed" loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" title="Satellite view — 115 Stryker Ln, Building 4, Hillsborough Township NJ"></iframe>
+        <div class="cap"><span><b>From above</b> — the loading docks are on the back of Building 4</span><a href="https://www.google.com/maps/dir/?api=1&destination=115+Stryker+Ln,+Hillsborough+Township,+NJ+08844" target="_blank" rel="noopener">Get directions →</a></div>
       </div>
       <div class="addr-card">
-        <span class="lbl">FLAGSHIP &mdash; WAREHOUSE &amp; OFFICE</span>
+        <span class="lbl">Flagship — warehouse and office</span>
         <div class="adr">115 Stryker Ln<br>Building 4<br>Hillsborough Township, NJ <em>08844</em></div>
         <div class="addr-row"><span>County</span><b>Somerset, Central NJ</b></div>
         <div class="addr-row"><span>NYC / Philadelphia</span><b>~1 hr / ~1 hr drive</b></div>
@@ -238,10 +270,41 @@
   </div>
 </section>
 
-<section style="padding:90px 0">
+
+<section class="floor" id="floor">
+  <div class="wrap">
+    <div class="sec-head" style="margin-bottom:28px">
+      <span class="eyebrow">On the floor</span>
+      <h2>See it moving<span class="dot">.</span></h2>
+      <p>The same floor your orders will cross. Filmed on a working day, not a photo shoot.</p>
+    </div>
+    <div class="floor-grid">
+      <figure class="floor-card">
+        <video autoplay muted loop playsinline preload="metadata" poster="assets/media/facility-floor-poster.jpg" aria-label="Inside the ShipBay facility — picking and packing">
+          <source src="assets/media/facility-floor.mp4" type="video/mp4">
+        </video>
+        <figcaption><b>Pick &amp; pack</b><span>Orders in by 2pm ET leave the same day.</span></figcaption>
+      </figure>
+      <figure class="floor-card">
+        <video autoplay muted loop playsinline preload="metadata" poster="assets/media/facility-floor-2-poster.jpg" aria-label="Receiving inbound inventory at the ShipBay dock">
+          <source src="assets/media/facility-floor-2.mp4" type="video/mp4">
+        </video>
+        <figcaption><b>Receiving</b><span>Counted against your list, put away in two days.</span></figcaption>
+      </figure>
+      <div class="floor-facts">
+        <div><b>2pm</b><span>ET cutoff, Mon–Sat</span></div>
+        <div><b>45 min</b><span>to Port Newark</span></div>
+        <div><b>1 day</b><span>ground to the Northeast</span></div>
+        <div><b>$0</b><span>setup, minimums, surcharges</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="padding:90px 0;background:var(--bg-soft);border-top:1px solid var(--line)">
   <div class="wrap">
     <div class="sec-head" style="margin-bottom:0">
-      <span class="eyebrow">On the floor</span>
+      <span class="eyebrow">Services</span>
       <h2>What the building does for you<span class="dot">.</span></h2>
       <p>Every service is on the <a href="pricing.html" style="color:var(--orange-soft);font-weight:600">published rate card</a>.</p>
     </div>
@@ -267,14 +330,69 @@
   </div>
 </div>
 
+  </div>
+</div>
+
 <footer>
+  <img class="wm" src="assets/brand/10-wordmark.svg" alt="">
   <div class="wrap">
+    <div class="foot-top">
+      <div class="foot-slogan">Fulfillment that<br>grows with you<span class="dot">.</span>
+        <small>115 Stryker Ln, Hillsborough Township, NJ 08844</small>
+      </div>
+      <a class="btn btn-orange" href="book.html">Book a call</a>
+    </div>
+    <div class="foot-cols">
+      <div>
+        <h4>Shipbay</h4>
+        <a href="facility.html">Our facility</a>
+        <a href="pricing.html">Pricing</a>
+        <a href="index.html#how">How it works</a>
+        <a href="book.html">Contact</a>
+      </div>
+      <div>
+        <h4>Platform</h4>
+        <a href="dashboard.html">shipbay.dashboard</a>
+        <a href="dashboard.html#integrations">Integrations</a>
+        <a href="dashboard.html#wms">WMS features</a>
+        <a href="portal.html">Client log in</a>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <a href="facility.html">About the facility</a>
+        <a href="start.html">Apply for an account</a>
+        <a href="book.html">Book a call</a>
+        <a href="crm.html">Sales team login</a>
+      </div>
+      <div>
+        <h4>The warehouse</h4>
+        <a href="facility.html">115 Stryker Ln</a>
+        <a href="facility.html">Hillsborough Township, NJ 08844</a>
+        <a href="facility.html">Mon&ndash;Sat &middot; 9&ndash;6</a>
+      </div>
+    </div>
     <div class="foot-legal">
       <span class="foot-logo"><img src="assets/brand/01-horizontal.svg" alt="shipbay."></span>
-      <span>&copy; 2026 shipbay. All rights reserved. &middot; <a href="privacy.html" style="text-decoration:underline">Privacy</a> &middot; <a href="terms.html" style="text-decoration:underline">Terms</a> &middot; 115 Stryker Ln, Hillsborough Township, NJ</span>
-    </div>
-  </div>
-</footer>
+      <span>&copy; 2026 ShipBay 3PL. All rights reserved. &middot; <a href="privacy.html" style="color:inherit;text-decoration:underline">Privacy</a> &middot; <a href="terms.html" style="color:inherit;text-decoration:underline">Terms</a></span>
+      <span class="foot-social" data-social aria-label="ShipBay on social media"></span>
+
+<script>
+(function(){ // footer social links: only the handles that exist in js/config.js are shown
+  var S = (window.SHIPBAY_SOCIAL) || {};
+  var I = {
+    linkedin:'<svg viewBox="0 0 24 24"><path d="M20.45 20.45h-3.56v-5.57c0-1.33-.03-3.04-1.85-3.04-1.85 0-2.13 1.45-2.13 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zM7.12 20.45H3.55V9h3.57v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z"/></svg>',
+    instagram:'<svg viewBox="0 0 24 24"><path d="M12 2.2c3.2 0 3.6 0 4.8.1 1.2.1 1.8.2 2.2.4.6.2 1 .5 1.4.9.4.4.7.8.9 1.4.2.4.4 1 .4 2.2.1 1.3.1 1.6.1 4.8s0 3.6-.1 4.8c-.1 1.2-.2 1.8-.4 2.2-.2.6-.5 1-.9 1.4-.4.4-.8.7-1.4.9-.4.2-1 .4-2.2.4-1.3.1-1.6.1-4.8.1s-3.6 0-4.8-.1c-1.2-.1-1.8-.2-2.2-.4-.6-.2-1-.5-1.4-.9-.4-.4-.7-.8-.9-1.4-.2-.4-.4-1-.4-2.2C2.2 15.6 2.2 15.2 2.2 12s0-3.6.1-4.8c.1-1.2.2-1.8.4-2.2.2-.6.5-1 .9-1.4.4-.4.8-.7 1.4-.9.4-.2 1-.4 2.2-.4C8.4 2.2 8.8 2.2 12 2.2M12 0C8.7 0 8.3 0 7.1.1 5.8.1 4.9.3 4.1.6c-.8.3-1.5.7-2.2 1.4C1.3 2.7.9 3.4.6 4.2.3 5 .1 5.9.1 7.1 0 8.3 0 8.7 0 12s0 3.7.1 4.9c.1 1.3.3 2.1.6 2.9.3.8.7 1.5 1.4 2.2.7.7 1.4 1.1 2.2 1.4.8.3 1.6.5 2.9.6C8.3 24 8.7 24 12 24s3.7 0 4.9-.1c1.3-.1 2.1-.3 2.9-.6.8-.3 1.5-.7 2.2-1.4.7-.7 1.1-1.4 1.4-2.2.3-.8.5-1.6.6-2.9.1-1.2.1-1.6.1-4.9s0-3.7-.1-4.9c-.1-1.3-.3-2.1-.6-2.9-.3-.8-.7-1.5-1.4-2.2C21.3 1.3 20.6.9 19.8.6 19 .3 18.2.1 16.9.1 15.7 0 15.3 0 12 0zm0 5.8a6.2 6.2 0 1 0 0 12.4 6.2 6.2 0 0 0 0-12.4zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.4-11.8a1.4 1.4 0 1 0 0 2.9 1.4 1.4 0 0 0 0-2.9z"/></svg>',
+    tiktok:'<svg viewBox="0 0 24 24"><path d="M19.6 5.8a5.1 5.1 0 0 1-3.9-4.3h-3.5v14.2a3 3 0 1 1-2.1-2.9V9.2a6.5 6.5 0 1 0 5.6 6.4V8.3a8.5 8.5 0 0 0 5 1.6V6.4c-.4 0-.8-.2-1.1-.6z"/></svg>',
+    youtube:'<svg viewBox="0 0 24 24"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8zM9.6 15.6V8.4l6.2 3.6-6.2 3.6z"/></svg>',
+    x:'<svg viewBox="0 0 24 24"><path d="M18.2 2h3.4l-7.4 8.5L23 22h-6.8l-5.3-7-6.1 7H1.4l7.9-9L1 2h7l4.8 6.4L18.2 2zm-1.2 18h1.9L7.1 3.9H5.1L17 20z"/></svg>',
+    facebook:'<svg viewBox="0 0 24 24"><path d="M24 12a12 12 0 1 0-13.9 11.9v-8.4H7.1V12h3V9.4c0-3 1.8-4.7 4.5-4.7 1.3 0 2.7.2 2.7.2v3h-1.5c-1.5 0-2 .9-2 1.9V12h3.3l-.5 3.5h-2.8v8.4A12 12 0 0 0 24 12z"/></svg>'
+  };
+  var N = {linkedin:'LinkedIn',instagram:'Instagram',tiktok:'TikTok',youtube:'YouTube',x:'X',facebook:'Facebook'};
+  document.querySelectorAll('[data-social]').forEach(function(el){
+    Object.keys(I).forEach(function(k){ if(!S[k]) return; var a=document.createElement('a'); a.href=S[k]; a.target='_blank'; a.rel='noopener'; a.setAttribute('aria-label','ShipBay on '+N[k]); a.title=N[k]; a.innerHTML=I[k]; el.appendChild(a); });
+  });
+})();
+</script>
 
 </body>
 </html>
