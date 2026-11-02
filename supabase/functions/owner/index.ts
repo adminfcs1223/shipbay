@@ -436,7 +436,7 @@ const pushable = (l: any) => l.stage !== 'new' || !['cold_email', 'cold_call'].i
 /** portal → HubSpot for one account: company (by domain), contact (by email), deal (stage past New) */
 async function hsPushLead(l: any, cfg: any) {
   const owner = l.assigned_to ? cfg.owners?.[l.assigned_to] : undefined;
-  const patch: any = { hs_synced_at: new Date().toISOString() };
+  const patch: any = { hs_synced_at: new Date().toISOString(), hs_error: null };
   // company
   if (l.company || l.domain) {
     const props: any = { name: l.company || l.domain, domain: l.domain || undefined, phone: l.phone || undefined, city: l.city || undefined, state: l.state || undefined, shipbay_account_id: l.id, hubspot_owner_id: owner, description: l.notes ? String(l.notes).slice(0, 5000) : undefined };
@@ -464,6 +464,12 @@ async function hsPushLead(l: any, cfg: any) {
     const props: any = { dealname: `${l.company || l.email} — fulfillment`, pipeline: cfg.pipeline_id, dealstage: stageId, amount: monthly != null ? hsMoney(monthly * 12) : undefined, hubspot_owner_id: owner, shipbay_account_id: l.id, closedate: l.won_at || undefined, description: monthly != null ? `Expected services ${Math.round(monthly)}/mo (annualized amount)${q ? ' · quote in the portal' : ''}` : undefined };
     let did = l.hs_deal_id;
     if (!did) { const f = await hs('/crm/v3/objects/deals/search', { method: 'POST', body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'shipbay_account_id', operator: 'EQ', value: l.id }] }], limit: 1 }) }); did = f.results?.[0]?.id; }
+    // adopt an open deal the website trigger already made for this contact (moves it into the ShipBay pipeline)
+    if (!did && patch.hs_contact_id) {
+      const a = await hs(`/crm/v4/objects/contacts/${patch.hs_contact_id}/associations/deals?limit=20`).catch(() => null);
+      const ids = (a?.results || []).map((x: any) => String(x.toObjectId));
+      if (ids.length) { const b = await hs('/crm/v3/objects/deals/batch/read', { method: 'POST', body: JSON.stringify({ properties: ['dealstage', 'pipeline'], inputs: ids.map((id: string) => ({ id })) }) }).catch(() => null); const open = (b?.results || []).find((d: any) => !/closed/.test(d.properties.dealstage || '') && d.properties.dealstage !== cfg.stage_ids?.lost); if (open) did = open.id; }
+    }
     if (did) await hs(`/crm/v3/objects/deals/${did}`, { method: 'PATCH', body: JSON.stringify({ properties: props }) }); else did = (await hs('/crm/v3/objects/deals', { method: 'POST', body: JSON.stringify({ properties: props }) })).id;
     patch.hs_deal_id = String(did);
     if (patch.hs_contact_id) await hs(`/crm/v4/objects/deals/${did}/associations/default/contacts/${patch.hs_contact_id}`, { method: 'PUT' }).catch(() => {});
@@ -509,10 +515,11 @@ async function hsPushActivity(l: any, cfg: any, since: string | null) {
   return n;
 }
 /** HubSpot → portal: contacts / companies / deals / engagements changed since the last pull */
-async function hsPull(cfg: any) {
+async function hsPull(cfg: any, left: () => number = () => 1e9) {
   const since = cfg.last_pull ? new Date(new Date(cfg.last_pull).getTime() - 120000).toISOString() : '2000-01-01T00:00:00Z';
   const ms = String(new Date(since).getTime()); const out = { contacts: 0, deals: 0, companies: 0, activities: 0, created: 0 };
-  const search = async (obj: string, props: string[]) => { const rows: any[] = []; let after: string | undefined; for (let i = 0; i < 10; i++) { const j = await hs(`/crm/v3/objects/${obj}/search`, { method: 'POST', body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'hs_lastmodifieddate', operator: 'GTE', value: ms }] }], properties: props, sorts: [{ propertyName: 'hs_lastmodifieddate', direction: 'ASCENDING' }], limit: 100, ...(after ? { after } : {}) }) }); rows.push(...(j.results || [])); after = j.paging?.next?.after; if (!after) break; } return rows; };
+  let cut = false;
+  const search = async (obj: string, props: string[]) => { if (left() < 15000) { cut = true; return []; } const modProp = obj === 'contacts' ? 'lastmodifieddate' : 'hs_lastmodifieddate'; const rows: any[] = []; let after: string | undefined; for (let i = 0; i < 10; i++) { const j = await hs(`/crm/v3/objects/${obj}/search`, { method: 'POST', body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: modProp, operator: 'GTE', value: ms }] }], properties: props, sorts: [{ propertyName: modProp, direction: 'ASCENDING' }], limit: 100, ...(after ? { after } : {}) }) }); rows.push(...(j.results || [])); after = j.paging?.next?.after; if (!after) break; } return rows; };
   // contacts
   for (const c of await search('contacts', ['firstname', 'lastname', 'email', 'phone', 'jobtitle', 'company', 'website', 'city', 'state', 'hs_lead_status', 'hubspot_owner_id', 'shipbay_account_id', 'lifecyclestage'])) {
     const p = c.properties; const email = (p.email || '').toLowerCase();
@@ -571,22 +578,26 @@ async function hsPull(cfg: any) {
     const p = e.properties; const incoming = p.hs_email_direction === 'INCOMING_EMAIL';
     await admin.from('sales_touches').insert({ lead_id: leadId, kind: incoming ? 'note' : 'email_sent', note: `${incoming ? 'Email received' : 'Email'} (HubSpot): ${p.hs_email_subject || ''}\n${String(p.hs_email_text || '').slice(0, 2000)}`.trim(), at: p.hs_timestamp, by_user: cfg.owner_users?.[p.hubspot_owner_id] || null, hs_id: String(e.id) }); out.activities++;
   }
-  cfg.last_pull = new Date().toISOString(); await saveHsCfg(cfg); return out;
+  if (!cut) cfg.last_pull = new Date().toISOString(); await saveHsCfg(cfg); return { ...out, partial: cut };
 }
 /** the whole round trip: pull HubSpot's changes, then push the portal's */
+/** each run works inside a time budget; whatever is left waits for the next tick (every 5 min) or the next click */
+const SYNC_BUDGET_MS = 110000;
 async function hubspotSync(full = false) {
   const cfg = await hsCfg(); if (!cfg.pipeline_id) throw new Error('Run HubSpot set-up first (Admin → Connections).');
-  const pulled = await hsPull(cfg);
-  const since = full ? null : cfg.last_push || null;
-  let q = admin.from('sales_leads').select('*').order('updated_at', { ascending: true }).limit(full ? 2000 : 300);
-  if (!full) q = q.or(`hs_synced_at.is.null,updated_at.gt.hs_synced_at`);
-  const { data: leads } = await q; let pushed = 0, acts = 0; const errors: string[] = [];
+  const t0 = Date.now(); const left = () => SYNC_BUDGET_MS - (Date.now() - t0);
+  if (full) { await admin.from('sales_leads').update({ hs_synced_at: null }).not('hs_synced_at', 'is', null); cfg.last_pull = null; }
+  const pulled = await hsPull(cfg, left);
+  const since = cfg.last_push || null;
+  const { data: leads } = await admin.rpc('hs_push_queue', { p_limit: 400 }); let pushed = 0, acts = 0; const errors: string[] = [];
   for (const l of leads || []) {
-    if (!pushable(l)) continue;
-    try { const l2 = await hsPushLead(l, cfg); acts += await hsPushActivity(l2, cfg, since); pushed++; } catch (e) { errors.push(`${l.company || l.email}: ${String((e as Error).message).slice(0, 140)}`); if (errors.length > 8) break; }
+    if (left() < 6000) break;
+    try { const l2 = await hsPushLead(l, cfg); acts += await hsPushActivity(l2, cfg, since); pushed++; }
+    catch (e) { errors.push(`${l.company || l.email}: ${String((e as Error).message).slice(0, 140)}`); await admin.from('sales_leads').update({ hs_synced_at: new Date().toISOString(), hs_error: String((e as Error).message).slice(0, 300) }).eq('id', l.id).then(() => {}, () => {}); if (errors.length > 8) break; }
   }
-  cfg.last_push = new Date().toISOString(); cfg.last_sync = cfg.last_push; cfg.last_result = { pulled, pushed, acts, errors: errors.slice(0, 5) }; await saveHsCfg(cfg);
-  return { ok: true, pulled, pushed, activities: acts, errors };
+  const { data: pending } = await admin.rpc('hs_push_pending');
+  cfg.last_push = new Date().toISOString(); cfg.last_sync = cfg.last_push; cfg.last_result = { pulled, pushed, acts, pending: pending ?? 0, errors: errors.slice(0, 5) }; await saveHsCfg(cfg);
+  return { ok: true, pulled, pushed, activities: acts, pending: pending ?? 0, errors };
 }
 
 // ---------- Calendly ----------

@@ -7,8 +7,12 @@
 // NOTE: cold-outreach leads never go through here (rule 2026-09-28) — only website inbound.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
-const WEBHOOK_SECRET = Deno.env.get("WEBHOOK_SECRET")!;
+const WEBHOOK_SECRET = Deno.env.get("WEBHOOK_SECRET") || "2e90b9f6bb971ea18e658c43ea8ac57506b07660cf5e44d8"; // same value the leads trigger sends
 const HS = "https://api.hubapi.com";
+// v7: deals go into the "ShipBay Sales" pipeline the portal syncs with (Contacted), not the default one.
+const SB_PIPELINE = "2672086748";
+const SB_STAGE_CONTACTED = "4543245043";
+const SB_CLOSED = ["4543245047", "4543245048"]; // Closed won / Closed lost
 const FREE_MAIL = /gmail|yahoo|outlook|hotmail|aol|icloud|proton|live\.|msn/i;
 
 function json(body: unknown, status = 200): Response {
@@ -42,7 +46,9 @@ Deno.serve(async (req: Request) => {
   const brand = String(lead.brand ?? "").trim();
   const src = String(lead.source ?? "");
   const isApplication = lead.intake != null || /start|get started|migrate|intake|application/i.test(src);
-  const leadType = /rate card/i.test(src) ? "Rate card request" : isApplication ? "Account application" : "Booked call";
+  const leadType = /instant quote/i.test(src) ? "Instant quote"
+    : /rate card/i.test(src) ? "Rate card request"
+    : isApplication ? "Account application" : "Booked call";
 
   // ---- 1) upsert contact (owner-assigned) ----
   const contactProps: Record<string, string> = {
@@ -107,7 +113,7 @@ Deno.serve(async (req: Request) => {
       });
       if (r.ok) {
         const open = (await r.json()).results?.find((d: { properties: Record<string, string> }) =>
-          d.properties.pipeline === "default" && !["closedwon", "closedlost"].includes(d.properties.dealstage));
+          d.properties.pipeline === SB_PIPELINE && !SB_CLOSED.includes(d.properties.dealstage));
         if (open) dealId = open.id;
       }
     }
@@ -116,7 +122,7 @@ Deno.serve(async (req: Request) => {
     r = await fetch(`${HS}/crm/v3/objects/deals`, {
       method: "POST", headers: h,
       body: JSON.stringify({
-        properties: { dealname: `${brand || name || email} — ${leadType}`, pipeline: "default", dealstage: "appointmentscheduled", hubspot_owner_id: OWNER },
+        properties: { dealname: `${brand || name || email} — ${leadType}`, pipeline: SB_PIPELINE, dealstage: SB_STAGE_CONTACTED, hubspot_owner_id: OWNER },
         associations: [{ to: { id: contactId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 3 }] }],
       }),
     });
