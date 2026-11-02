@@ -17,6 +17,46 @@ export const EMAIL = [['nothing', 'Nothing yet'], ['replied', 'Replied'], ['boun
 export const SEND = [['send', 'Send the email'], ['skip', 'Not this time']];
 const NO_PICKUP = ['no_answer', 'voicemail'];
 const POWER_BLOCKED = ['replied', 'call_booked', 'won', 'dnc', 'lost', 'signed'];
+const THIRD_PARTY = ['agency', 'fulfill', 'fulfilment'];
+
+/** Why a lead can't go to Power right now, or null if it can. */
+export function powerBlock(lead) {
+  if (!lead) return 'no lead';
+  if (lead.power_enrolled_at) return 'enrolled';
+  if (lead.sequence === 'power') return 'queued';
+  if (lead.sequence === 'blitz') return 'blitz';
+  if (THIRD_PARTY.includes(lead.source || '')) return 'third-party';
+  if (POWER_BLOCKED.includes(lead.stage || 'new')) return lead.stage;
+  if (!lead.email) return 'no email';
+  return null;
+}
+
+/** Queue a lead for the Power sequence. The DB cron enrolls it in HubSpot within the minute. */
+export async function enrollPower(lead, me, note) {
+  const block = powerBlock(lead); if (block) return { error: block };
+  const now = new Date().toISOString();
+  const patch = { sequence: 'power', enroll_at: now, last_touch_at: now, last_outcome: 'power_enrolled', assigned_to: lead.assigned_to || me.id };
+  if (!lead.first_email_at) patch.first_email_at = now;
+  if ((lead.stage || 'new') === 'new') patch.stage = 'contacted';
+  const { error } = await supabase.from('sales_leads').update(patch).eq('id', lead.id);
+  if (error) return { error: error.message };
+  await supabase.from('sales_touches').insert({ lead_id: lead.id, kind: 'power_enrolled', note: note || null, by_user: me.id }).catch(() => {});
+  return { ok: true };
+}
+
+/** The one button: enroll, or the state if it already happened. */
+export function PowerButton({ lead, me, note, onDone, say }) {
+  const [busy, setBusy] = useState(false);
+  const block = powerBlock(lead);
+  const when = (d) => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  if (block === 'enrolled') return <span className="pill connected" title={`Power since ${new Date(lead.power_enrolled_at).toLocaleString()}`}>In Power · {when(lead.power_enrolled_at)}</span>;
+  if (block === 'queued') return <span className={lead.hs_error ? 'pill error' : 'pill pending'} title={lead.hs_error ? `HubSpot said: ${lead.hs_error}` : 'Queued — HubSpot enrollment runs within the minute'}>{lead.hs_error ? 'Power · retrying' : 'Power · queued'}</span>;
+  if (block === 'blitz') return <span className="pill navy">In Blitz</span>;
+  if (block === 'third-party') return null;
+  if (block) return <button className="btn-sm" disabled title={block === 'no email' ? 'No email on file' : `Not while the lead is ${block.replace('_', ' ')}`}>Enroll in Power</button>;
+  return <button className="btn-sm" disabled={busy} onClick={async () => { setBusy(true); const r = await enrollPower(lead, me, note); setBusy(false); if (r.error) say?.({ error: r.error }); else { say?.(null, `${lead.company || lead.email} → Power. First email goes out within the minute.`); onDone?.(); } }}>Enroll in Power</button>;
+}
+
 const label = (list, k) => (list.find(([x]) => x === k) || [])[1] || k || '—';
 
 /** the legacy outcome the scoreboards and stages run on, derived from the answers */

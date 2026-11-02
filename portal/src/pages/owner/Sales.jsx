@@ -9,7 +9,7 @@ import { ownerFn, fetchAll, money, pct, num, ago, mmss, hhmm, STAGES, stageLabel
 import { compute, phases } from '../../quote';
 import Quotes from '../Quotes';
 import Onboarding from '../Onboarding';
-import { Debrief, DebriefBoard, saveDebrief } from './Debrief';
+import { Debrief, DebriefBoard, PowerButton, saveDebrief } from './Debrief';
 
 /** the quotes that belong to an account (by the account row, or its client org) — best first */
 const QRANK = { accepted: 0, sent: 1, draft: 2, declined: 3, superseded: 4 };
@@ -442,7 +442,7 @@ export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say,
         </div>
         <div className="pactions">
           {lead.email && <a className="btn-sm primary" href={kit.link(lead.email, lastReply?.subject, lead)} target="_blank" rel="noreferrer">{lastReply ? 'Reply in Gmail' : 'Email in Gmail'}</a>}
-          {lead.email && <button className="btn-sm" onClick={async () => { await supabase.from('sales_touches').insert({ lead_id: lead.id, kind: 'email_sent', note: note || null, by_user: me.id }); await upd({ last_touch_at: new Date().toISOString(), last_outcome: 'email_sent', ...(lead.stage === 'new' ? { stage: 'contacted' } : {}) }, 'Email logged.'); const { data } = await supabase.from('sales_touches').select('*').eq('lead_id', lead.id).order('at', { ascending: false }); setTouches(data || []); }}>Mark email sent</button>}
+          <PowerButton lead={lead} me={me} note={note} say={say} onDone={async () => { reload(); const { data } = await supabase.from('sales_touches').select('*').eq('lead_id', lead.id).order('at', { ascending: false }); setTouches(data || []); }} />
           {booking && <button className="btn-sm" onClick={() => { navigator.clipboard?.writeText(booking); say(null, 'Booking link copied.'); }}>Copy booking link</button>}
           {lead.phone && <a className="btn-sm" href={`tel:${lead.phone.replace(/[^+\d]/g, '')}`}>Call {lead.phone}</a>}
           <button className="btn-sm" onClick={() => setLogging((v) => !v)}>Log a call</button>
@@ -479,7 +479,7 @@ export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say,
                     {t.kind === 'reply' && <div className={`ev reply ${t.s.read_at ? '' : 'unread'}`} onClick={() => { markRead(t.s); go('email', t.s.id); onClose(); }}><b>Replied</b>{t.s.reply_type && <span className="pill">{t.s.reply_type}</span>}<div className="snip">{(t.s.reply_body || t.s.subject || '').split('\n').filter(Boolean).join(' ').slice(0, 220)}</div><span className="sm">open conversation →</span></div>}
                     {t.kind === 'sent' && <div className="ev"><span className="sm">Email step {t.s.step} sent · {t.s.subject}</span></div>}
                     {t.kind === 'call' && <div className="ev"><b>Call · {t.c.outcome.replace('_', ' ')}</b><span className="sm"> · {who(t.c.by_user)}{t.c.seconds ? ` · ${mmss(t.c.seconds)}` : ''}</span>{t.c.note && <div className="sm">{t.c.note}</div>}</div>}
-                    {t.kind === 'touch' && <div className="ev"><b>{t.t.kind === 'email_sent' ? 'Email sent' : t.t.kind}</b><span className="sm"> · {who(t.t.by_user)}</span>{t.t.note && <div className="sm">{t.t.note}</div>}</div>}
+                    {t.kind === 'touch' && <div className="ev"><b>{t.t.kind === 'email_sent' ? 'Email sent' : t.t.kind === 'power_enrolled' ? 'Enrolled in Power' : t.t.kind}</b><span className="sm"> · {who(t.t.by_user)}</span>{t.t.note && <div className="sm">{t.t.note}</div>}</div>}
                     {t.kind === 'meeting' && <div className="ev"><b>{t.m.status === 'canceled' ? 'Canceled call' : 'Call booked'}</b><span className="sm"> · {t.m.name}{t.m.outcome ? ` → ${t.m.outcome.replace('_', ' ')}` : ''}</span></div>}
                   </li>
                 ))}</ul>
@@ -916,7 +916,7 @@ const grade = (bookedPer100, dials) => (dials < 30 ? '—' : bookedPer100 >= 3 ?
 export function Calls({ me, rep, leads, people, reload, say, openLead }) {
   const [list, setList] = useState(''); const [who, setWho] = useState(''); const kit = useReplyKit(me); const booking = kit.booking; const [calls, setCalls] = useState([]); const [sessions, setSessions] = useState([]);
   const [session, setSession] = useState(() => { try { return JSON.parse(sessionStorage.getItem('shipbay-call-session') || 'null'); } catch { return null; } });
-  const [cur, setCur] = useState(null); const [callStart, setCallStart] = useState(null); const [note, setNote] = useState(''); const [tick, setTick] = useState(0); const [skipped, setSkipped] = useState([]); const [debrief, setDebrief] = useState(false); const [emailed, setEmailed] = useState(null); const [emailLogging, setEmailLogging] = useState(false);
+  const [cur, setCur] = useState(null); const [callStart, setCallStart] = useState(null); const [note, setNote] = useState(''); const [tick, setTick] = useState(0); const [skipped, setSkipped] = useState([]); const [debrief, setDebrief] = useState(false); const [emailed, setEmailed] = useState(null);
   useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t); }, []);
   const loadCalls = async () => { const [c, s] = await Promise.all([fetchAll('sales_calls', '*', (q) => q.order('started_at', { ascending: false })), fetchAll('sales_call_sessions', '*', (q) => q.order('started_at', { ascending: false }))]); setCalls(c); setSessions(s); };
   useEffect(() => { loadCalls(); }, []);
@@ -940,13 +940,6 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
     setDebrief(false); setCallStart(null); setNote(''); setCur(null); setEmailed(null); reload(); loadCalls();
   };
   const skip = () => { if (lead) setSkipped([...skipped, lead.id]); setCur(null); setCallStart(null); };
-  const logEmail = async (l) => {
-    setEmailLogging(true);
-    await supabase.from('sales_touches').insert({ lead_id: l.id, kind: 'email_sent', note: note || null, by_user: me.id });
-    const patch = { last_touch_at: new Date().toISOString(), last_outcome: 'email_sent', assigned_to: l.assigned_to || me.id }; if (l.stage === 'new') patch.stage = 'contacted';
-    await supabase.from('sales_leads').update(patch).eq('id', l.id);
-    setEmailLogging(false); setEmailed(null); say(null, `Email to ${l.company || l.email} logged.`); reload();
-  };
 
   const board = useMemo(() => {
     const today = new Date().toDateString();
@@ -980,7 +973,7 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
                 {lead.notes && <pre className="notes">{lead.notes}</pre>}
               </div>
               <div className="timer">{callStart ? <><b>{mmss(callSecs)}</b><span>on the call</span></> : <button className="btn primary big" onClick={startCall}>Start call</button>}
-                {lead.email && <span className="emailacts"><a className="btn-sm" href={kit.link(lead.email, null, lead)} target="_blank" rel="noreferrer" onClick={() => setEmailed(lead.id)}>Compose email</a><button className="btn-sm" disabled={emailLogging} onClick={() => logEmail(lead)}>{emailed === lead.id ? '✓ Mark email sent' : 'Mark email sent'}</button></span>}
+                {lead.email && <span className="emailacts"><a className="btn-sm" href={kit.link(lead.email, null, lead)} target="_blank" rel="noreferrer" onClick={() => setEmailed(lead.id)}>Compose email</a><PowerButton lead={lead} me={me} note={note} say={say} onDone={() => { reload(); loadCalls(); }} /></span>}
               </div>
               <textarea className="callnote" rows={2} placeholder="One line: who you spoke to, what they said, when to call back…" value={note} onChange={(e) => setNote(e.target.value)} />
               <div className="outcomes end"><button className="oc solid" onClick={() => setDebrief(true)}>{callStart ? 'End call' : 'Log this dial'}</button></div>

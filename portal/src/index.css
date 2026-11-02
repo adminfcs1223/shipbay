@@ -1486,3 +1486,6 @@ input[type=text], input[type=search], input[type=email], input[type=number], inp
 .dbr-row input { width: 100%; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .modal.dbr textarea { width: 100%; padding: 11px 14px; border: 1.5px solid var(--line-2); border-radius: 10px; font-size: 14.5px; }
 @media (max-width: 760px) { .dbr-pick { grid-template-columns: repeat(2, 1fr) !important; } .dbr-row { grid-template-columns: 1fr; } }
+
+/* Power state pills sit beside buttons in the action rows — same height as .btn-sm so the row doesn't jog */
+.pactions .pill, .emailacts .pill { display: inline-flex; align-items: center; padding: 0 12px; height: 32px; font: 600 12px var(--font); letter-spacing: 0; text-transform: none; }
