@@ -84,11 +84,13 @@ export async function saveDebrief({ lead, me, started, seconds, note, a, emailed
   const row = { lead_id: lead.id, started_at: new Date(started).toISOString(), ended_at: now.toISOString(), seconds, outcome, note: note || null, by_user: me.id, list_id: lead.filter_id || null, hour_block: etHour(new Date(started)),
     dial_result: a.dial_result || null, picked_up: a.picked_up || null, fit: a.fit || null, not_fit_reason: a.fit === 'not_fit' ? a.not_fit_reason || null : null, not_fit_detail: a.fit === 'not_fit' ? a.not_fit_detail || null : null,
     orders_month: a.orders_month ? Number(a.orders_month) : null, current_setup: a.current_setup || null, pain: a.pain || null, result: a.result || null, callback_at: a.result === 'callback' && a.callback_at ? new Date(a.callback_at).toISOString() : null, email_result: a.email_result || null };
-  await supabase.from('sales_calls').insert(row);
   // the lead: attempts, next action, stage, the durable answers
   const next = { no_answer: 2, voicemail: 3, gatekeeper: 1, connected: 7 }[outcome];
   const patch = { attempts: (lead.attempts || 0) + 1, last_outcome: outcome, last_touch_at: now.toISOString(), assigned_to: lead.assigned_to || me.id, next_action_at: row.callback_at || (next ? new Date(Date.now() + next * 86400000).toISOString() : null) };
   if (row.picked_up) patch.picked_up = row.picked_up;
+  // the rep can correct the address before it sends (a different person, a better inbox)
+  const newEmail = (a.send === 'yes' && a.to_email && a.to_email.toLowerCase() !== (lead.email || '').toLowerCase()) ? a.to_email.toLowerCase() : null;
+  if (newEmail) { patch.email = newEmail; patch.notes = [patch.notes || lead.notes, `${now.toLocaleDateString()} email changed ${lead.email || '—'} → ${newEmail}`].filter(Boolean).join('\n'); }
   if (row.orders_month != null) patch.orders_month_actual = row.orders_month;
   if (row.current_setup) patch.current_setup = row.current_setup;
   if (row.pain && row.pain !== 'none') patch.pain = row.pain;
@@ -99,16 +101,18 @@ export async function saveDebrief({ lead, me, started, seconds, note, a, emailed
   else if (outcome === 'wrong_number') { patch.in_calls = false; patch.tags = [...new Set([...(lead.tags || []), 'bad_number'])]; }
   else if (lead.stage === 'new') patch.stage = 'contacted';
   if (a.result === 'soft_no') patch.next_action_at = new Date(Date.now() + 45 * 86400000).toISOString();
-  if (note) patch.notes = [lead.notes, `${now.toLocaleDateString()} ${label(DIAL, a.dial_result)}${a.result ? ` → ${label(RESULT, a.result)}` : ''}: ${note}`].filter(Boolean).join('\n');
+  if (note) patch.notes = [patch.notes || lead.notes, `${now.toLocaleDateString()} ${label(DIAL, a.dial_result)}${a.result ? ` → ${label(RESULT, a.result)}` : ''}: ${note}`].filter(Boolean).join('\n');
   if ((lead.attempts || 0) + 1 >= 4 && !['booked', 'connected', 'gatekeeper'].includes(outcome)) patch.in_calls = false;   // 4 tries with no human → park it
   // The email: "Enroll in Power" queues the Power sequence; "Send info" queues the info sequence (the rundown + booking link, then Power a day later if no reply).
   // The DB trigger on sales_calls does the same on email_result in (power, info); this is belt and braces so the UI reflects it instantly.
   if (['power', 'info'].includes(a.email_result) && !['agency', 'fulfill', 'fulfilment'].includes(lead.source || '') && !lead.sequence && !lead.power_enrolled_at && !POWER_BLOCKED.includes(lead.stage || 'new') && !(outcome === 'booked' || outcome === 'dnc' || outcome === 'not_fit')) {
-    patch.sequence = a.email_result; patch.enroll_at = now.toISOString();
+    patch.sequence = a.email_result; patch.enroll_at = newEmail ? new Date(now.getTime() + 90000).toISOString() : now.toISOString();
     if (!lead.first_email_at) patch.first_email_at = now.toISOString();
   }
   if (emailedNow && !lead.first_email_at) patch.first_email_at = now.toISOString();
   await supabase.from('sales_leads').update(patch).eq('id', lead.id);
+  // the call row goes in after the lead patch, so the DB trigger sees the sequence already set (and the delayed enroll_at when the email changed)
+  await supabase.from('sales_calls').insert(row);
   if (outcome === 'dnc' && lead.email) ownerFn({ action: 'smartlead_stop_lead', email: lead.email });
   // HubSpot gets the call + the contact answers right away (the 5-minute sync would catch it anyway)
   ownerFn({ action: 'hubspot_push_one', lead_id: lead.id }).catch(() => {});
@@ -121,14 +125,15 @@ function Pick({ options, value, onChange, cols = 3 }) {
 
 /** The modal. Quick path for no-answer / voicemail / bad number; full path when a human picked up. */
 export function Debrief({ lead, seconds, note, setNote, emailedNow, onSave, onCancel }) {
-  const [a, setA] = useState({ dial_result: '', picked_up: '', fit: '', not_fit_reason: '', not_fit_detail: '', orders_month: '', current_setup: '', pain: '', result: '', callback_at: '', send: '', email_result: '' });
+  const [a, setA] = useState({ dial_result: '', picked_up: '', fit: '', not_fit_reason: '', not_fit_detail: '', orders_month: '', current_setup: '', pain: '', result: '', callback_at: '', send: '', to_email: lead.email || '', email_result: '' });
   const set = (k) => (v) => setA((x) => ({ ...x, [k]: v }));
   const human = a.dial_result === 'gatekeeper' || a.dial_result === 'decision_maker';
   const quick = ['no_answer', 'voicemail', 'bad_number'].includes(a.dial_result);
   const inSeq = !!(lead.sequence || lead.power_enrolled_at);
   // The last question, always: send the email? Not after a booking, a hard no, a not-fit, or a bad number — and not if they're already in a sequence.
   const askSend = !!lead.email && !inSeq && (NO_PICKUP.includes(a.dial_result) || (human && !!a.result && !NO_EMAIL_AFTER.includes(a.result) && a.fit !== 'not_fit'));
-  const sendDone = !askSend || (a.send === 'no') || (a.send === 'yes' && !!a.email_result);
+  const toOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a.to_email || '');
+  const sendDone = !askSend || (a.send === 'no') || (a.send === 'yes' && !!a.email_result && toOk);
   const canSave = !!a.dial_result && sendDone && (quick || (a.dial_result === 'gatekeeper' ? !!a.result : !!a.picked_up && !!a.fit && (a.fit !== 'not_fit' || !!a.not_fit_reason) && !!a.result));
   useEffect(() => { const k = (e) => { if (e.key === 'Escape') onCancel(); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onCancel]);
   return (
@@ -154,7 +159,8 @@ export function Debrief({ lead, seconds, note, setNote, emailedNow, onSave, onCa
         {askSend && <section><div className="dbr-q">{human ? '8' : '2'} · Send the email?</div><Pick options={YESNO} value={a.send} onChange={(v) => setA((x) => ({ ...x, send: v, email_result: v === 'yes' ? x.email_result : '' }))} cols={2} />
           {a.send === 'yes' && <div className="dbr-sub">
             <Pick options={WHICH} value={a.email_result} onChange={set('email_result')} cols={2} />
-            <div className="dbr-to"><b>To</b> {lead.email} <b>from</b> {SENDER}</div>
+            <label className="dbr-to"><b>To</b><input type="email" value={a.to_email} onChange={(e) => set('to_email')(e.target.value.trim())} spellCheck={false} /><b>from</b><span>{SENDER}</span></label>
+            {a.to_email && a.to_email.toLowerCase() !== (lead.email || '').toLowerCase() && <span className="sm">{/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a.to_email) ? `Saves ${a.to_email} as their email here and in HubSpot, then sends.` : 'That doesn\u2019t look like an email address.'}</span>}
             <span className="sm">{a.email_result === 'info' ? 'Send info: one email with the rundown and a booking link. No reply in a day → Power takes over.' : a.email_result === 'power' ? 'Power: first email within the minute, four follow-ups over two weeks. A reply stops it.' : 'Power opens cold; Send info is for someone who asked what we do.'}</span>
           </div>}
         </section>}

@@ -1491,3 +1491,7 @@ input[type=text], input[type=search], input[type=email], input[type=number], inp
 .pactions .pill, .emailacts .pill { display: inline-flex; align-items: center; padding: 0 12px; height: 32px; font: 600 12px var(--font); letter-spacing: 0; text-transform: none; }
 .dbr-to { font: 500 14px var(--font); color: var(--ink); padding: 10px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
 .dbr-to b { font-weight: 700; color: var(--muted); margin-right: 4px; }
+label.dbr-to { display: flex; align-items: center; gap: 10px; }
+label.dbr-to input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 8px; font: 600 14px var(--font); color: var(--ink); background: #fff; }
+label.dbr-to input:focus { outline: 2px solid var(--orange); outline-offset: -1px; }
+label.dbr-to span { color: var(--muted); }
