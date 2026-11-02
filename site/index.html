@@ -113,11 +113,18 @@
   .line-mask>span{display:block;transform:translateY(110%);transition:transform 1.1s var(--ease);transition-delay:var(--d,0ms)}
   .live .line-mask>span{transform:none}
 
-  /* the promise line: four short facts, faded ink, rises into place under the headline once the curtain is up */
-  .hero p.lede.promise{display:flex;flex-wrap:wrap;gap:6px 18px;max-width:none;margin:30px 0 36px;color:rgba(15,27,42,.7);opacity:0;transform:translateY(46px);transition:opacity .9s var(--ease) 1.05s,transform 1.15s var(--ease) 1.05s;will-change:transform,opacity}
-  .hero p.lede.promise b{font-weight:800;color:rgba(15,27,42,.76);white-space:nowrap}
-  .live .hero p.lede.promise{opacity:1;transform:none}
-  .hero h1.big{font-size:clamp(58px,7vw,106px);line-height:.9;text-transform:uppercase;letter-spacing:-.045em}
+  /* the promise line: four short facts, no sentence */
+  .hero p.lede.promise{display:flex;flex-wrap:wrap;gap:6px 18px;max-width:none}
+  .hero p.lede.promise b{font-weight:800;color:#fff;white-space:nowrap}
+
+  /* after the intro the whole headline block rides up and FEEL FULFILLED. surfaces beneath it, faded ink */
+  .hv-left{transform:translateY(110px);transition:transform 1.3s var(--ease-io) .95s;will-change:transform}
+  .live .hv-left{transform:none}
+  .feel{display:flex;align-items:flex-end;gap:28px;margin-top:64px;opacity:0;transform:translateY(34px);transition:opacity 1s var(--ease) 1.75s,transform 1.2s var(--ease) 1.75s}
+  .live .feel{opacity:1;transform:none}
+  .feel h2{font-size:clamp(54px,6.2vw,96px);font-weight:800;line-height:.88;letter-spacing:-.045em;text-transform:uppercase;color:#33405A;margin:0}
+  .feel h2 span{display:block}
+  .feel .person{height:clamp(220px,24vw,340px);width:auto;flex:none;margin-bottom:-88px;filter:drop-shadow(0 24px 40px rgba(120,40,0,.28))}
 
   /* ============ intro ============ */
   #intro{position:fixed;inset:0;z-index:2000;background:var(--orange);color:#fff;display:grid;place-items:center;overflow:hidden;cursor:pointer;clip-path:inset(0 0 0 0)}
@@ -478,7 +485,7 @@
   @media(prefers-reduced-motion:reduce){
     *{transition:none!important;animation:none!important}
     [data-reveal]{opacity:1;transform:none;filter:none}
-    .hero p.lede.promise{opacity:1;transform:none}
+    .hv-left,.feel{opacity:1;transform:none}
     .line-mask>span{transform:none}
     .og-bar,.dm-bars i{transform:none!important}
   }
@@ -489,7 +496,7 @@
 <header id="hdr">
   <div class="wrap">
     <nav>
-      <a class="nav-logo" href="index.html" aria-label="shipbay home"><img src="assets/brand/01-horizontal.svg" alt="shipbay."><small>Hillsborough, NJ</small></a>
+      <a class="nav-logo" href="index.html" aria-label="shipbay home"><img src="assets/brand/01-horizontal.svg" alt="shipbay."></a>
       <div class="nav-links">
         <a href="facility.html">Facility</a>
         <a href="pricing.html">Pricing</a>
@@ -535,11 +542,12 @@
   <img class="wm" src="assets/brand/13-mono-horizontal-white.svg" alt="" data-depth="0.03">
   <div class="wrap hero-grid">
     <div class="hv-left">
-      <h1 class="big">
-        <span class="line-mask"><span style="--d:80ms">Feel</span></span>
-        <span class="line-mask"><span style="--d:220ms"><em>fulfilled.</em></span></span>
+      <h1>
+        <span class="line-mask"><span style="--d:80ms">A DTC 3PL built</span></span>
+        <span class="line-mask"><span style="--d:180ms">for small brands.</span></span>
+        <span class="line-mask"><span style="--d:280ms"><em>Finally.</em></span></span>
       </h1>
-      <p class="lede promise"><b>No order minimum.</b> <b>No monthly minimums.</b> <b>$0 setup.</b> <b>$0 markup on postage.</b></p>
+      <p class="lede promise" data-reveal="fade" style="--i:5"><b>No order minimum.</b> <b>No monthly minimums.</b> <b>$0 setup.</b> <b>$0 markup on postage.</b></p>
       <div class="hv-ctas" data-reveal style="--i:6">
         <a class="btn btn-ink" href="book.html">Book a call <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
         <a class="btn btn-ghostw" href="pricing.html">See the rate card</a>
@@ -548,6 +556,10 @@
         <div><b><span data-count="1.65" data-prefix="$" data-dec="2">$1.65</span></b><small>per order, pick &amp; pack</small></div>
         <div><b><span data-count="2">2</span>pm</b><small>same-day cutoff, Mon&ndash;Sat</small></div>
         <div><b><span data-count="0" data-prefix="$">$0</span></b><small>setup &middot; minimums &middot; markup</small></div>
+      </div>
+      <div class="feel" aria-label="Feel fulfilled">
+        <h2><span>Feel</span><span>fulfilled.</span></h2>
+        <img class="person" src="assets/media/people/hero-person.png" alt="" onerror="this.remove()">
       </div>
     </div>
 
