@@ -423,11 +423,14 @@ async function hubspotSetup() {
   await ensureProp('companies', 'shipbay_account_id', 'ShipBay account id', 'companyinformation');
   await ensureProp('deals', 'shipbay_account_id', 'ShipBay account id', 'dealinformation');
   // owners ↔ staff by email
-  const { data: staff } = await admin.from('profiles').select('id, email, hs_owner_id').like('role', 'shipbay%');
+  const { data: staff } = await admin.from('profiles').select('id, email, role, hs_owner_id').like('role', 'shipbay%');
   cfg.owners = cfg.owners || {}; cfg.owner_users = cfg.owner_users || {};
   for (const p of staff || []) if (p.hs_owner_id) { cfg.owners[p.id] = String(p.hs_owner_id); cfg.owner_users[String(p.hs_owner_id)] = p.id; }
   let owners: any = { results: [] }; try { owners = await hs('/crm/v3/owners?limit=100'); cfg.owners_error = null; } catch (e) { cfg.owners_error = `Owners not readable (add the crm.objects.owners.read scope to the private app): ${String((e as Error).message).slice(0, 120)}`; }
   for (const o of owners.results || []) { const p = (staff || []).find((x: any) => String(x.email).toLowerCase() === String(o.email).toLowerCase()); if (p) { cfg.owners[p.id] = String(o.id); cfg.owner_users[String(o.id)] = p.id; await admin.from('profiles').update({ hs_owner_id: String(o.id) }).eq('id', p.id); } }
+  // unassigned accounts land on the owner (first shipbay_owner with a HubSpot owner id)
+  const ownerProfile = (staff || []).find((x: any) => x.role === 'shipbay_owner' && cfg.owners[x.id]) || (staff || []).find((x: any) => cfg.owners[x.id]);
+  if (ownerProfile) cfg.default_owner = cfg.owners[ownerProfile.id];
   cfg.setup_at = new Date().toISOString(); await saveHsCfg(cfg); return cfg;
 }
 const hsMoney = (v: unknown) => (v == null || v === '' ? undefined : String(Math.round(Number(v) || 0)));
@@ -435,7 +438,7 @@ const splitName = (n: string) => { const parts = String(n || '').trim().split(/\
 const pushable = (l: any) => l.stage !== 'new' || !['cold_email', 'cold_call'].includes(l.source);
 /** portal → HubSpot for one account: company (by domain), contact (by email), deal (stage past New) */
 async function hsPushLead(l: any, cfg: any) {
-  const owner = l.assigned_to ? cfg.owners?.[l.assigned_to] : undefined;
+  const owner = (l.assigned_to && cfg.owners?.[l.assigned_to]) || cfg.default_owner || undefined;
   const patch: any = { hs_synced_at: new Date().toISOString(), hs_error: null };
   // company
   if (l.company || l.domain) {
@@ -481,7 +484,7 @@ async function hsPushLead(l: any, cfg: any) {
 const assoc = (cid?: string, did?: string, kind = 'contacts') => [...(cid ? [{ to: { id: cid }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: kind === 'notes' ? 202 : kind === 'calls' ? 194 : kind === 'emails' ? 198 : kind === 'meetings' ? 200 : 202 }] }] : []), ...(did ? [{ to: { id: did }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: kind === 'notes' ? 214 : kind === 'calls' ? 206 : kind === 'emails' ? 210 : kind === 'meetings' ? 212 : 214 }] }] : [])];
 /** portal → HubSpot engagements for an account */
 async function hsPushActivity(l: any, cfg: any, since: string | null) {
-  const owner = l.assigned_to ? cfg.owners?.[l.assigned_to] : undefined; let n = 0;
+  const owner = (l.assigned_to && cfg.owners?.[l.assigned_to]) || cfg.default_owner || undefined; let n = 0;
   const { data: calls } = await admin.from('sales_calls').select('*').eq('lead_id', l.id).is('hs_id', null);
   for (const c of calls || []) {
     const r = await hs('/crm/v3/objects/calls', { method: 'POST', body: JSON.stringify({ properties: { hs_timestamp: c.started_at, hs_call_title: `Call — ${c.outcome.replace('_', ' ')}`, hs_call_body: c.note || '', hs_call_duration: String((c.seconds || 0) * 1000), hs_call_status: 'COMPLETED', hs_call_direction: 'OUTBOUND', hubspot_owner_id: cfg.owners?.[c.by_user] || owner }, associations: assoc(l.hs_contact_id, l.hs_deal_id, 'calls') }) });
