@@ -1402,3 +1402,68 @@ input[type=checkbox], input[type=radio] { accent-color: var(--orange); }
 }
 .card.ownertabs.withsearch .tabs button { padding: 12px 11px; font-size: 13.5px; }
 .card.ownertabs.withsearch .gsearch { width: 240px; }
+
+/* ======================================================================
+   v3.1 — heavy. (Derek, 02:31) Full-width, bigger type, fewer words.
+   ====================================================================== */
+.app { grid-template-columns: 264px minmax(0, 1fr); }
+.content { max-width: none; padding: 34px clamp(32px, 3.2vw, 64px) 72px; }
+.sidenav { padding: 26px 18px 20px; }
+.sidenav .logo img { height: 34px; }
+.navitem { font-size: 15.5px; font-weight: 700; padding: 11px 14px; letter-spacing: -.01em; }
+.navitem .ico { width: 20px; height: 20px; }
+.sidenav .section { font-size: 13px; margin: 22px 14px 8px; }
+.sidenav .me b { font-size: 14.5px; }
+
+/* titles carry the page; the explanatory line under them is gone (it lives in the ? launcher) */
+.pagehead { margin-bottom: 30px; align-items: flex-end; }
+.pagehead h1 { font-size: clamp(36px, 2.6vw, 48px); letter-spacing: -.035em; }
+.pagehead .sub, .hint, .brandpick .lbl .sm, p.lead.hint { display: none; }
+.pagehead .glance > div > b { font-size: clamp(32px, 2.2vw, 40px); font-weight: 800; }
+.pagehead .glance > div { padding-right: 28px; margin-right: 28px; }
+.pagehead .glance > div > small { font-size: 13.5px; }
+
+/* numbers everywhere: heavier */
+.kpis b, .tile b, .board b { font-size: clamp(30px, 2vw, 38px); font-weight: 800; }
+.kpis > div, .tile, .board > div { padding: 18px 20px; }
+.kpis small, .tile small, .board small, .ordertable th, .ops .lbl, .detail .facts small, .glance > div > small { font-size: 13.5px; }
+.brandcard { padding: 26px 28px; }
+.brandcard .bname { font-size: 24px; }
+.brandcard .bstats b { font-size: 30px; font-weight: 800; }
+.brandgrid { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
+
+/* surfaces: more presence */
+.card { border-radius: 18px; }
+.card .cardhead { padding: 18px 24px; }
+.card .cardhead h3, .card > h3 { font-size: 17px; font-weight: 800; letter-spacing: -.02em; }
+.ordertable { font-size: 14.5px; }
+.ordertable th, .ordertable td { padding: 14px 16px; }
+.tabs button { font-size: 15px; padding: 13px 16px; }
+.card.ownertabs.withsearch .tabs button { font-size: 15px; padding: 13px 14px; }
+.card.ownertabs.withsearch .gsearch { width: 300px; }
+.btn-sm { font-size: 14px; padding: 10px 16px; }
+.btn-sm.primary { font-weight: 700; }
+.bar { height: 10px; }
+.bar > i { border-radius: 99px; }
+.bonushero { padding: 40px 32px !important; }
+.bonushero h2 { font-size: clamp(36px, 4vw, 56px); }
+.statuspill, .pill, .tag { font-size: 13px; padding: 4px 10px; }
+.workbar { font-size: 14px; }
+.workbar .chip { font-size: 14px; padding: 7px 14px 7px 12px; }
+.empty { font-size: 15px; padding: 56px 24px; }
+input[type=text], input[type=search], input[type=email], input[type=number], input[type=date], input[type=tel], input[type=url], select, textarea, .search { font-size: 15px; padding: 11px 14px; }
+.opsbar .search { max-width: 640px; padding: 13px 16px; }
+
+/* wide screens: let the grids breathe into the space */
+@media (min-width: 1700px) {
+  .content { padding-left: 64px; padding-right: 64px; }
+  .callgrid { grid-template-columns: 1.3fr 1fr; }
+}
+.bonusbar { background: var(--ink); border-radius: 18px; padding: 24px 28px; }
+.bonusbar .lbl { font-size: 15px; font-weight: 600; }
+.bonusbar .bar { height: 14px; }
+.goalrow .lbl { font-size: 15px; font-weight: 600; }
+.goalrow .bar { height: 14px; }
+.funnel .step b { font-size: 30px; font-weight: 800; letter-spacing: -.03em; }
+.funnel .step small { font-size: 13px; }
+.funnel .step .barw { height: 10px; }

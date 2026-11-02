@@ -404,6 +404,9 @@ const hsCfg = async () => (await getSetting('hubspot')) || {};
 const saveHsCfg = (c: unknown) => setSetting('hubspot', c);
 const hsPortal = async () => { const c = await hsCfg(); return c.portal_id ? `https://app.hubspot.com/contacts/${c.portal_id}` : null; };
 
+const CALL_DEBRIEF_PROPS: [string, string][] = [['shipbay_dial_result', 'Dial result'], ['shipbay_picked_up', 'Who picked up'], ['shipbay_fit', 'Fit'], ['shipbay_not_fit_reason', 'Not a fit — reason'], ['shipbay_not_fit_detail', 'Not a fit — detail'], ['shipbay_orders_month', 'Orders / month (said on the call)'], ['shipbay_current_setup', 'Current setup'], ['shipbay_pain', 'Pain named'], ['shipbay_result', 'Call result'], ['shipbay_callback_at', 'Callback date'], ['shipbay_hour_block', 'Hour block (ET)'], ['shipbay_email_result', 'Email result'], ['shipbay_list', 'ShipBay list']];
+const CONTACT_DEBRIEF_PROPS: [string, string][] = [['shipbay_orders_month', 'Orders / month (said on a call)'], ['shipbay_current_setup', 'Current setup'], ['shipbay_pain', 'Pain named'], ['shipbay_not_fit_reason', 'Not a fit — reason'], ['shipbay_picked_up', 'Who picks up']];
+const debriefBody = (c: any) => [c.note, c.dial_result && `Dial: ${c.dial_result}`, c.picked_up && `Picked up: ${c.picked_up}`, c.fit && `Fit: ${c.fit}${c.not_fit_reason ? ` (${c.not_fit_reason}${c.not_fit_detail ? ` — ${c.not_fit_detail}` : ''})` : ''}`, c.orders_month != null && `Orders/mo: ${c.orders_month}`, c.current_setup && `Setup: ${c.current_setup}`, c.pain && `Pain: ${c.pain}`, c.result && `Result: ${c.result}${c.callback_at ? ` (${c.callback_at.slice(0, 10)})` : ''}`, c.email_result && `Email: ${c.email_result}`].filter(Boolean).join('\n');
 /** one-time: pipeline with the portal's stages, custom properties, owner map, portal id */
 async function hubspotSetup() {
   const cfg = await hsCfg();
@@ -422,6 +425,9 @@ async function hubspotSetup() {
   await ensureProp('contacts', 'shipbay_list', 'ShipBay list', 'contactinformation');
   await ensureProp('companies', 'shipbay_account_id', 'ShipBay account id', 'companyinformation');
   await ensureProp('deals', 'shipbay_account_id', 'ShipBay account id', 'dealinformation');
+  // post-call debrief (Derek, 2026-11-02): the nine answers live on the call, the durable ones also on the contact
+  for (const [name, label] of CALL_DEBRIEF_PROPS) await ensureProp('calls', name, label, 'call');
+  for (const [name, label] of CONTACT_DEBRIEF_PROPS) await ensureProp('contacts', name, label, 'contactinformation');
   // owners ↔ staff by email
   const { data: staff } = await admin.from('profiles').select('id, email, role, hs_owner_id').like('role', 'shipbay%');
   cfg.owners = cfg.owners || {}; cfg.owner_users = cfg.owner_users || {};
@@ -451,7 +457,7 @@ async function hsPushLead(l: any, cfg: any) {
   }
   // contact
   if (l.email || l.contact_name) {
-    const props: any = { ...splitName(l.contact_name || ''), email: l.email || undefined, phone: l.phone || undefined, jobtitle: l.title || undefined, city: l.city || undefined, state: l.state || undefined, company: l.company || undefined, website: l.domain || undefined, hs_lead_status: HS_LEAD_STATUS[l.stage] || 'NEW', lifecyclestage: l.stage === 'signed' ? 'customer' : ['quoted', 'call_booked'].includes(l.stage) ? 'opportunity' : l.stage === 'replied' ? 'salesqualifiedlead' : 'lead', shipbay_account_id: l.id, shipbay_source: l.source, shipbay_list: l.filter_id || undefined, hubspot_owner_id: owner };
+    const props: any = { ...splitName(l.contact_name || ''), email: l.email || undefined, phone: l.phone || undefined, jobtitle: l.title || undefined, city: l.city || undefined, state: l.state || undefined, company: l.company || undefined, website: l.domain || undefined, hs_lead_status: HS_LEAD_STATUS[l.stage] || 'NEW', lifecyclestage: l.stage === 'signed' ? 'customer' : ['quoted', 'call_booked'].includes(l.stage) ? 'opportunity' : l.stage === 'replied' ? 'salesqualifiedlead' : 'lead', shipbay_account_id: l.id, shipbay_source: l.source, shipbay_list: l.filter_id || undefined, hubspot_owner_id: owner, shipbay_orders_month: l.orders_month_actual != null ? String(l.orders_month_actual) : undefined, shipbay_current_setup: l.current_setup || undefined, shipbay_pain: l.pain || undefined, shipbay_not_fit_reason: l.not_fit_reason || undefined, shipbay_picked_up: l.picked_up || undefined };
     let pid = l.hs_contact_id;
     if (!pid && l.email) { const f = await hs('/crm/v3/objects/contacts/search', { method: 'POST', body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'email', operator: 'EQ', value: l.email.toLowerCase() }] }], limit: 1 }) }); pid = f.results?.[0]?.id; }
     try { if (pid) await hs(`/crm/v3/objects/contacts/${pid}`, { method: 'PATCH', body: JSON.stringify({ properties: props }) }); else pid = (await hs('/crm/v3/objects/contacts', { method: 'POST', body: JSON.stringify({ properties: props }) })).id; }
@@ -487,7 +493,9 @@ async function hsPushActivity(l: any, cfg: any, since: string | null) {
   const owner = (l.assigned_to && cfg.owners?.[l.assigned_to]) || cfg.default_owner || undefined; let n = 0;
   const { data: calls } = await admin.from('sales_calls').select('*').eq('lead_id', l.id).is('hs_id', null);
   for (const c of calls || []) {
-    const r = await hs('/crm/v3/objects/calls', { method: 'POST', body: JSON.stringify({ properties: { hs_timestamp: c.started_at, hs_call_title: `Call — ${c.outcome.replace('_', ' ')}`, hs_call_body: c.note || '', hs_call_duration: String((c.seconds || 0) * 1000), hs_call_status: 'COMPLETED', hs_call_direction: 'OUTBOUND', hubspot_owner_id: cfg.owners?.[c.by_user] || owner }, associations: assoc(l.hs_contact_id, l.hs_deal_id, 'calls') }) });
+    const debrief: Record<string, string> = {};
+    for (const [k, col] of [['shipbay_dial_result', 'dial_result'], ['shipbay_picked_up', 'picked_up'], ['shipbay_fit', 'fit'], ['shipbay_not_fit_reason', 'not_fit_reason'], ['shipbay_not_fit_detail', 'not_fit_detail'], ['shipbay_orders_month', 'orders_month'], ['shipbay_current_setup', 'current_setup'], ['shipbay_pain', 'pain'], ['shipbay_result', 'result'], ['shipbay_callback_at', 'callback_at'], ['shipbay_hour_block', 'hour_block'], ['shipbay_email_result', 'email_result'], ['shipbay_list', 'list_id']]) if (c[col] != null && c[col] !== '') debrief[k] = String(c[col]);
+    const r = await hs('/crm/v3/objects/calls', { method: 'POST', body: JSON.stringify({ properties: { hs_timestamp: c.started_at, hs_call_title: `Call — ${(c.result || c.dial_result || c.outcome).replace(/_/g, ' ')}`, hs_call_body: debriefBody(c), hs_call_duration: String((c.seconds || 0) * 1000), hs_call_status: 'COMPLETED', hs_call_direction: 'OUTBOUND', hubspot_owner_id: cfg.owners?.[c.by_user] || owner, ...debrief }, associations: assoc(l.hs_contact_id, l.hs_deal_id, 'calls') }) });
     await admin.from('sales_calls').update({ hs_id: String(r.id) }).eq('id', c.id); n++;
   }
   const { data: touches } = await admin.from('sales_touches').select('*').eq('lead_id', l.id).is('hs_id', null);
