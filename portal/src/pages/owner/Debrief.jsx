@@ -12,18 +12,22 @@ export const NOT_FIT = [['on_3pl', 'Already on a 3PL'], ['ships_own_store', 'Shi
 export const SETUP = [['self_shipstation', 'Self-ship · ShipStation'], ['self_shippo', 'Self-ship · Shippo'], ['self_pirateship', 'Self-ship · Pirate Ship'], ['self_veeqo', 'Self-ship · Veeqo'], ['self_other', 'Self-ship · other'], ['threepl', '3PL'], ['hybrid', 'Hybrid'], ['fba', 'FBA']];
 export const PAIN = [['space', 'Space'], ['time', 'Time'], ['q4', 'Q4'], ['cost', 'Cost'], ['moving', 'Moving'], ['none', 'None']];
 export const RESULT = [['booked', 'Booked'], ['callback', 'Callback'], ['send_info', 'Send info'], ['soft_no', 'Soft no'], ['hard_no', 'Hard no (DNC)']];
-export const EMAIL = [['nothing', 'Nothing yet'], ['replied', 'Replied'], ['bounced', 'Bounced']];
+export const EMAIL = [['nothing', 'Nothing yet'], ['replied', 'Replied'], ['bounced', 'Bounced']];   // legacy values still in sales_calls.email_result; the UI no longer asks
 /** Quick path (nobody picked up): the one decision is whether the email goes out. 'send' = Power sends it. */
-export const SEND = [['send', 'Send the email'], ['skip', 'Not this time']];
+export const SENDER = 'derekh@shipbay3pl.com';   // the only inbox HubSpot sequences send from
+export const YESNO = [['yes', 'Yes'], ['no', 'No']];
+export const WHICH = [['power', 'Enroll in Power'], ['info', 'Send info']];
 const NO_PICKUP = ['no_answer', 'voicemail'];
+/** Outcomes after which the email question is pointless: they booked, said never, or aren't a fit. */
+const NO_EMAIL_AFTER = ['booked', 'hard_no'];
 const POWER_BLOCKED = ['replied', 'call_booked', 'won', 'dnc', 'lost', 'signed'];
 const THIRD_PARTY = ['agency', 'fulfill', 'fulfilment'];
 
 /** Why a lead can't go to Power right now, or null if it can. */
 export function powerBlock(lead) {
   if (!lead) return 'no lead';
-  if (lead.power_enrolled_at) return 'enrolled';
-  if (lead.sequence === 'power') return 'queued';
+  if (lead.power_enrolled_at) return lead.sequence === 'info' ? 'info' : 'enrolled';
+  if (lead.sequence === 'power' || lead.sequence === 'info') return 'queued';
   if (lead.sequence === 'blitz') return 'blitz';
   if (THIRD_PARTY.includes(lead.source || '')) return 'third-party';
   if (POWER_BLOCKED.includes(lead.stage || 'new')) return lead.stage;
@@ -51,6 +55,7 @@ export function PowerButton({ lead, me, note, onDone, say }) {
   const when = (d) => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   if (block === 'enrolled') return <span className="pill connected" title={`Power since ${new Date(lead.power_enrolled_at).toLocaleString()}`}>In Power · {when(lead.power_enrolled_at)}</span>;
   if (block === 'queued') return <span className={lead.hs_error ? 'pill error' : 'pill pending'} title={lead.hs_error ? `HubSpot said: ${lead.hs_error}` : 'Queued — HubSpot enrollment runs within the minute'}>{lead.hs_error ? 'Power · retrying' : 'Power · queued'}</span>;
+  if (block === 'info') return <span className="pill connected" title={`Info email sent ${new Date(lead.power_enrolled_at).toLocaleString()}; Power follows a day later if no reply`}>Info sent · Power next</span>;
   if (block === 'blitz') return <span className="pill navy">In Blitz</span>;
   if (block === 'third-party') return null;
   if (block) return <button className="btn-sm" disabled title={block === 'no email' ? 'No email on file' : `Not while the lead is ${block.replace('_', ' ')}`}>Enroll in Power</button>;
@@ -96,13 +101,12 @@ export async function saveDebrief({ lead, me, started, seconds, note, a, emailed
   if (a.result === 'soft_no') patch.next_action_at = new Date(Date.now() + 45 * 86400000).toISOString();
   if (note) patch.notes = [lead.notes, `${now.toLocaleDateString()} ${label(DIAL, a.dial_result)}${a.result ? ` → ${label(RESULT, a.result)}` : ''}: ${note}`].filter(Boolean).join('\n');
   if ((lead.attempts || 0) + 1 >= 4 && !['booked', 'connected', 'gatekeeper'].includes(outcome)) patch.in_calls = false;   // 4 tries with no human → park it
-  // Power: nobody picked up and the rep said "send the email" → the lead is queued for the Power sequence now.
-  // (The DB trigger on sales_calls does the same on email_result = 'send'; this is belt and braces so the UI reflects it instantly.)
-  if (a.email_result === 'send' && NO_PICKUP.includes(a.dial_result) && !['agency', 'fulfill', 'fulfilment'].includes(lead.source || '') && !lead.sequence && !lead.power_enrolled_at && !POWER_BLOCKED.includes(lead.stage || 'new')) {
-    patch.sequence = 'power'; patch.enroll_at = now.toISOString();
+  // The email: "Enroll in Power" queues the Power sequence; "Send info" queues the info sequence (the rundown + booking link, then Power a day later if no reply).
+  // The DB trigger on sales_calls does the same on email_result in (power, info); this is belt and braces so the UI reflects it instantly.
+  if (['power', 'info'].includes(a.email_result) && !['agency', 'fulfill', 'fulfilment'].includes(lead.source || '') && !lead.sequence && !lead.power_enrolled_at && !POWER_BLOCKED.includes(lead.stage || 'new') && !(outcome === 'booked' || outcome === 'dnc' || outcome === 'not_fit')) {
+    patch.sequence = a.email_result; patch.enroll_at = now.toISOString();
     if (!lead.first_email_at) patch.first_email_at = now.toISOString();
   }
-  // Reached-DM outcomes (send info / callback / soft no) are parked until Derek decides whether they go to Power (lead-approaches.md Q2). Nothing is enrolled from here.
   if (emailedNow && !lead.first_email_at) patch.first_email_at = now.toISOString();
   await supabase.from('sales_leads').update(patch).eq('id', lead.id);
   if (outcome === 'dnc' && lead.email) ownerFn({ action: 'smartlead_stop_lead', email: lead.email });
@@ -117,14 +121,16 @@ function Pick({ options, value, onChange, cols = 3 }) {
 
 /** The modal. Quick path for no-answer / voicemail / bad number; full path when a human picked up. */
 export function Debrief({ lead, seconds, note, setNote, emailedNow, onSave, onCancel }) {
-  const [a, setA] = useState({ dial_result: '', picked_up: '', fit: '', not_fit_reason: '', not_fit_detail: '', orders_month: '', current_setup: '', pain: '', result: '', callback_at: '', email_result: '' });
+  const [a, setA] = useState({ dial_result: '', picked_up: '', fit: '', not_fit_reason: '', not_fit_detail: '', orders_month: '', current_setup: '', pain: '', result: '', callback_at: '', send: '', email_result: '' });
   const set = (k) => (v) => setA((x) => ({ ...x, [k]: v }));
   const human = a.dial_result === 'gatekeeper' || a.dial_result === 'decision_maker';
   const quick = ['no_answer', 'voicemail', 'bad_number'].includes(a.dial_result);
-  const askSend = !!lead.email && NO_PICKUP.includes(a.dial_result);
-  const canSave = !!a.dial_result && (quick ? (!askSend || !!a.email_result) : (a.dial_result === 'gatekeeper' ? !!a.result : !!a.picked_up && !!a.fit && (a.fit !== 'not_fit' || !!a.not_fit_reason) && !!a.result));
+  const inSeq = !!(lead.sequence || lead.power_enrolled_at);
+  // The last question, always: send the email? Not after a booking, a hard no, a not-fit, or a bad number — and not if they're already in a sequence.
+  const askSend = !!lead.email && !inSeq && (NO_PICKUP.includes(a.dial_result) || (human && !!a.result && !NO_EMAIL_AFTER.includes(a.result) && a.fit !== 'not_fit'));
+  const sendDone = !askSend || (a.send === 'no') || (a.send === 'yes' && !!a.email_result);
+  const canSave = !!a.dial_result && sendDone && (quick || (a.dial_result === 'gatekeeper' ? !!a.result : !!a.picked_up && !!a.fit && (a.fit !== 'not_fit' || !!a.not_fit_reason) && !!a.result));
   useEffect(() => { const k = (e) => { if (e.key === 'Escape') onCancel(); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onCancel]);
-  const showEmail = !!lead.email;
   return (
     <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
       <div className="modal dbr">
@@ -145,9 +151,14 @@ export function Debrief({ lead, seconds, note, setNote, emailedNow, onSave, onCa
         </>}
         {human && <section><div className="dbr-q">7 · Outcome</div><Pick options={RESULT} value={a.result} onChange={set('result')} cols={5} />
           {a.result === 'callback' && <div className="dbr-sub"><input type="datetime-local" value={a.callback_at} onChange={(e) => set('callback_at')(e.target.value)} /></div>}</section>}
-        {askSend && <section><div className="dbr-q">2 · Send the email?</div><Pick options={SEND} value={a.email_result} onChange={set('email_result')} cols={2} />
-          <span className="sm">{lead.sequence || lead.power_enrolled_at ? 'Already in a sequence — Power keeps going; this just logs the dial.' : 'Send = Power emails them from Derek\u2019s inbox within the minute and follows up four more times. A reply stops it.'}</span></section>}
-        {showEmail && human && <section><div className="dbr-q">9 · Email (only if you emailed them yourself)</div><Pick options={EMAIL} value={a.email_result} onChange={set('email_result')} />{emailedNow && <span className="sm">You marked an email sent during this call — it counts.</span>}</section>}
+        {askSend && <section><div className="dbr-q">{human ? '8' : '2'} · Send the email?</div><Pick options={YESNO} value={a.send} onChange={(v) => setA((x) => ({ ...x, send: v, email_result: v === 'yes' ? x.email_result : '' }))} cols={2} />
+          {a.send === 'yes' && <div className="dbr-sub">
+            <Pick options={WHICH} value={a.email_result} onChange={set('email_result')} cols={2} />
+            <div className="dbr-to"><b>To</b> {lead.email} <b>from</b> {SENDER}</div>
+            <span className="sm">{a.email_result === 'info' ? 'Send info: one email with the rundown and a booking link. No reply in a day → Power takes over.' : a.email_result === 'power' ? 'Power: first email within the minute, four follow-ups over two weeks. A reply stops it.' : 'Power opens cold; Send info is for someone who asked what we do.'}</span>
+          </div>}
+        </section>}
+        {!askSend && !!lead.email && inSeq && (quick || human) && <section><span className="sm">Already in {lead.sequence === 'info' ? 'the info sequence' : lead.sequence === 'blitz' ? 'the Blitz' : 'Power'} — this just logs the dial.</span></section>}
         <section><textarea rows={2} placeholder="One line: who you spoke to, what they said, when to call back…" value={note} onChange={(e) => setNote(e.target.value)} /></section>
         <div className="row"><button className="btn-sm" type="button" onClick={onCancel}>Back to the call</button><div className="spacer" /><button className="btn-sm primary" type="button" disabled={!canSave} onClick={() => onSave(a)}>Close call</button></div>
       </div>

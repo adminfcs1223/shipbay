@@ -1489,3 +1489,5 @@ input[type=text], input[type=search], input[type=email], input[type=number], inp
 
 /* Power state pills sit beside buttons in the action rows — same height as .btn-sm so the row doesn't jog */
 .pactions .pill, .emailacts .pill { display: inline-flex; align-items: center; padding: 0 12px; height: 32px; font: 600 12px var(--font); letter-spacing: 0; text-transform: none; }
+.dbr-to { font: 500 14px var(--font); color: var(--ink); padding: 10px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+.dbr-to b { font-weight: 700; color: var(--muted); margin-right: 4px; }
