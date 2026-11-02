@@ -108,9 +108,9 @@ const TABLES = { sales_calls: [], sales_meetings: [], sales_touches: [], sales_r
   await page.getByRole('button', { name: 'Email campaign' }).click(); await page.waitForTimeout(800); await page.screenshot({ path: 'shots/08b-strategies-email.png', fullPage: true });
   await page.getByRole('button', { name: 'Admin settings', exact: true }).click(); await page.waitForTimeout(600); await page.screenshot({ path: 'shots/09-admin-settings.png', fullPage: true }); await page.getByRole('button', { name: 'Connections & keys' }).click(); await page.waitForTimeout(500); await page.screenshot({ path: 'shots/09b-connections.png', fullPage: true });
   await page.locator('.sidenav .navitem', { hasText: /^CRM$/ }).click(); await page.waitForTimeout(1600); await page.screenshot({ path: 'shots/20-hub-contacts.png', fullPage: false });
-  await page.locator('.hub-table .hub-link.name').first().click(); await page.waitForTimeout(900); await page.screenshot({ path: 'shots/21-hub-record.png', fullPage: false });
-  await page.locator('.hub-menu > button', { hasText: 'CRM' }).click(); await page.waitForTimeout(200); await page.locator('.hub-drop button', { hasText: 'Deals' }).click(); await page.waitForTimeout(900); await page.screenshot({ path: 'shots/22-hub-deals.png', fullPage: false });
-  await page.locator('.hub-menu > button', { hasText: 'CRM' }).click(); await page.waitForTimeout(200); await page.locator('.hub-drop button', { hasText: 'Companies' }).click(); await page.waitForTimeout(900); await page.screenshot({ path: 'shots/23-hub-companies.png', fullPage: false });
-  await page.getByRole('button', { name: 'Create contact' }).click(); await page.waitForTimeout(500); await page.screenshot({ path: 'shots/24-hub-create.png', fullPage: false });
+  await page.locator('.hub-table .hub-link.nm').first().click(); await page.waitForTimeout(900); await page.screenshot({ path: 'shots/21-hub-record.png', fullPage: false });
+  await page.locator('.hub-sideitem', { hasText: 'Deals' }).click(); await page.waitForTimeout(900); await page.screenshot({ path: 'shots/22-hub-deals.png', fullPage: false });
+  await page.locator('.hub-sideitem', { hasText: 'Companies' }).click(); await page.waitForTimeout(900); await page.screenshot({ path: 'shots/23-hub-companies.png', fullPage: false });
+  await page.locator('.hub-sideitem', { hasText: 'Contacts' }).click(); await page.waitForTimeout(500); await page.getByRole('button', { name: /Add contacts/ }).click(); await page.waitForTimeout(500); await page.screenshot({ path: 'shots/24-hub-create.png', fullPage: false });
   await browser.close(); srv.close(); console.log('done');
 })();

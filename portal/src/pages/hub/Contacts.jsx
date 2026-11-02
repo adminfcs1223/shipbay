@@ -11,9 +11,9 @@ const fmtDT = (iso) => (iso ? new Date(iso).toLocaleString('en-US', { month: 'sh
 const LIFE = (s) => (s === 'signed' ? 'Customer' : ['quoted', 'call_booked'].includes(s) ? 'Opportunity' : s === 'replied' ? 'Sales qualified lead' : 'Lead');
 const PER = 25;
 
-export default function Contacts({ me, rep, kind, data, people, sources, reload, say, openLead, goTab, hs }) {
+export default function Contacts({ me, rep, kind, data, people, sources, reload, say, openLead, goTab, hs, autoCreate = false }) {
   const { leads, allLeads, calls, touches, mail, meetings, sends, quotes, orgs } = data;
-  const [view, setView] = useState('all'); const [owner, setOwner] = useState(''); const [stage, setStage] = useState(''); const [src, setSrc] = useState(''); const [created, setCreated] = useState(''); const [q, setQ] = useState(''); const [page, setPage] = useState(1); const [sel, setSel] = useState(() => new Set()); const [creating, setCreating] = useState(false); const [sort, setSort] = useState(['last', 'desc']);
+  const [view, setView] = useState('all'); const [owner, setOwner] = useState(''); const [stage, setStage] = useState(''); const [src, setSrc] = useState(''); const [created, setCreated] = useState(''); const [q, setQ] = useState(''); const [page, setPage] = useState(1); const [sel, setSel] = useState(() => new Set()); const [creating, setCreating] = useState(autoCreate); const [sort, setSort] = useState(['last', 'desc']);
   const who = (id) => { const p = people.find((x) => x.id === id); return p ? (p.full_name || p.email) : ''; };
   // last activity per lead (calls, notes, emails, meetings, replies)
   const lastAct = useMemo(() => { const m = {}; const bump = (id, at) => { if (id && at && (!m[id] || at > m[id])) m[id] = at; }; calls.forEach((c) => bump(c.lead_id, c.started_at)); touches.forEach((t) => bump(t.lead_id, t.at)); mail.forEach((x) => bump(x.lead_id, x.at)); meetings.forEach((x) => bump(x.lead_id, x.starts_at)); sends.forEach((s) => s.replied && bump(s.lead_id, s.reply_at)); leads.forEach((l) => bump(l.id, l.last_touch_at)); return m; }, [calls, touches, mail, meetings, sends, leads]);
@@ -47,47 +47,55 @@ export default function Contacts({ me, rep, kind, data, people, sources, reload,
   if (kind === 'activity') return <Activities data={data} people={people} openLead={openLead} />;
   return (
     <div className="hub-page">
+      <div className="hub-sheet">
       <div className="hub-head">
-        <div><h1>{kind === 'company' ? 'Companies' : 'Contacts'}</h1><small>{num(rows.length)} records{rep ? ' · yours' : ''}</small></div>
+        <div className="hub-title"><h1>{kind === 'company' ? 'Companies' : 'Contacts'}</h1><i>⌄</i></div>
         <div className="acts">
-          {hs?.portal_id && <a className="hs-btn ghost" href={`https://app.hubspot.com/contacts/${hs.portal_id}/objects/${kind === 'company' ? '0-2' : '0-1'}/views/all/list`} target="_blank" rel="noreferrer">Open in HubSpot</a>}
-          <button className="hs-btn ghost" onClick={() => goTab('master')}>Import</button>
-          <button className="hs-btn primary" onClick={() => setCreating(true)}>Create {kind === 'company' ? 'company' : 'contact'}</button>
+          <button className="hub-kebab" title="More">⋮</button>
+          <button className="hs-btn primary" onClick={() => setCreating(true)}>Add {kind === 'company' ? 'companies' : 'contacts'} <i>▾</i></button>
         </div>
       </div>
-      <div className="hub-views">{views.map(([k, l]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{l}</button>)}<button className="add">+ Add view</button></div>
-      <div className="hub-card">
-        <div className="hub-filters">
-          <select className="pill" value={owner} onChange={(e) => setOwner(e.target.value)}><option value="">{kind === 'company' ? 'Company' : 'Contact'} owner</option><option value="none">Unassigned</option>{people.map((p) => <option key={p.id} value={p.id}>{p.full_name || p.email}</option>)}</select>
-          <select className="pill" value={created} onChange={(e) => setCreated(e.target.value)}><option value="">Create date</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select>
-          <select className="pill" value={stage} onChange={(e) => setStage(e.target.value)}><option value="">Lead status</option>{STAGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
-          <select className="pill" value={src} onChange={(e) => setSrc(e.target.value)}><option value="">Original source</option>{sources.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
-          <button className="linkish" onClick={() => { setOwner(''); setStage(''); setSrc(''); setCreated(''); setQ(''); }}>Clear filters</button>
-          <div className="spacer" />
-          <label className="hub-tsearch"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input placeholder={`Search name, phone, email${kind === 'company' ? ', domain' : ''}`} value={q} onChange={(e) => setQ(e.target.value)} /></label>
-          <button className="linkish">Export</button><button className="linkish">Edit columns</button>
-        </div>
+      <div className="hub-views">{views.map(([k, l]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 10h18M9 4v16"/></svg>{l}</button>)}<button className="add" title="Add view">+</button></div>
+      <div className="hub-toolbar">
+        <label className="hub-tsearch"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input placeholder="Search ( / )" value={q} onChange={(e) => setQ(e.target.value)} /></label>
+        <button className={`hub-pillbtn mint ${owner || stage || src || created ? 'on' : ''}`} onClick={() => { setOwner(''); setStage(''); setSrc(''); setCreated(''); }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Filter{owner || stage || src || created ? ' · clear' : ''}</button>
+        <button className="hub-pillbtn" onClick={() => setSort([sort[0], sort[1] === 'desc' ? 'asc' : 'desc'])}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 7h10M4 12h7M4 17h4M17 5v14M14 16l3 3 3-3"/></svg>Sort by</button>
+        <div className="spacer" />
+        {hs?.portal_id && <a className="hub-pillbtn" href={`https://app.hubspot.com/contacts/${hs.portal_id}/objects/${kind === 'company' ? '0-2' : '0-1'}/views/all/list`} target="_blank" rel="noreferrer">Open in HubSpot ↗</a>}
+        <button className="hub-iconbtn" title="Table" ><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="3" rx="1"/><rect x="3" y="10.5" width="18" height="3" rx="1"/><rect x="3" y="16" width="18" height="3" rx="1"/></svg></button>
+        <button className="hub-iconbtn" title="Edit columns">⚙</button>
+      </div>
+      <div className="hub-chips">
+        <select className="chip" value={owner} onChange={(e) => setOwner(e.target.value)}><option value="">{kind === 'company' ? 'Company' : 'Contact'} owner</option><option value="none">Unassigned</option>{people.map((p) => <option key={p.id} value={p.id}>{p.full_name || p.email}</option>)}</select>
+        <select className="chip" value={created} onChange={(e) => setCreated(e.target.value)}><option value="">Create date</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select>
+        <select className="chip" value={sort[0] === 'last' ? '' : ''} onChange={() => {}}><option value="">Last activity date</option></select>
+        <select className="chip" value={stage} onChange={(e) => setStage(e.target.value)}><option value="">Lead status</option>{STAGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+        <select className="chip" value={src} onChange={(e) => setSrc(e.target.value)}><option value="">Original source</option>{sources.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
+        <button className="hub-roundbtn" title="Add filter">+</button><button className="hub-roundbtn" title="Edit filters">✎</button>
+        <button className="linkish adv"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Advanced filters</button>
+      </div>
+      <div className="hub-card flat">
         {sel.size > 0 && <div className="hub-bulk"><b>{sel.size} selected</b>
           {!rep && <select className="pill" defaultValue="" onChange={(e) => e.target.value && bulk({ assigned_to: e.target.value === 'none' ? null : e.target.value }, 'Owner updated.')}><option value="" disabled>Assign owner</option><option value="none">Unassigned</option>{people.map((p) => <option key={p.id} value={p.id}>{p.full_name || p.email}</option>)}</select>}
           <select className="pill" defaultValue="" onChange={(e) => e.target.value && bulk({ stage: e.target.value, last_touch_at: new Date().toISOString(), ...(rep ? { assigned_to: me.id } : {}) }, 'Lead status updated.')}><option value="" disabled>Set lead status</option>{STAGES.filter((s) => s[0] !== 'signed').map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
           {sel.size > 1 && <button className="hs-btn ghost sm" onClick={merge}>Merge</button>}
           <button className="linkish" onClick={() => setSel(new Set())}>Cancel</button></div>}
         <div className="hub-tablewrap"><table className="hub-table">
-          <thead><tr><th className="chk"><input type="checkbox" checked={allOn} onChange={() => setSel((s) => { const n = new Set(s); slice.forEach((l) => (allOn ? n.delete(l.id) : n.add(l.id))); return n; })} /></th>
+          <thead><tr><th className="chk"><input type="checkbox" checked={allOn} onChange={() => setSel((s) => { const n = new Set(s); slice.forEach((l) => (allOn ? n.delete(l.id) : n.add(l.id))); return n; })} /></th><th className="exp"></th>
             {th('name', kind === 'company' ? 'Company name' : 'Name', 'sticky')}
             {kind === 'company' ? <>{<th>Company domain name</th>}<th>Phone number</th><th>City</th>{th('value', 'Expected $/mo')}</> : <><th>Email</th><th>Phone number</th><th>Primary company</th></>}
-            <th>{kind === 'company' ? 'Company' : 'Contact'} owner</th>{th('last', 'Last activity date')}{th('stage', 'Lead status')}<th>Lifecycle stage</th><th>Original source</th>{th('created', 'Create date')}</tr></thead>
+            <th>{kind === 'company' ? 'Company' : 'Contact'} owner</th>{th('last', 'Last Activity Date')}{th('stage', 'Lead Status')}<th>Lifecycle Stage</th><th>Original Source</th>{th('created', 'Create Date')}</tr></thead>
           <tbody>
             {slice.map((l) => { const name = kind === 'company' ? (l.company || l.domain || l.email) : (l.contact_name || l.company || l.email); const exp = expectedMonthly(l, quotes); return (
               <tr key={l.id} className={sel.has(l.id) ? 'sel' : ''}>
-                <td className="chk"><input type="checkbox" checked={sel.has(l.id)} onChange={() => toggle(l.id)} /></td>
+                <td className="chk"><input type="checkbox" checked={sel.has(l.id)} onChange={() => toggle(l.id)} /></td><td className="exp"><button className="hub-exp" onClick={() => openLead(l)}>›</button></td>
                 <td className="sticky name"><button className="hub-link nm" onClick={() => openLead(l)}><span className={`hub-av ${kind === 'company' ? 'sq' : ''}`} style={{ background: avColor(name) }}>{kind === 'company' ? (l.domain ? <img src={`https://www.google.com/s2/favicons?domain=${l.domain}&sz=64`} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : initialsOf(name)) : initialsOf(name)}</span><span>{name}</span></button></td>
                 {kind === 'company' ? <><td>{l.domain ? <a className="hub-link" href={`https://${l.domain}`} target="_blank" rel="noreferrer">{l.domain}</a> : '--'}</td><td>{l.phone || '--'}</td><td>{[l.city, l.state].filter(Boolean).join(', ') || '--'}</td><td>{exp.value ? money(exp.value) : '--'}</td></>
-                  : <><td>{l.email ? <a className="hub-link" href={`mailto:${l.email}`}>{l.email}</a> : '--'}</td><td>{l.phone || '--'}</td><td>{l.company ? <button className="hub-link" onClick={() => openLead(l)}>{l.company}</button> : '--'}</td></>}
-                <td>{l.assigned_to ? <span className="hub-owner"><span className="hub-av xs" style={{ background: avColor(who(l.assigned_to)) }}>{initialsOf(who(l.assigned_to))}</span>{who(l.assigned_to)}</span> : <span className="muted">Unassigned</span>}</td>
+                  : <><td>{l.email ? <a className="hub-link" href={`mailto:${l.email}`}>{l.email} <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 4h6v6M20 4l-9 9M19 14v6H4V5h6"/></svg></a> : '--'}</td><td>{l.phone || '--'}</td><td>{l.company ? <button className="hub-link" onClick={() => openLead(l)}>{l.company}</button> : '--'}</td></>}
+                <td>{l.assigned_to ? <span className="hub-owner"><span className="hub-av xs" style={{ background: avColor(who(l.assigned_to)) }}>{initialsOf(who(l.assigned_to))}</span>{who(l.assigned_to)}{people.find((p) => p.id === l.assigned_to)?.email ? ` (${people.find((p) => p.id === l.assigned_to).email.split('@')[0]}…)` : ''}</span> : <span className="muted">No owner</span>}</td>
                 <td>{fmtDT(lastAct[l.id])}</td>
-                <td><span className={`hub-status s-${l.stage}`}>{stageLabel(l.stage)}</span></td>
-                <td>{LIFE(l.stage)}</td>
+                <td>{stageLabel(l.stage)}</td>
+                <td><span className={`hub-life l-${LIFE(l.stage).split(' ')[0].toLowerCase()}`}>{LIFE(l.stage)}</span></td>
                 <td>{srcLabelPlain(l.source)}{l.filter_id ? <span className="muted"> · {l.filter_id}</span> : ''}</td>
                 <td>{fmtDate(l.created_at)}</td>
               </tr>); })}
@@ -95,6 +103,8 @@ export default function Contacts({ me, rep, kind, data, people, sources, reload,
           </tbody>
         </table></div>
         <div className="hub-pager"><button disabled={page <= 1} onClick={() => setPage(page - 1)}>‹ Prev</button>{Array.from({ length: Math.min(pages, 7) }, (_, i) => { const p = pages <= 7 ? i + 1 : Math.max(1, Math.min(pages - 6, page - 3)) + i; return <button key={p} className={p === page ? 'on' : ''} onClick={() => setPage(p)}>{p}</button>; })}<button disabled={page >= pages} onClick={() => setPage(page + 1)}>Next ›</button><span className="spacer" /><span className="muted">{PER} per page</span></div>
+      </div>
+      <div className="hub-foot"><span className="hub-count">{num(rows.length)} {kind === 'company' ? 'companies' : 'contacts'}</span><span className="spacer" /><button className="hub-pillbtn" onClick={() => goTab('master')}>Import</button><button className="hub-pillbtn">Export</button><button className="hub-pillbtn">Clone</button></div>
       </div>
       {creating && <CreatePanel kind={kind} me={me} rep={rep} people={people} sources={sources} onClose={() => setCreating(false)} reload={reload} say={say} openLead={openLead} />}
     </div>

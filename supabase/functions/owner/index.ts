@@ -19,7 +19,7 @@ const json = (b: unknown, status = 200) => Response.json(b, { status, headers: c
 const DASH = 'https://dashboard.shipbay3pl.com/';
 const QBO_REDIRECT = 'https://dashboard.shipbay3pl.com/oauth/qbo';
 const QBO_API = 'https://quickbooks.api.intuit.com';
-const SECRET_KEYS = new Set(['QBO_CLIENT_ID', 'QBO_CLIENT_SECRET', 'SMARTLEAD_API_KEY', 'SMARTLEAD_CAMPAIGNS', 'CALENDLY_TOKEN', 'GCAL_ICS_URL', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'HUBSPOT_TOKEN']);
+const SECRET_KEYS = new Set(['QBO_CLIENT_ID', 'QBO_CLIENT_SECRET', 'SMARTLEAD_API_KEY', 'SMARTLEAD_CAMPAIGNS', 'CALENDLY_TOKEN', 'GCAL_ICS_URL', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'HUBSPOT_TOKEN', 'CRON_KEY']);
 const GOOGLE_REDIRECT = 'https://dashboard.shipbay3pl.com/oauth/google';
 const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email';
 const SL = 'https://server.smartlead.ai/api/v1';
@@ -423,8 +423,10 @@ async function hubspotSetup() {
   await ensureProp('companies', 'shipbay_account_id', 'ShipBay account id', 'companyinformation');
   await ensureProp('deals', 'shipbay_account_id', 'ShipBay account id', 'dealinformation');
   // owners ↔ staff by email
-  const owners = await hs('/crm/v3/owners?limit=100'); const { data: staff } = await admin.from('profiles').select('id, email').like('role', 'shipbay%');
-  cfg.owners = {}; cfg.owner_users = {};
+  const { data: staff } = await admin.from('profiles').select('id, email, hs_owner_id').like('role', 'shipbay%');
+  cfg.owners = cfg.owners || {}; cfg.owner_users = cfg.owner_users || {};
+  for (const p of staff || []) if (p.hs_owner_id) { cfg.owners[p.id] = String(p.hs_owner_id); cfg.owner_users[String(p.hs_owner_id)] = p.id; }
+  let owners: any = { results: [] }; try { owners = await hs('/crm/v3/owners?limit=100'); cfg.owners_error = null; } catch (e) { cfg.owners_error = `Owners not readable (add the crm.objects.owners.read scope to the private app): ${String((e as Error).message).slice(0, 120)}`; }
   for (const o of owners.results || []) { const p = (staff || []).find((x: any) => String(x.email).toLowerCase() === String(o.email).toLowerCase()); if (p) { cfg.owners[p.id] = String(o.id); cfg.owner_users[String(o.id)] = p.id; await admin.from('profiles').update({ hs_owner_id: String(o.id) }).eq('id', p.id); } }
   cfg.setup_at = new Date().toISOString(); await saveHsCfg(cfg); return cfg;
 }
@@ -689,6 +691,27 @@ Deno.serve(async (req) => {
     await admin.from('gmail_accounts').upsert({ user_id: st.uid, email: info.email || null, access_token: j.access_token, refresh_token: j.refresh_token || prev?.refresh_token || null, expires_at: new Date(Date.now() + (j.expires_in || 3600) * 1000).toISOString(), connected_at: new Date().toISOString(), last_error: null, scopes: j.scope || null }, { onConflict: 'user_id' });
     await setSetting(`google_state:${q.get('state')}`, null);
     return back(true, info.email ? `Gmail connected: ${info.email}` : 'Gmail connected');
+  }
+
+  // ----- scheduled runs (pg_cron → pg_net) and one-off system calls: x-cron-key instead of a user -----
+  const cronKey = req.headers.get('x-cron-key');
+  if (cronKey) {
+    const want = await secret('CRON_KEY'); if (!want || cronKey !== want) return json({ error: 'bad cron key' }, 403);
+    const sb = await req.json().catch(() => ({}));
+    try {
+      if (sb.action === 'hubspot_setup') return json({ ok: true, hubspot: await hubspotSetup() });
+      if (sb.action === 'hubspot_sync') return json(await hubspotSync(!!sb.full));
+      if (sb.action === 'gmail_sync') return json(await gmailSync('', true));
+      if (sb.action === 'smartlead_sync') { const { data: owner } = await admin.from('profiles').select('id').eq('is_owner', true).limit(1).maybeSingle(); return json(await smartleadSync(owner?.id || '')); }
+      if (sb.action === 'calendly_sync') { const { data: owner } = await admin.from('profiles').select('id').eq('is_owner', true).limit(1).maybeSingle(); return json(await calendlySync(owner?.id || '')); }
+      if (sb.action === 'tick') {
+        // one scheduled pass: everything that can move, each guarded so one failure doesn't stop the rest
+        const out: Record<string, unknown> = {};
+        for (const [k, fn] of [['hubspot', () => hubspotSync(false)], ['gmail', () => gmailSync('', true)]] as [string, () => Promise<unknown>][]) { try { out[k] = await fn(); } catch (e) { out[k] = { error: String((e as Error).message).slice(0, 200) }; } }
+        return json({ ok: true, ...out });
+      }
+      return json({ error: 'unknown system action' }, 400);
+    } catch (e) { return json({ error: String((e as Error).message) }, 500); }
   }
 
   // ----- everything else: signed-in owner -----

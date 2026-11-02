@@ -21,7 +21,7 @@ const ICON = {
 };
 
 export default function Record({ me, rep, lead, data, people, sources, reload, say, goTab, nav, quotes, orgs, hs, back }) {
-  const kit = useReplyKit(me); const [tab, setTab] = useState('activities'); const [filter, setFilter] = useState('all'); const [composer, setComposer] = useState(null); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false); const [more, setMore] = useState(false); const [editing, setEditing] = useState(null); const [draft, setDraft] = useState('');
+  const kit = useReplyKit(me); const [tab, setTab] = useState('catchup'); const [filter, setFilter] = useState('all'); const [composer, setComposer] = useState(null); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false); const [more, setMore] = useState(false); const [editing, setEditing] = useState(null); const [draft, setDraft] = useState('');
   const { calls, touches, mail, meetings, allSends } = data;
   const sends = allSends.filter((s) => s.lead_id === lead.id);
   const exp = expectedMonthly(lead, quotes); const myQuotes = quotesFor(lead, quotes); const org = lead.org_id ? orgs.find((o) => o.id === lead.org_id) : null;
@@ -66,47 +66,41 @@ export default function Record({ me, rep, lead, data, people, sources, reload, s
   const hsLink = hs?.portal_id ? HS_URL(hs.portal_id, 'contact', lead.hs_contact_id) : null;
   return (
     <div className="hub-record">
-      <div className="hub-crumb"><button className="hub-link" onClick={back}>‹ Contacts</button><span className="spacer" />{hsLink ? <a className="hs-btn ghost sm" href={hsLink} target="_blank" rel="noreferrer">Open in HubSpot</a> : <button className="hs-btn ghost sm" disabled={busy || !hs?.setup} onClick={pushNow}>{hs?.setup ? 'Push to HubSpot' : 'HubSpot not connected'}</button>}</div>
       <div className="hub-cols">
         {/* left */}
         <aside className="hub-left">
-          <div className="hub-card pad">
-            <div className="hub-id"><span className="hub-av lg" style={{ background: avColor(name) }}>{initialsOf(name)}</span><div><h2>{name}</h2>{lead.title && <div className="muted">{lead.title}{lead.company ? ` at ${lead.company}` : ''}</div>}{lead.email && <a className="hub-link" href={`mailto:${lead.email}`}>{lead.email}</a>}</div></div>
+          <div className="hub-card pad idcard">
+            <div className="hub-cardtop"><button className="hub-link back" onClick={back}>‹ Contacts</button><span className="spacer" /><button className="linkish dark" onClick={() => setMore(!more)}>Actions <i>▾</i></button></div>
+            <div className="hub-id"><span className="hub-av lg" style={{ background: avColor(name) }}>{lead.domain ? <img src={`https://www.google.com/s2/favicons?domain=${lead.domain}&sz=64`} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : initialsOf(name)}</span><h2>{name}</h2></div>
+            {lead.email && <div className="hub-idmail"><a className="hub-link" href={`mailto:${lead.email}`}>{lead.email}</a> <button className="linkish" title="Copy" onClick={() => { navigator.clipboard?.writeText(lead.email); say(null, 'Copied.'); }}>⧉</button></div>}
             <div className="hub-actions">
-              {[['note', 'Note'], ['email', 'Email'], ['call', 'Call'], ['task', 'Log'], ['meeting', 'Meeting'], ['more', 'More']].map(([k, l]) => <button key={k} className={composer === k || (k === 'more' && more) ? 'on' : ''} onClick={() => { if (k === 'more') { setMore(!more); return; } if (k === 'meeting') { if (kit.booking) { navigator.clipboard?.writeText(kit.booking); say(null, 'Booking link copied — paste it in your reply.'); } else goTab('meetings'); return; } setComposer(composer === k ? null : k); setNote(''); }}><span className="ic">{ICON[k]}</span>{l}</button>)}
+              {[['note', 'Note'], ['email', 'Email'], ['call', 'Call'], ['task', 'Task'], ['meeting', 'Meeting'], ['more', 'More']].map(([k, l]) => <button key={k} className={composer === k || (k === 'more' && more) ? 'on' : ''} onClick={() => { if (k === 'more') { setMore(!more); return; } if (k === 'meeting') { if (kit.booking) { navigator.clipboard?.writeText(kit.booking); say(null, 'Booking link copied — paste it in your reply.'); } else goTab('meetings'); return; } setComposer(composer === k ? null : k); setNote(''); }}><span className="ic">{ICON[k]}</span>{l}</button>)}
             </div>
             {more && <div className="hub-moremenu">
               {lead.phone && <a href={`tel:${lead.phone.replace(/[^+\d]/g, '')}`}>Call {lead.phone}</a>}
               {lead.email && <a href={kit.link(lead.email, sends.find((s) => s.replied)?.subject, lead)} target="_blank" rel="noreferrer">Compose in Gmail</a>}
               <button onClick={() => { goTab('quotes', { lead: lead.id }); }}>Create quote</button>
               {hsLink && <a href={hsLink} target="_blank" rel="noreferrer">View in HubSpot</a>}
+              {!hsLink && hs?.setup && <button disabled={busy} onClick={pushNow}>Push to HubSpot now</button>}
               {!rep && <button onClick={() => { const to = prompt('Hand off to (name or email)?'); const p = people.find((x) => (x.full_name || '').toLowerCase().includes((to || '').toLowerCase()) || (x.email || '').toLowerCase() === (to || '').toLowerCase()); if (p) upd({ assigned_to: p.id }, `Handed to ${p.full_name || p.email}.`); }}>Hand off</button>}
               {lead.stage !== 'dnc' && <button className="danger" onClick={() => setStage('dnc')}>Do not contact</button>}
             </div>}
-            <div className="hub-about">
-              <div className="hub-abouthead"><b>About this contact</b><button className="linkish" onClick={() => setEditing(editing ? null : 'email')}>Actions ▾</button></div>
-              <Prop k="email" label="Email" type="email" render={(v) => (v ? <a className="hub-link" href={`mailto:${v}`}>{v}</a> : <span className="muted">--</span>)} />
-              <Prop k="phone" label="Phone number" render={(v) => (v ? <a className="hub-link" href={`tel:${v.replace(/[^+\d]/g, '')}`}>{v}</a> : <span className="muted">--</span>)} />
-              <div className="hub-prop"><small>Contact owner</small>{rep ? <b className="val">{who(lead.assigned_to) || <span className="muted">Unassigned</span>}</b> : <select className="hub-select" value={lead.assigned_to || ''} onChange={(e) => upd({ assigned_to: e.target.value || null }, 'Owner updated.')}><option value="">Unassigned</option>{people.map((p) => <option key={p.id} value={p.id}>{p.full_name || p.email}</option>)}</select>}</div>
-              <div className="hub-prop"><small>Lead status</small><select className={`hub-select s-${lead.stage}`} value={lead.stage} onChange={(e) => setStage(e.target.value)}>{STAGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
-              <div className="hub-prop"><small>Lifecycle stage</small><b className="val static">{LIFE(lead.stage)}</b></div>
-              <Prop k="title" label="Job title" />
-              <Prop k="contact_name" label="Full name" />
-              <div className="hub-prop"><small>Original source</small><select className="hub-select" value={lead.source} onChange={(e) => upd({ source: e.target.value }, 'Source updated.')}>{sources.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></div>
-              {lead.filter_id && <div className="hub-prop"><small>List</small><b className="val static" title={listName(lead.filter_id)}>{lead.filter_id}</b></div>}
-              <Prop k="city" label="City" /><Prop k="state" label="State/Region" />
-              <div className="hub-prop"><small>Last activity date</small><b className="val static">{fmtDT(items.find((i) => i.id !== 'created')?.at)}</b></div>
-              <div className="hub-prop"><small>Next step</small>{editing === 'next_action_at' ? <div className="edit"><input autoFocus type="datetime-local" value={draft} onChange={(e) => setDraft(e.target.value)} /><button className="hs-btn primary sm" onClick={() => { upd({ next_action_at: draft ? new Date(draft).toISOString() : null }); setEditing(null); }}>Save</button></div> : <b className="val" onClick={() => { setEditing('next_action_at'); setDraft(lead.next_action_at ? new Date(lead.next_action_at).toISOString().slice(0, 16) : ''); }}>{lead.next_action_at ? fmtDT(lead.next_action_at) : <span className="muted">--</span>}</b>}</div>
-              <div className="hub-prop"><small>Create date</small><b className="val static">{fmtDT(lead.created_at)}</b></div>
-              <Prop k="est_sales_usd" label="Est. online sales / mo" type="number" render={(v) => (v ? money(v) : <span className="muted">--</span>)} />
-              <div className="hub-prop"><small>HubSpot</small><b className="val static">{lead.hs_contact_id ? <>synced{lead.hs_synced_at ? ` · ${ago(lead.hs_synced_at)}` : ''}</> : <span className="muted">not yet</span>}</b></div>
-            </div>
+          </div>
+          <div className="hub-card pad keyinfo">
+            <div className="hub-cardtop"><b><i className="tw">⌄</i> Key information</b><span className="spacer" /><button className="linkish dark" onClick={() => setTab('about')}>Actions <i>▾</i></button><span className="hub-roundbtn sm">⚙</span></div>
+            <div className="hub-prop"><small>Email</small><b className="val static">{lead.email || <span className="muted">--</span>}</b></div>
+            <div className="hub-prop"><small>Phone Number</small><b className="val static">{lead.phone ? <a className="hub-link" href={`tel:${lead.phone.replace(/[^+\d]/g, '')}`}>{lead.phone}</a> : <span className="muted">--</span>}</b></div>
+            <div className="hub-prop"><small>Contact owner</small><b className="val static">{who(lead.assigned_to) || <span className="muted">No owner</span>}</b></div>
+            <div className="hub-prop"><small>Last Contacted</small><b className="val static">{fmtDT(items.find((i) => i.id !== 'created' && (i.kind === 'email' || i.kind === 'call'))?.at)}</b></div>
+            <div className="hub-prop"><small>Lifecycle Stage</small><b className="val static"><span className={`hub-life l-${LIFE(lead.stage).split(' ')[0].toLowerCase()}`}>{LIFE(lead.stage)}</span></b></div>
+            <div className="hub-prop"><small>Lead Status</small><select className={`hub-select s-${lead.stage}`} value={lead.stage} onChange={(e) => setStage(e.target.value)}>{STAGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
+            <div className="hub-prop"><small>Expected services / month</small><b className="val static">{exp.value ? `${money(exp.value)}${exp.from ? ` · ${exp.from.label}` : ''}` : <span className="muted">--</span>}</b></div>
           </div>
         </aside>
 
         {/* middle */}
         <main className="hub-mid">
-          <div className="hub-tabs"><button className={tab === 'overview' ? 'on' : ''} onClick={() => setTab('overview')}>Overview</button><button className={tab === 'activities' ? 'on' : ''} onClick={() => setTab('activities')}>Activities</button></div>
+          <div className="hub-tabs">{[['catchup', 'Catch-up'], ['about', 'About'], ['activities', 'Activities']].map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}<span className="spacer" /><button className="hub-customize">⚙ Customize</button></div>
           {composer && <div className="hub-card pad composer">
             <div className="hub-ctitle">{composer === 'note' ? 'Create note' : composer === 'email' ? 'Log an email' : composer === 'call' ? 'Log a call' : 'Log activity'}</div>
             <textarea rows={4} autoFocus placeholder={composer === 'note' ? 'Start typing to leave a note…' : composer === 'call' ? 'What happened on the call…' : 'What was sent or said…'} value={note} onChange={(e) => setNote(e.target.value)} />
@@ -119,13 +113,34 @@ export default function Record({ me, rep, lead, data, people, sources, reload, s
               <button className="linkish" onClick={() => setComposer(null)}>Cancel</button>
             </div>
           </div>}
-          {tab === 'overview' && <>
+          {tab === 'catchup' && <>
+            <div className="hub-sectionlbl"><i>⌄</i> Overview</div>
             <div className="hub-card pad"><div className="hub-ctitle">Data highlights</div><div className="hub-highlights">
               <div><small>Create date</small><b>{fmtD(lead.created_at)}</b></div><div><small>Lifecycle stage</small><b>{LIFE(lead.stage)}</b></div><div><small>Last activity</small><b>{items.find((i) => i.id !== 'created') ? ago(items.find((i) => i.id !== 'created').at) : '--'}</b></div><div><small>Expected services</small><b>{exp.value ? `${money(exp.value)}/mo` : '--'}</b></div>
             </div></div>
-            <div className="hub-card pad"><div className="hub-ctitle">Recent communications</div>{items.filter((i) => i.kind === 'email' || i.kind === 'call').slice(0, 3).map((i) => <TimelineItem key={i.id} i={i} compact />)}{!items.some((i) => i.kind === 'email' || i.kind === 'call') && <div className="muted">No emails or calls yet.</div>}</div>
+            <div className="hub-card pad"><div className="hub-ctitle">Recent interactions</div><div className="hub-inout">
+              <div className="hub-iobox"><b>Inbound</b>{items.filter((i) => i.kind === 'email' && /received/i.test(i.title)).slice(0, 5).map((i) => <div key={i.id} className="hub-iorow"><span className="ic">{ICON.email}</span><button className="hub-link" onClick={() => { setTab('activities'); setFilter('email'); }}>{i.title.replace(/^Email received — /, 'Incoming email - ')}</button><span className="muted">from {i.by}</span><span className="spacer" /><span className="muted">{fmtD(i.at)}</span></div>)}{!items.some((i) => i.kind === 'email' && /received/i.test(i.title)) && <div className="muted">No inbound emails yet.</div>}</div>
+              <div className="hub-iobox"><b>Outbound</b>{items.filter((i) => (i.kind === 'email' && !/received/i.test(i.title)) || i.kind === 'call').slice(0, 5).map((i) => <div key={i.id} className="hub-iorow"><span className="ic">{ICON[i.kind]}</span><button className="hub-link" onClick={() => { setTab('activities'); setFilter(i.kind); }}>{i.title.replace(/^Email sent — /, 'Email - ')}</button>{i.by && <span className="muted">from {i.by}</span>}<span className="spacer" /><span className="muted">{fmtD(i.at)}</span></div>)}{!items.some((i) => (i.kind === 'email' && !/received/i.test(i.title)) || i.kind === 'call') && <div className="muted">Nothing sent yet.</div>}</div>
+            </div></div>
             <div className="hub-card pad"><div className="hub-ctitle">Upcoming</div>{upcoming.length ? upcoming.map((m) => <div key={m.id} className="hub-upc"><span className="ic">{ICON.meeting}</span><div><b>{m.name || 'Meeting'}</b><small>{fmtDT(m.starts_at)}{m.location ? ` · ${m.location}` : ''}</small></div></div>) : lead.next_action_at ? <div className="hub-upc"><span className="ic">{ICON.task}</span><div><b>Follow up</b><small>{fmtDT(lead.next_action_at)}</small></div></div> : <div className="muted">Nothing scheduled.</div>}</div>
           </>}
+          {tab === 'about' && <div className="hub-card pad"><div className="hub-ctitle">About this contact</div><div className="hub-aboutgrid">
+              <Prop k="email" label="Email" type="email" render={(v) => (v ? <a className="hub-link" href={`mailto:${v}`}>{v}</a> : <span className="muted">--</span>)} />
+              <Prop k="phone" label="Phone number" render={(v) => (v ? <a className="hub-link" href={`tel:${v.replace(/[^+\d]/g, '')}`}>{v}</a> : <span className="muted">--</span>)} />
+              <Prop k="contact_name" label="Full name" /><Prop k="title" label="Job title" />
+              <div className="hub-prop"><small>Contact owner</small>{rep ? <b className="val static">{who(lead.assigned_to) || <span className="muted">No owner</span>}</b> : <select className="hub-select" value={lead.assigned_to || ''} onChange={(e) => upd({ assigned_to: e.target.value || null }, 'Owner updated.')}><option value="">No owner</option>{people.map((p) => <option key={p.id} value={p.id}>{p.full_name || p.email}</option>)}</select>}</div>
+              <div className="hub-prop"><small>Lead status</small><select className={`hub-select s-${lead.stage}`} value={lead.stage} onChange={(e) => setStage(e.target.value)}>{STAGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
+              <div className="hub-prop"><small>Lifecycle stage</small><b className="val static">{LIFE(lead.stage)}</b></div>
+              <div className="hub-prop"><small>Original source</small><select className="hub-select" value={lead.source} onChange={(e) => upd({ source: e.target.value }, 'Source updated.')}>{sources.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select></div>
+              {lead.filter_id && <div className="hub-prop"><small>List</small><b className="val static" title={listName(lead.filter_id)}>{lead.filter_id}</b></div>}
+              <Prop k="city" label="City" /><Prop k="state" label="State/Region" />
+              <div className="hub-prop"><small>Next step</small>{editing === 'next_action_at' ? <div className="edit"><input autoFocus type="datetime-local" value={draft} onChange={(e) => setDraft(e.target.value)} /><button className="hs-btn primary sm" onClick={() => { upd({ next_action_at: draft ? new Date(draft).toISOString() : null }); setEditing(null); }}>Save</button></div> : <b className="val" onClick={() => { setEditing('next_action_at'); setDraft(lead.next_action_at ? new Date(lead.next_action_at).toISOString().slice(0, 16) : ''); }}>{lead.next_action_at ? fmtDT(lead.next_action_at) : <span className="muted">--</span>}</b>}</div>
+              <Prop k="est_sales_usd" label="Est. online sales / mo" type="number" render={(v) => (v ? money(v) : <span className="muted">--</span>)} />
+              <div className="hub-prop"><small>Create date</small><b className="val static">{fmtDT(lead.created_at)}</b></div>
+              <div className="hub-prop"><small>Last activity date</small><b className="val static">{fmtDT(items.find((i) => i.id !== 'created')?.at)}</b></div>
+              <div className="hub-prop"><small>HubSpot</small><b className="val static">{lead.hs_contact_id ? <>synced{lead.hs_synced_at ? ` · ${ago(lead.hs_synced_at)}` : ''}</> : <span className="muted">not yet</span>}</b></div>
+              <div className="hub-prop wide"><small>Notes</small>{editing === 'notes' ? <div className="edit"><textarea autoFocus rows={5} value={draft} onChange={(e) => setDraft(e.target.value)} style={{ width: '100%' }} /><button className="hs-btn primary sm" onClick={() => { upd({ notes: draft || null }); setEditing(null); }}>Save</button><button className="linkish" onClick={() => setEditing(null)}>Cancel</button></div> : <b className="val pre" onClick={() => { setEditing('notes'); setDraft(lead.notes || ''); }}>{lead.notes || <span className="muted">--</span>}</b>}</div>
+            </div></div>}
           {tab === 'activities' && <>
             <div className="hub-filterrow">{[['all', 'Activity'], ['note', 'Notes'], ['email', 'Emails'], ['call', 'Calls'], ['meeting', 'Meetings']].map(([k, l]) => <button key={k} className={filter === k ? 'on' : ''} onClick={() => setFilter(k)}>{l}</button>)}<span className="spacer" /><span className="muted">{items.length} activities</span></div>
             {groups.map((g) => <div key={g.k} className="hub-month"><div className="hub-monthlbl">{g.k}</div>{g.items.map((i) => <TimelineItem key={i.id} i={i} />)}</div>)}
@@ -154,7 +169,7 @@ export default function Record({ me, rep, lead, data, people, sources, reload, s
 
 function AssocCard({ title, count, onAdd, addLabel = '+ Add', children }) {
   const [open, setOpen] = useState(true);
-  return <div className="hub-card hub-assoccard"><div className="hub-assochead" onClick={() => setOpen(!open)}><b>{title} ({count})</b><span className="spacer" />{onAdd && <button className="linkish" onClick={(e) => { e.stopPropagation(); onAdd(); }}>{addLabel}</button>}<i className={open ? 'open' : ''}>▾</i></div>{open && <div className="hub-assocbody">{children}</div>}</div>;
+  return <div className="hub-card hub-assoccard"><div className="hub-assochead" onClick={() => setOpen(!open)}><i className={`tw ${open ? 'open' : ''}`}>⌄</i><b>{title} ({count})</b><span className="spacer" />{onAdd && <button className="linkish dark" onClick={(e) => { e.stopPropagation(); onAdd(); }}>{addLabel}</button>}<span className="hub-roundbtn sm">⚙</span></div>{open && <div className="hub-assocbody">{children}</div>}</div>;
 }
 function TimelineItem({ i, compact }) {
   const [open, setOpen] = useState(!compact && (i.kind === 'note' || (i.body || '').length < 240));
