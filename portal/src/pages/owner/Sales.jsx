@@ -447,6 +447,9 @@ export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say,
           <button className="btn-sm" onClick={() => setLogging((v) => !v)}>Log a call</button>
           {lead.stage === 'replied' && (lead.answered_at ? <button className="btn-sm ok" onClick={() => upd({ answered_at: null })}>✓ Answered — undo</button> : <button className="btn-sm" onClick={() => upd({ answered_at: new Date().toISOString() }, 'Marked answered.')}>Mark answered</button>)}
           {lead.stage !== 'dnc' && <button className="btn-sm" onClick={() => setStage('dnc')}>Do not contact</button>}
+          {lead.hs_contact_id
+            ? <a className="btn-sm" href={`https://app.hubspot.com/contacts/247219014/record/0-1/${lead.hs_contact_id}`} target="_blank" rel="noreferrer" title={lead.hs_synced_at ? `In HubSpot · synced ${ago(lead.hs_synced_at)}` : 'In HubSpot'}>HubSpot ↗</a>
+            : <span className="sm" title="Goes to HubSpot on the next sync once it's worked (any stage past New, or a non-cold source)">{lead.stage !== 'new' || !['cold_email', 'cold_call'].includes(lead.source) ? 'HubSpot: syncing…' : ''}</span>}
         </div>
         {logging && <div className="plog"><textarea rows={2} placeholder="What happened on the call…" value={note} onChange={(e) => setNote(e.target.value)} /><div className="outcomes">{PANEL_OUT.map(([k, l, cls]) => <button key={k} className={`oc ${cls}`} onClick={() => logCall(k)}>{l}</button>)}</div></div>}
         <div className="tabs ptabs"><button className={tab === 'activity' ? 'on' : ''} onClick={() => setTab('activity')}>Activity{replies.length ? <i>{replies.length}</i> : null}</button><button className={tab === 'details' ? 'on' : ''} onClick={() => setTab('details')}>Details</button></div>

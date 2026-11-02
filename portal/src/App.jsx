@@ -227,7 +227,7 @@ const STAFF_NAV = [
   { key: 'receiving', label: 'Receiving', icon: Ico.receiving, page: Receiving, brandFirst: true },
   { key: 'pack', label: 'Pack & Ship', icon: Ico.pack, page: PackShip, brandFirst: true },
   { group: 'Sales', salesOnly: true },
-  { key: 'salesdesk', label: 'CRM', icon: Ico.sales, page: SalesDesk, salesOnly: true, fullBleed: true },
+  { key: 'salesdesk', label: 'CRM', icon: Ico.sales, page: SalesDesk, salesOnly: true },
   { group: 'Owner', ownerOnly: true },
   { key: 'owner', label: 'Admin', icon: Ico.owner, page: Owner, ownerOnly: true },
 ];
@@ -259,7 +259,7 @@ function Shell({ me }) {
   const signOut = async () => { await supabase.auth.signOut(); if (splitMode) window.location.replace(authUrl()); };
 
   return (
-    <div className={`app ${active?.fullBleed ? 'fullbleed' : ''}`}>
+    <div className="app">
       <aside className="sidenav">
         <a className="logo" href="/"><img src="/brand/06-horizontal-reverse.svg" alt="shipbay." /></a>
         <div className="tagline">shipbay.dashboard</div>

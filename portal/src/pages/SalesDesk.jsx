@@ -1,8 +1,15 @@
-// Sales — the CRM, in HubSpot's clothes. Same data and rules as before (reps see their own leads + the untouched pool);
-// HubSpot is the record underneath and the two stay in sync.
-import Hub from './hub/Hub';
+// Sales — the salesperson's desk. Same CRM as the owner's Sales section, scoped to this rep: their own leads and
+// booked calls, plus the shared pool of untouched leads to call. Everything they touch becomes theirs.
+import Sales from './owner/Sales';
 
 export default function SalesDesk({ me, go }) {
-  if (!me?.is_sales && !me?.is_owner) return <div className="card"><div className="empty">Ask Derek to add you to the sales team (Admin → Team).</div></div>;
-  return <Hub me={me} status={null} refreshStatus={() => {}} rep nav={go} />;
+  if (!me?.is_sales && !me?.is_owner) return <div className="card"><div className="empty">Ask Derek to add you to the sales team (Owner → Team).</div></div>;
+  return (
+    <div className="owner">
+      <div className="pagehead">
+        <div><h1>CRM<span className="dot">.</span></h1><p className="sub">Your pipeline, replies, calls, quotes and onboarding — and the shared pool of untouched leads.</p></div>
+      </div>
+      <Sales me={me} status={null} refreshStatus={() => {}} rep nav={go} />
+    </div>
+  );
 }

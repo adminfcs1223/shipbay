@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib';
 import { ownerFn, getToken, setToken, ago } from './util';
 import Financials from './Financials';
-import Hub from '../hub/Hub';
+import Sales from './Sales';
 import Strategies from './Strategies';
 import Compliance from '../Compliance';
 import AdminSettings from '../AdminSettings';
@@ -48,7 +48,7 @@ export default function Owner({ me, go: nav, params }) {
       {flash && <div className={`msg ${flash.kind} flash`}>{flash.text || (flash.kind === 'ok' ? 'QuickBooks connected.' : 'QuickBooks connection failed.')}<button onClick={() => setFlash(null)} aria-label="Dismiss">×</button></div>}
       <div className="card ownertabs"><div className="tabs">{TABS.map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}</div></div>
       {tab === 'fin' && <Financials status={status} refreshStatus={refresh} />}
-      {tab === 'sales' && <div className="hubwrap"><Hub me={me} status={status} refreshStatus={refresh} nav={nav} /></div>}
+      {tab === 'sales' && <Sales me={me} status={status} refreshStatus={refresh} nav={nav} />}
       {tab === 'team' && <Team />}
       {tab === 'strat' && <Strategies status={status} />}
       {tab === 'docs' && <div className="embed"><Compliance me={me} /></div>}
@@ -109,7 +109,7 @@ function Settings({ status, refreshStatus }) {
     <div className="ownergrid">
       {msg && <div className={`msg ${msg.kind} flash span2`}>{msg.text}<button onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
       <div className="card span2 hubcard">
-        <div className="cardhead"><h3>HubSpot — the system of record</h3><span className="sm">Everything in the CRM lives in HubSpot and flows both ways: accounts ↔ company + contact + deal, calls / notes / emails / meetings ↔ the HubSpot timeline. The cold list stays out until someone replies or is worked.</span></div>
+        <div className="cardhead"><h3>HubSpot — the engine</h3><span className="sm">The CRM here is the portal's own; HubSpot is the record underneath. Every 3 minutes the server syncs both ways: accounts ↔ company + contact + deal, calls / notes / emails / meetings ↔ the HubSpot timeline. The cold list stays out until someone replies or is worked.</span></div>
         <div className="hubgrid">
           <div>
             <div className="field"><label>Private app token</label><input type="password" value={hst} onChange={(e) => setHst(e.target.value)} placeholder={hub.token_set ? '•••••••• (saved — paste to replace)' : 'pat-na1-…'} autoComplete="off" /></div>
