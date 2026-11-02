@@ -527,7 +527,7 @@ async function hsPull(cfg: any, left: () => number = () => 1e9) {
     if (!l && p.shipbay_account_id) ({ data: l } = await admin.from('sales_leads').select('*').eq('id', p.shipbay_account_id).maybeSingle());
     if (!l && email) { const { data: id } = await admin.rpc('find_lead', { p_email: email, p_domain: '', p_company: p.company || '' }); if (id) ({ data: l } = await admin.from('sales_leads').select('*').eq('id', id).maybeSingle()); }
     const domain = (p.website || '').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '').toLowerCase() || null;
-    const fields: any = { contact_name: [p.firstname, p.lastname].filter(Boolean).join(' ') || undefined, email: email || undefined, phone: p.phone || undefined, title: p.jobtitle || undefined, city: p.city || undefined, state: p.state || undefined, hs_contact_id: String(c.id), hs_owner_id: p.hubspot_owner_id || undefined, assigned_to: cfg.owner_users?.[p.hubspot_owner_id] || undefined, hs_synced_at: new Date().toISOString() };
+    const fields: any = { contact_name: [p.firstname, p.lastname].filter(Boolean).join(' ') || undefined, email: email || undefined, phone: p.phone || undefined, title: p.jobtitle || undefined, city: p.city || undefined, state: p.state || undefined, hs_contact_id: String(c.id), hs_owner_id: p.hubspot_owner_id || undefined, assigned_to: cfg.owner_users?.[p.hubspot_owner_id] || undefined, hs_pulled_at: new Date().toISOString() };
     Object.keys(fields).forEach((k) => fields[k] === undefined && delete fields[k]);
     if (l) { await admin.from('sales_leads').update(fields).eq('id', l.id); out.contacts++; }
     else if (email || p.company) { const { data: ins } = await admin.from('sales_leads').insert({ ...fields, company: p.company || (domain ? domain.split('.')[0] : null) || email, domain, source: 'inbound', stage: p.lifecyclestage === 'customer' ? 'signed' : p.hs_lead_status === 'UNQUALIFIED' ? 'lost' : 'new', notes: 'Created in HubSpot.', last_touch_at: new Date().toISOString() }).select('id').single(); if (ins) { await hs(`/crm/v3/objects/contacts/${c.id}`, { method: 'PATCH', body: JSON.stringify({ properties: { shipbay_account_id: ins.id } }) }).catch(() => {}); out.created++; } }
@@ -535,7 +535,7 @@ async function hsPull(cfg: any, left: () => number = () => 1e9) {
   // companies: name / domain / phone changes on linked accounts
   for (const c of await search('companies', ['name', 'domain', 'phone', 'city', 'state', 'shipbay_account_id', 'hubspot_owner_id'])) {
     const p = c.properties; const { data: l } = await admin.from('sales_leads').select('id, domain').eq('hs_company_id', String(c.id)).maybeSingle(); if (!l) continue;
-    const fields: any = { company: p.name || undefined, phone: p.phone || undefined, city: p.city || undefined, state: p.state || undefined, hs_synced_at: new Date().toISOString() }; if (p.domain && !l.domain) fields.domain = p.domain.toLowerCase();
+    const fields: any = { company: p.name || undefined, phone: p.phone || undefined, city: p.city || undefined, state: p.state || undefined, hs_pulled_at: new Date().toISOString() }; if (p.domain && !l.domain) fields.domain = p.domain.toLowerCase();
     Object.keys(fields).forEach((k) => fields[k] === undefined && delete fields[k]); await admin.from('sales_leads').update(fields).eq('id', l.id); out.companies++;
   }
   // deals: stage + amount + owner
@@ -543,7 +543,7 @@ async function hsPull(cfg: any, left: () => number = () => 1e9) {
     const p = d.properties; if (p.pipeline !== cfg.pipeline_id) continue;
     let { data: l } = await admin.from('sales_leads').select('id, stage, deal_value, org_id').eq('hs_deal_id', String(d.id)).maybeSingle();
     if (!l && p.shipbay_account_id) ({ data: l } = await admin.from('sales_leads').select('id, stage, deal_value, org_id').eq('id', p.shipbay_account_id).maybeSingle()); if (!l) continue;
-    const stage = cfg.stage_keys?.[p.dealstage]; const fields: any = { hs_deal_id: String(d.id), hs_synced_at: new Date().toISOString() };
+    const stage = cfg.stage_keys?.[p.dealstage]; const fields: any = { hs_deal_id: String(d.id), hs_pulled_at: new Date().toISOString() };
     if (p.amount) fields.deal_value = Math.round(Number(p.amount) / 12);
     if (p.hubspot_owner_id && cfg.owner_users?.[p.hubspot_owner_id]) fields.assigned_to = cfg.owner_users[p.hubspot_owner_id];
     if (stage && stage !== l.stage) { if (stage === 'signed' && !l.org_id) { await admin.from('sales_leads').update(fields).eq('id', l.id); await admin.rpc('win_lead', { p_lead_id: l.id, p_deal_value: fields.deal_value ?? null }); out.deals++; continue; } fields.stage = stage; if (stage === 'signed') fields.won_at = p.closedate || new Date().toISOString(); fields.last_touch_at = new Date().toISOString(); }

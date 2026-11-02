@@ -23,3 +23,11 @@ create or replace function hs_push_pending() returns int language sql security d
 $$;
 create index if not exists sales_leads_hs_queue on sales_leads (updated_at) where hs_synced_at is null;
 alter table sales_leads add column if not exists hs_error text; -- last push error, cleared on success
+-- 3) a pull (HubSpot → portal) is marked with hs_pulled_at, never hs_synced_at, so it can't hide a portal change that still has to go out
+alter table sales_leads add column if not exists hs_pulled_at timestamptz;
+create or replace function sales_leads_touch_fn() returns trigger language plpgsql as $$
+begin
+  if new.hs_synced_at is distinct from old.hs_synced_at or new.hs_pulled_at is distinct from old.hs_pulled_at then new.updated_at = old.updated_at;
+  else new.updated_at = now(); end if;
+  return new;
+end $$;
