@@ -13,6 +13,10 @@ export const SETUP = [['self_shipstation', 'Self-ship · ShipStation'], ['self_s
 export const PAIN = [['space', 'Space'], ['time', 'Time'], ['q4', 'Q4'], ['cost', 'Cost'], ['moving', 'Moving'], ['none', 'None']];
 export const RESULT = [['booked', 'Booked'], ['callback', 'Callback'], ['send_info', 'Send info'], ['soft_no', 'Soft no'], ['hard_no', 'Hard no (DNC)']];
 export const EMAIL = [['nothing', 'Nothing yet'], ['replied', 'Replied'], ['bounced', 'Bounced']];
+/** Quick path (nobody picked up): the one decision is whether the email goes out. 'send' = Power sends it. */
+export const SEND = [['send', 'Send the email'], ['skip', 'Not this time']];
+const NO_PICKUP = ['no_answer', 'voicemail'];
+const POWER_BLOCKED = ['replied', 'call_booked', 'won', 'dnc', 'lost', 'signed'];
 const label = (list, k) => (list.find(([x]) => x === k) || [])[1] || k || '—';
 
 /** the legacy outcome the scoreboards and stages run on, derived from the answers */
@@ -52,13 +56,14 @@ export async function saveDebrief({ lead, me, started, seconds, note, a, emailed
   if (a.result === 'soft_no') patch.next_action_at = new Date(Date.now() + 45 * 86400000).toISOString();
   if (note) patch.notes = [lead.notes, `${now.toLocaleDateString()} ${label(DIAL, a.dial_result)}${a.result ? ` → ${label(RESULT, a.result)}` : ''}: ${note}`].filter(Boolean).join('\n');
   if ((lead.attempts || 0) + 1 >= 4 && !['booked', 'connected', 'gatekeeper'].includes(outcome)) patch.in_calls = false;   // 4 tries with no human → park it
-  // Blitz hand-off: a cold-call lead that got an email and isn't closed starts the Blitz a day after that first email.
-  const emailed = emailedNow || (a.email_result && a.email_result !== 'bounced');
-  if (emailed && ['send_info', 'callback', 'soft_no'].includes(a.result || '') && !lead.blitz_enroll_at) {
-    const first = lead.first_email_at ? new Date(lead.first_email_at) : now;
+  // Power: nobody picked up and the rep said "send the email" → the lead is queued for the Power sequence now.
+  // (The DB trigger on sales_calls does the same on email_result = 'send'; this is belt and braces so the UI reflects it instantly.)
+  if (a.email_result === 'send' && NO_PICKUP.includes(a.dial_result) && !['agency', 'fulfill', 'fulfilment'].includes(lead.source || '') && !lead.sequence && !lead.power_enrolled_at && !POWER_BLOCKED.includes(lead.stage || 'new')) {
+    patch.sequence = 'power'; patch.enroll_at = now.toISOString();
     if (!lead.first_email_at) patch.first_email_at = now.toISOString();
-    patch.blitz_enroll_at = new Date(first.getTime() + 86400000).toISOString();
   }
+  // Reached-DM outcomes (send info / callback / soft no) are parked until Derek decides whether they go to Power (lead-approaches.md Q2). Nothing is enrolled from here.
+  if (emailedNow && !lead.first_email_at) patch.first_email_at = now.toISOString();
   await supabase.from('sales_leads').update(patch).eq('id', lead.id);
   if (outcome === 'dnc' && lead.email) ownerFn({ action: 'smartlead_stop_lead', email: lead.email });
   // HubSpot gets the call + the contact answers right away (the 5-minute sync would catch it anyway)
@@ -76,7 +81,8 @@ export function Debrief({ lead, seconds, note, setNote, emailedNow, onSave, onCa
   const set = (k) => (v) => setA((x) => ({ ...x, [k]: v }));
   const human = a.dial_result === 'gatekeeper' || a.dial_result === 'decision_maker';
   const quick = ['no_answer', 'voicemail', 'bad_number'].includes(a.dial_result);
-  const canSave = !!a.dial_result && (quick || (a.dial_result === 'gatekeeper' ? !!a.result : !!a.picked_up && !!a.fit && (a.fit !== 'not_fit' || !!a.not_fit_reason) && !!a.result));
+  const askSend = !!lead.email && NO_PICKUP.includes(a.dial_result);
+  const canSave = !!a.dial_result && (quick ? (!askSend || !!a.email_result) : (a.dial_result === 'gatekeeper' ? !!a.result : !!a.picked_up && !!a.fit && (a.fit !== 'not_fit' || !!a.not_fit_reason) && !!a.result));
   useEffect(() => { const k = (e) => { if (e.key === 'Escape') onCancel(); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onCancel]);
   const showEmail = !!lead.email;
   return (
@@ -99,7 +105,9 @@ export function Debrief({ lead, seconds, note, setNote, emailedNow, onSave, onCa
         </>}
         {human && <section><div className="dbr-q">7 · Outcome</div><Pick options={RESULT} value={a.result} onChange={set('result')} cols={5} />
           {a.result === 'callback' && <div className="dbr-sub"><input type="datetime-local" value={a.callback_at} onChange={(e) => set('callback_at')(e.target.value)} /></div>}</section>}
-        {showEmail && (quick || human) && <section><div className="dbr-q">{human ? '9' : '2'} · Email (only if you emailed them yourself)</div><Pick options={EMAIL} value={a.email_result} onChange={set('email_result')} />{emailedNow && <span className="sm">You marked an email sent during this call — it counts.</span>}</section>}
+        {askSend && <section><div className="dbr-q">2 · Send the email?</div><Pick options={SEND} value={a.email_result} onChange={set('email_result')} cols={2} />
+          <span className="sm">{lead.sequence || lead.power_enrolled_at ? 'Already in a sequence — Power keeps going; this just logs the dial.' : 'Send = Power emails them from Derek\u2019s inbox within the minute and follows up four more times. A reply stops it.'}</span></section>}
+        {showEmail && human && <section><div className="dbr-q">9 · Email (only if you emailed them yourself)</div><Pick options={EMAIL} value={a.email_result} onChange={set('email_result')} />{emailedNow && <span className="sm">You marked an email sent during this call — it counts.</span>}</section>}
         <section><textarea rows={2} placeholder="One line: who you spoke to, what they said, when to call back…" value={note} onChange={(e) => setNote(e.target.value)} /></section>
         <div className="row"><button className="btn-sm" type="button" onClick={onCancel}>Back to the call</button><div className="spacer" /><button className="btn-sm primary" type="button" disabled={!canSave} onClick={() => onSave(a)}>Close call</button></div>
       </div>
