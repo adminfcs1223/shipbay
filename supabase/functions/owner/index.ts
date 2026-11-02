@@ -143,7 +143,8 @@ async function smartleadSync(uid: string) {
       const j = await (await fetch(`${base}/campaigns/${cid}/statistics?api_key=${key}&offset=${off}&limit=100`)).json().catch(() => ({}));
       const d = j?.data || []; stats.push(...d); if (d.length < 100) break;
     }
-    const { data: existing } = await admin.from('sales_email_sends').select('external_id, reply_type').eq('campaign', label);
+    const { data: existing } = await admin.from('sales_email_sends').select('external_id, reply_type, replied').eq('campaign', label);
+    const wasReplied = new Set((existing || []).filter((e: any) => e.replied).map((e: any) => e.external_id));
     const keep = new Map((existing || []).map((e: any) => [e.external_id, e.reply_type]));
     const tags: Record<string, string> = (await getSetting('reply_tags')) || {};   // email → reply type, set from the Email tab; survives re-syncs and label changes
     const rows = stats.map((s) => {
@@ -154,6 +155,8 @@ async function smartleadSync(uid: string) {
       return { external_id: s.stats_id, lead_id: byEmail.get(String(s.lead_email).toLowerCase()) || null, sl_lead_id: slId.get(String(s.lead_email).toLowerCase()) || (s.lead_id ? String(s.lead_id) : null), lead_email: s.lead_email, lead_name: s.lead_name, campaign: label, step: s.sequence_number, variant: String(s.seq_variant_id), subject: s.email_subject, sent_at: sent.toISOString(), opened: !!s.open_time, open_count: Number(s.open_count || 0), replied: !!rt && !bounceBack, bounced, reply_type: prev ?? (rt && tags[String(s.lead_email).toLowerCase()]) ?? (bounceBack ? 'Bounce-back' : null) };
     });
     for (let i = 0; i < rows.length; i += 200) await admin.from('sales_email_sends').upsert(rows.slice(i, i + 200), { onConflict: 'external_id' });
+    // replies that weren't replies at the last sync — these get a HubSpot task + reminder after the round-robin below
+    const fresh = rows.filter((r: any) => r.replied && !wasReplied.has(r.external_id) && (existing || []).length > 0);
     // reply bodies: one message-history call per lead that replied and has no text stored yet (max 40 per sync)
     const { data: need } = await admin.from('sales_email_sends').select('id, sl_lead_id, lead_email, sent_at').eq('campaign', label).eq('replied', true).is('reply_body', null).not('sl_lead_id', 'is', null).limit(40);
     let bodies = 0;
@@ -183,7 +186,26 @@ async function smartleadSync(uid: string) {
     }
     const neg = [...new Set(rows.filter((r) => r.reply_type === 'Negative').map((r) => r.lead_id).filter(Boolean))] as string[];
     if (neg.length) await admin.from('sales_leads').update({ stage: 'dnc' }).in('id', neg);
-    out[label] = { leads: leads.length, sends: rows.length, reply_bodies: bodies, analytics: await (await fetch(`${base}/campaigns/${cid}/analytics?api_key=${key}`)).json().catch(() => null) };
+    // tell someone: each new reply → HubSpot task for the lead's owner, due now, with a reminder (HubSpot pushes it to the app + email)
+    let alerted = 0;
+    for (const r of fresh) {
+      try {
+        const { data: sent } = await admin.from('sales_email_sends').select('reply_body, reply_subject, subject').eq('external_id', r.external_id).maybeSingle();
+        const { data: l0 } = r.lead_id ? await admin.from('sales_leads').select('*').eq('id', r.lead_id).maybeSingle() : { data: null } as any;
+        const cfg = await hsCfg();
+        const l = l0 ? await hsPushLead(l0, cfg) : null;
+        const owner = (l0?.assigned_to && cfg.owners?.[l0.assigned_to]) || cfg.default_owner || undefined;
+        const now = new Date();
+        const t: any = await hs('/crm/v3/objects/tasks', { method: 'POST', body: JSON.stringify({ properties: {
+          hs_timestamp: now.toISOString(), hs_task_subject: `Smartlead reply — ${l0?.company || r.lead_name || r.lead_email}: answer it`,
+          hs_task_body: `${r.lead_name || ''} <${r.lead_email}> replied to "${sent?.subject || r.subject || ''}".\n\n${String(sent?.reply_body || '(open the Email tab in the portal for the text)').slice(0, 1500)}\n\nCBE reply = a human conversation. Answer from the portal Email tab; do not enroll in a sequence.`,
+          hs_task_status: 'NOT_STARTED', hs_task_priority: 'HIGH', hs_task_type: 'EMAIL', hs_task_reminders: String(now.getTime() + 60000), hubspot_owner_id: owner } }) });
+        const cid = l?.hs_contact_id || l0?.hs_contact_id;
+        if (t?.id && cid) await hs(`/crm/v4/objects/tasks/${t.id}/associations/default/contacts/${cid}`, { method: 'PUT' }).catch(() => {});
+        alerted++;
+      } catch (e) { console.log('reply alert failed', r.lead_email, String(e)); }
+    }
+    out[label] = { leads: leads.length, sends: rows.length, reply_bodies: bodies, new_replies: fresh.length, alerted, analytics: await (await fetch(`${base}/campaigns/${cid}/analytics?api_key=${key}`)).json().catch(() => null) };
   }
   await setSetting('smartlead_last_sync', { at: new Date().toISOString(), by: uid, out });
   return { ok: true, campaigns: out };
@@ -730,6 +752,11 @@ Deno.serve(async (req) => {
         // one scheduled pass: everything that can move, each guarded so one failure doesn't stop the rest
         const out: Record<string, unknown> = {};
         for (const [k, fn] of [['hubspot', () => hubspotSync(false)], ['gmail', () => gmailSync('', true)]] as [string, () => Promise<unknown>][]) { try { out[k] = await fn(); } catch (e) { out[k] = { error: String((e as Error).message).slice(0, 200) }; } }
+        // Smartlead every ~9 minutes (the tick runs every 3): sends, replies, round-robin, reply alerts
+        try {
+          const last = (await getSetting('smartlead_tick_at')) as any; const due = !last?.at || Date.now() - new Date(last.at).getTime() > 8.5 * 60000;
+          if (due) { await setSetting('smartlead_tick_at', { at: new Date().toISOString() }); const { data: owner } = await admin.from('profiles').select('id').eq('is_owner', true).limit(1).maybeSingle(); out.smartlead = await smartleadSync(owner?.id || ''); }
+        } catch (e) { out.smartlead = { error: String((e as Error).message).slice(0, 200) }; }
         return json({ ok: true, ...out });
       }
       return json({ error: 'unknown system action' }, 400);
