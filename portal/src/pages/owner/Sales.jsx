@@ -9,6 +9,7 @@ import { ownerFn, fetchAll, money, pct, num, ago, mmss, hhmm, STAGES, stageLabel
 import { compute, phases } from '../../quote';
 import Quotes from '../Quotes';
 import Onboarding from '../Onboarding';
+import { Debrief, DebriefBoard, saveDebrief } from './Debrief';
 
 /** the quotes that belong to an account (by the account row, or its client org) — best first */
 const QRANK = { accepted: 0, sent: 1, draft: 2, declined: 3, superseded: 4 };
@@ -907,14 +908,15 @@ export function Score({ title, rows }) {
 
 
 /* =================== Calls =================== */
-const OUTCOMES = [['no_answer', 'No answer', ''], ['voicemail', 'Voicemail', ''], ['gatekeeper', 'Gatekeeper', 'warn'], ['connected', 'Connected', 'ok'], ['booked', 'Booked a call', 'ok solid'], ['not_fit', 'Not a fit', 'bad'], ['wrong_number', 'Wrong number', 'bad'], ['dnc', 'Do not call', 'bad']];
+// outcome buttons replaced by the debrief (Debrief.jsx); the legacy outcome is still derived for the scoreboards
+// const OUTCOMES = [['no_answer', 'No answer', ''], ['voicemail', 'Voicemail', ''], ['gatekeeper', 'Gatekeeper', 'warn'], ['connected', 'Connected', 'ok'], ['booked', 'Booked a call', 'ok solid'], ['not_fit', 'Not a fit', 'bad'], ['wrong_number', 'Wrong number', 'bad'], ['dnc', 'Do not call', 'bad']];
 const PICKUP = new Set(['gatekeeper', 'connected', 'booked', 'not_fit']); const CONNECT = new Set(['connected', 'booked', 'not_fit']);
 const grade = (bookedPer100, dials) => (dials < 30 ? '—' : bookedPer100 >= 3 ? 'A' : bookedPer100 >= 1.5 ? 'B' : bookedPer100 >= 0.5 ? 'C' : 'D');
 
 export function Calls({ me, rep, leads, people, reload, say, openLead }) {
   const [list, setList] = useState(''); const [who, setWho] = useState(''); const kit = useReplyKit(me); const booking = kit.booking; const [calls, setCalls] = useState([]); const [sessions, setSessions] = useState([]);
   const [session, setSession] = useState(() => { try { return JSON.parse(sessionStorage.getItem('shipbay-call-session') || 'null'); } catch { return null; } });
-  const [cur, setCur] = useState(null); const [callStart, setCallStart] = useState(null); const [note, setNote] = useState(''); const [tick, setTick] = useState(0); const [skipped, setSkipped] = useState([]);
+  const [cur, setCur] = useState(null); const [callStart, setCallStart] = useState(null); const [note, setNote] = useState(''); const [tick, setTick] = useState(0); const [skipped, setSkipped] = useState([]); const [debrief, setDebrief] = useState(false); const [emailed, setEmailed] = useState(null); const [emailLogging, setEmailLogging] = useState(false);
   useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t); }, []);
   const loadCalls = async () => { const [c, s] = await Promise.all([fetchAll('sales_calls', '*', (q) => q.order('started_at', { ascending: false })), fetchAll('sales_call_sessions', '*', (q) => q.order('started_at', { ascending: false }))]); setCalls(c); setSessions(s); };
   useEffect(() => { loadCalls(); }, []);
@@ -930,23 +932,14 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
   const startSession = async () => { const { data } = await supabase.from('sales_call_sessions').insert({ started_at: new Date().toISOString(), by_user: me.id, note: list || null }).select().single(); const s = { id: data.id, started_at: data.started_at }; setSession(s); sessionStorage.setItem('shipbay-call-session', JSON.stringify(s)); };
   const endSession = async () => { const secs = Math.round((Date.now() - new Date(session.started_at)) / 1000); await supabase.from('sales_call_sessions').update({ ended_at: new Date().toISOString(), seconds: secs }).eq('id', session.id); setSession(null); sessionStorage.removeItem('shipbay-call-session'); if (callStart) setCallStart(null); loadCalls(); };
   const startCall = () => { if (!session) startSession(); setCallStart(Date.now()); };
-  const finish = async (outcome) => {
+  // every dial ends in the debrief (Derek, 2026-11-02): nine answers → sales_calls + lead + HubSpot; the Blitz starts a day after the first email
+  const closeCall = async (answers) => {
     if (!lead) return;
     const started = callStart || Date.now(); const secs = Math.round((Date.now() - started) / 1000);
-    await supabase.from('sales_calls').insert({ lead_id: lead.id, started_at: new Date(started).toISOString(), ended_at: new Date().toISOString(), seconds: secs, outcome, note: note || null, by_user: me.id });
-    const next = { no_answer: 2, voicemail: 3, gatekeeper: 1, connected: 7 }[outcome];
-    const patch = { attempts: (lead.attempts || 0) + 1, last_outcome: outcome, last_touch_at: new Date().toISOString(), next_action_at: next ? new Date(Date.now() + next * 86400000).toISOString() : null, assigned_to: lead.assigned_to || me.id };   // first touch claims the lead
-    if (outcome === 'booked') patch.stage = 'call_booked'; else if (outcome === 'dnc') patch.stage = 'dnc'; else if (outcome === 'not_fit') patch.stage = 'lost';
-    else if (outcome === 'wrong_number') { patch.in_calls = false; patch.tags = [...new Set([...(lead.tags || []), 'bad_number'])]; }
-    else if (lead.stage === 'new') patch.stage = 'contacted';
-    if (note) patch.notes = [lead.notes, `${new Date().toLocaleDateString()} ${outcome.replace('_', ' ')}: ${note}`].filter(Boolean).join('\n');
-    if ((lead.attempts || 0) + 1 >= 4 && !['booked', 'connected', 'gatekeeper'].includes(outcome)) patch.in_calls = false;   // 4 tries with no human → park it
-    await supabase.from('sales_leads').update(patch).eq('id', lead.id);
-    if (outcome === 'dnc' && lead.email) ownerFn({ action: 'smartlead_stop_lead', email: lead.email });
-    setCallStart(null); setNote(''); setCur(null); reload(); loadCalls();
+    await saveDebrief({ lead, me, started, seconds: secs, note, a: answers, emailedNow: emailed === lead.id });
+    setDebrief(false); setCallStart(null); setNote(''); setCur(null); setEmailed(null); reload(); loadCalls();
   };
   const skip = () => { if (lead) setSkipped([...skipped, lead.id]); setCur(null); setCallStart(null); };
-  const [emailed, setEmailed] = useState(null); const [emailLogging, setEmailLogging] = useState(false);
   const logEmail = async (l) => {
     setEmailLogging(true);
     await supabase.from('sales_touches').insert({ lead_id: l.id, kind: 'email_sent', note: note || null, by_user: me.id });
@@ -990,7 +983,8 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
                 {lead.email && <span className="emailacts"><a className="btn-sm" href={kit.link(lead.email, null, lead)} target="_blank" rel="noreferrer" onClick={() => setEmailed(lead.id)}>Compose email</a><button className="btn-sm" disabled={emailLogging} onClick={() => logEmail(lead)}>{emailed === lead.id ? '✓ Mark email sent' : 'Mark email sent'}</button></span>}
               </div>
               <textarea className="callnote" rows={2} placeholder="One line: who you spoke to, what they said, when to call back…" value={note} onChange={(e) => setNote(e.target.value)} />
-              <div className="outcomes">{OUTCOMES.map(([k, l, cls]) => <button key={k} className={`oc ${cls}`} onClick={() => finish(k)}>{l}</button>)}</div>
+              <div className="outcomes end"><button className="oc solid" onClick={() => setDebrief(true)}>{callStart ? 'End call' : 'Log this dial'}</button></div>
+              {debrief && <Debrief lead={lead} seconds={Math.round((Date.now() - (callStart || Date.now())) / 1000)} note={note} setNote={setNote} emailedNow={emailed === lead.id} onSave={closeCall} onCancel={() => setDebrief(false)} />}
               <div className="row"><button className="btn-xs" onClick={skip}>Skip for now</button><div className="spacer" /><span className="sm">Next up: {queue.filter((q) => q.id !== lead.id).slice(0, 3).map((q) => q.company).join(' · ') || '—'}</span></div>
             </>
           )}
@@ -1007,6 +1001,7 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
           <tbody>{board.byList.map((r) => <tr key={r.k}><td><b className="mono">{r.k}</b>{LIST_NAMES[r.k] && <span className="sm"> {LIST_NAMES[r.k]}</span>}</td><td className="n">{r.dials}</td><td className="n">{pct(r.pickRate)}</td><td className="n">{pct(r.connRate)}</td><td className="n">{r.booked}</td><td className="n">{r.per100.toFixed(1)}</td><td className="n">{pct(r.dials ? r.bad / r.dials : 0)}</td><td className="n">{r.minPerConn.toFixed(1)}</td><td><b className={`grade g${r.grade}`}>{r.grade}</b></td></tr>)}
             {!board.byList.length && <tr><td colSpan={9} className="empty">No calls logged yet.</td></tr>}</tbody></table>
       </div>
+      <DebriefBoard calls={calls} leads={leads} />
     </>
   );
 }
