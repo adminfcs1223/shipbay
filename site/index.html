@@ -116,21 +116,6 @@
   /* the promise line: four short facts, no sentence */
   .hero p.lede.promise{display:flex;flex-wrap:wrap;gap:6px 18px;max-width:none}
   .hero p.lede.promise b{font-weight:800;color:#fff;white-space:nowrap}
-  /* the fox: as tall as the headline, rises from under the hero beside the words, tucks behind the calculator card,
-     looks left and right, drops. Position + size set by JS from the headline box. */
-  .fox{position:absolute;z-index:3;pointer-events:none;width:300px;transform:translateY(var(--rise,120vh));will-change:transform;opacity:0}
-  .fox.ready{opacity:1}
-  .fox svg{display:block;width:100%;height:auto;overflow:visible;filter:drop-shadow(0 24px 40px rgba(90,30,0,.35))}
-  .fox-head{transform-origin:130px 250px}
-  .fox-eyes{transform-origin:130px 120px}
-  .fox.go{animation:foxPeek 5.2s cubic-bezier(.2,.7,.2,1) forwards}
-  .fox.go .fox-head{animation:foxLook 5.2s ease-in-out forwards}
-  .fox.go .fox-eyes{animation:foxEyes 5.2s ease-in-out forwards}
-  @keyframes foxPeek{0%{transform:translateY(var(--rise))}16%{transform:translateY(-3%)}22%{transform:translateY(0)}84%{transform:translateY(0)}91%{transform:translateY(-4%)}100%{transform:translateY(var(--rise))}}
-  @keyframes foxLook{0%,24%{transform:rotate(0)}36%{transform:rotate(-7deg)}50%{transform:rotate(-7deg)}62%{transform:rotate(6deg)}74%{transform:rotate(6deg)}84%,100%{transform:rotate(0)}}
-  @keyframes foxEyes{0%,24%{transform:translateX(0)}36%{transform:translateX(-9px)}50%{transform:translateX(-9px)}62%{transform:translateX(9px)}74%{transform:translateX(9px)}84%,100%{transform:translateX(0)}}
-  @media(max-width:960px){.fox{display:none}}
-  @media(prefers-reduced-motion:reduce){.fox{display:none}}
 
   /* ============ intro ============ */
   #intro{position:fixed;inset:0;z-index:2000;background:var(--orange);color:#fff;display:grid;place-items:center;overflow:hidden;cursor:pointer;clip-path:inset(0 0 0 0)}
@@ -227,6 +212,30 @@
   .qmail button:disabled{opacity:.6;cursor:default}
   .qmail small{font-size:11px;color:#9AA3B2}
   .qmail .qm-ok{text-align:center;padding:8px 0;font-size:15px;font-weight:600}
+
+  /* ============ ships-from-here: the product strip ============ */
+  .ships{position:relative;background:#fff;padding:96px 0 72px;overflow:hidden}
+  .ships::before{content:"";position:absolute;left:0;right:0;top:0;height:1px;background:var(--line)}
+  .ships-head{max-width:720px;margin-bottom:48px}
+  .ships-head h2{font-size:clamp(34px,4vw,52px)}
+  .ships-head p{font-size:17px;color:var(--muted);margin-top:14px;line-height:1.6;max-width:60ch}
+  .ships-row{display:grid;grid-template-columns:repeat(5,1fr);gap:22px;align-items:end;perspective:1600px}
+  .ship{margin:0;position:relative;opacity:0;transform:translateY(90px) scale(.86) rotate(var(--r));transition:opacity .9s var(--ease),transform 1.1s var(--ease);transition-delay:calc(var(--i)*110ms);will-change:transform}
+  .ships.in .ship{opacity:1;transform:translateY(0) scale(1) rotate(0)}
+  .ships.in .ship .ship-img{animation:shipFloat 7s ease-in-out calc(var(--i)*-1.3s) infinite}
+  .ship.lead{transform:translateY(90px) scale(.86) rotate(var(--r)) translateY(-18px)}
+  .ships.in .ship.lead{transform:translateY(-18px) scale(1.06)}
+  .ship-img{position:relative;border-radius:22px;overflow:hidden;background:#fff;box-shadow:0 1px 0 rgba(15,27,42,.04),0 30px 60px -24px rgba(15,27,42,.35),0 12px 24px -12px rgba(15,27,42,.18);transition:transform .6s var(--ease),box-shadow .6s var(--ease);transform-style:preserve-3d}
+  .ship-img::after{content:"";position:absolute;inset:0;border-radius:22px;box-shadow:inset 0 0 0 1px rgba(15,27,42,.06);pointer-events:none}
+  .ship-img img{display:block;width:100%;height:auto;aspect-ratio:260/298;object-fit:cover}
+  .ship:hover .ship-img{transform:translateY(-10px) rotateX(4deg) rotateY(var(--ty,0deg));box-shadow:0 1px 0 rgba(15,27,42,.04),0 48px 80px -28px rgba(15,27,42,.42),0 18px 30px -14px rgba(15,27,42,.22)}
+  .ship figcaption{margin-top:16px;padding:0 4px}
+  .ship figcaption b{display:block;font-size:15.5px;letter-spacing:-.015em}
+  .ship figcaption span{display:block;font-size:13px;color:var(--muted);margin-top:3px;line-height:1.45}
+  @keyframes shipFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+  @media(max-width:1100px){.ships-row{grid-template-columns:repeat(3,1fr);gap:18px}.ship.lead,.ships.in .ship.lead{transform:none}}
+  @media(max-width:640px){.ships{padding:72px 0 56px}.ships-row{grid-template-columns:repeat(2,1fr);gap:14px}.ship-img{border-radius:16px}}
+  @media(prefers-reduced-motion:reduce){.ship{opacity:1;transform:none;transition:none}.ships.in .ship .ship-img{animation:none}}
 
   /* ============ marquee ============ */
   .marquee{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--bg-soft);overflow:hidden;padding:20px 0;-webkit-mask-image:linear-gradient(90deg,transparent,#000 10%,#000 90%,transparent);mask-image:linear-gradient(90deg,transparent,#000 10%,#000 90%,transparent)}
@@ -521,98 +530,6 @@
   <div class="orb o2" data-depth="-0.04"></div>
   <div class="grain"></div>
   <img class="wm" src="assets/brand/13-mono-horizontal-white.svg" alt="" data-depth="0.03">
-  <div class="fox" aria-hidden="true">
-<svg viewBox="0 0 260 340" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="fx-fur" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F0772A"/><stop offset="1" stop-color="#C94A00"/></linearGradient>
-        <linearGradient id="fx-furDark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#D65300"/><stop offset="1" stop-color="#A83C00"/></linearGradient>
-        <linearGradient id="fx-cream" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFF6EA"/><stop offset="1" stop-color="#F1DCC4"/></linearGradient>
-        <linearGradient id="fx-cap" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22324A"/><stop offset="1" stop-color="#0F1B2A"/></linearGradient>
-        <linearGradient id="fx-hood" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1B2A40"/><stop offset="1" stop-color="#0B1522"/></linearGradient>
-        <radialGradient id="fx-cheekGlow" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#FF9A5C" stop-opacity=".55"/><stop offset="1" stop-color="#FF9A5C" stop-opacity="0"/></radialGradient>
-        <radialGradient id="fx-eyeShine" cx=".35" cy=".3" r=".7"><stop offset="0" stop-color="#4A5A70"/><stop offset=".6" stop-color="#0F1B2A"/><stop offset="1" stop-color="#05090F"/></radialGradient>
-        <filter id="fx-soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2.2"/></filter>
-        <clipPath id="fx-headClip"><path d="M26 118 C26 70 68 48 130 48 C192 48 234 70 234 118 C234 162 204 206 160 238 L130 256 L100 238 C56 206 26 162 26 118 Z"/></clipPath>
-      </defs>
-    
-      <!-- hoodie / shoulders -->
-      <g class="fox-body">
-        <path d="M10 340 C10 288 44 262 92 254 L130 262 L168 254 C216 262 250 288 250 340 Z" fill="url(#fx-hood)"/>
-        <path d="M92 254 C104 236 156 236 168 254 C156 262 104 262 92 254 Z" fill="#0F1B2A"/>
-        <path d="M60 340 C62 300 84 284 112 282 L130 290 L148 282 C176 284 198 300 200 340 Z" fill="#132235"/>
-        <!-- hoodie strings -->
-        <path d="M118 262 L116 300 M142 262 L144 300" stroke="#F6E7D7" stroke-width="3" stroke-linecap="round" fill="none"/>
-        <!-- chest mark -->
-        <g transform="translate(130 318)"><rect x="-13" y="-13" width="26" height="26" rx="7" fill="#FF6B15"/><path d="M-7 -3 L0 -7 L7 -3 L0 1 Z" fill="#fff"/><path d="M-7 -3 L0 1 L0 8 L-7 4 Z" fill="#fff" opacity=".7"/><path d="M7 -3 L0 1 L0 8 L7 4 Z" fill="#fff" opacity=".45"/></g>
-      </g>
-    
-      <!-- neck -->
-      <path d="M104 226 C112 244 148 244 156 226 L160 262 C150 270 110 270 100 262 Z" fill="#D65300"/>
-      <path d="M112 232 C120 246 140 246 148 232 L150 258 C140 264 120 264 110 258 Z" fill="#F1DCC4"/>
-      <g class="fox-head">
-        <!-- ears -->
-        <path d="M44 112 L20 10 L98 64 Z" fill="url(#fx-furDark)"/>
-        <path d="M216 112 L240 10 L162 64 Z" fill="url(#fx-furDark)"/>
-        <path d="M54 104 L34 28 L90 70 Z" fill="#0F1B2A"/>
-        <path d="M206 104 L226 28 L170 70 Z" fill="#0F1B2A"/>
-        <!-- ear fur tufts -->
-        <path d="M60 96 L50 82 L64 84 Z M70 88 L62 74 L76 78 Z" fill="#F6E7D7" opacity=".9"/>
-        <path d="M200 96 L210 82 L196 84 Z M190 88 L198 74 L184 78 Z" fill="#F6E7D7" opacity=".9"/>
-    
-        <!-- head -->
-        <path d="M26 118 C26 70 68 48 130 48 C192 48 234 70 234 118 C234 162 204 206 160 238 L130 256 L100 238 C56 206 26 162 26 118 Z" fill="url(#fx-fur)"/>
-        <!-- cheek fur spikes -->
-        <path d="M30 146 C22 150 18 158 22 166 C16 172 18 182 28 184 Z" fill="#E66814"/>
-        <path d="M230 146 C238 150 242 158 238 166 C244 172 242 182 232 184 Z" fill="#E66814"/>
-        <!-- cream mask: cheeks + muzzle -->
-        <g clip-path="url(#fx-headClip)">
-          <path d="M22 158 C34 140 62 136 86 150 C104 162 118 182 130 206 C142 182 156 162 174 150 C198 136 226 140 238 158 C236 196 204 228 160 240 L130 258 L100 240 C56 228 24 196 22 158 Z" fill="url(#fx-cream)"/>
-          <!-- cream brow patches -->
-          <path d="M60 108 C72 96 92 98 100 112 C92 118 76 120 60 108 Z" fill="#F6E7D7" opacity=".8"/>
-          <path d="M200 108 C188 96 168 98 160 112 C168 118 184 120 200 108 Z" fill="#F6E7D7" opacity=".8"/>
-          <!-- cheek blush -->
-          <circle cx="62" cy="170" r="22" fill="url(#fx-cheekGlow)"/>
-          <circle cx="198" cy="170" r="22" fill="url(#fx-cheekGlow)"/>
-        </g>
-    
-        <!-- eyes -->
-        <g>
-          <path d="M68 118 C74 104 100 102 108 116 C104 132 76 134 68 118 Z" fill="#fff"/>
-          <path d="M192 118 C186 104 160 102 152 116 C156 132 184 134 192 118 Z" fill="#fff"/>
-          <g class="fox-eyes">
-            <ellipse cx="90" cy="120" rx="9.5" ry="11" fill="url(#fx-eyeShine)"/>
-            <ellipse cx="170" cy="120" rx="9.5" ry="11" fill="url(#fx-eyeShine)"/>
-            <circle cx="94" cy="114" r="3.2" fill="#fff"/><circle cx="174" cy="114" r="3.2" fill="#fff"/>
-            <circle cx="86" cy="126" r="1.4" fill="#fff" opacity=".7"/><circle cx="166" cy="126" r="1.4" fill="#fff" opacity=".7"/>
-          </g>
-          <!-- lids / brows -->
-          <path d="M66 112 C78 98 104 100 110 114" fill="none" stroke="#A83C00" stroke-width="3" stroke-linecap="round"/>
-          <path d="M194 112 C182 98 156 100 150 114" fill="none" stroke="#A83C00" stroke-width="3" stroke-linecap="round"/>
-        </g>
-    
-        <!-- nose + mouth -->
-        <path d="M116 190 C122 182 138 182 144 190 C140 202 120 202 116 190 Z" fill="#0F1B2A"/>
-        <ellipse cx="124" cy="187" rx="4" ry="2.4" fill="#fff" opacity=".45"/>
-        <path d="M130 200 L130 210 M130 210 C124 220 112 218 110 212 M130 210 C136 220 148 218 150 212" fill="none" stroke="#0F1B2A" stroke-width="3" stroke-linecap="round"/>
-        <!-- whisker dots -->
-        <g fill="#A83C00" opacity=".8"><circle cx="96" cy="196" r="1.6"/><circle cx="90" cy="204" r="1.6"/><circle cx="164" cy="196" r="1.6"/><circle cx="170" cy="204" r="1.6"/></g>
-    
-        <!-- cap -->
-        <path d="M40 92 C44 34 216 34 220 92 Z" fill="url(#fx-cap)"/>
-        <path d="M40 92 C44 34 216 34 220 92" fill="none" stroke="#2C3D57" stroke-width="2"/>
-        <!-- panel seams -->
-        <path d="M130 38 C118 56 112 74 110 92 M130 38 C142 56 148 74 150 92" fill="none" stroke="#2C3D57" stroke-width="1.6"/>
-        <!-- button -->
-        <circle cx="130" cy="37" r="4" fill="#FF6B15"/>
-        <!-- brim (forward, curved) -->
-        <path d="M30 92 C40 86 220 86 230 92 C240 100 230 112 200 108 C170 102 90 102 60 108 C30 112 20 100 30 92 Z" fill="#0F1B2A"/>
-        <path d="M44 94 C70 90 190 90 216 94" fill="none" stroke="#2C3D57" stroke-width="1.5" stroke-dasharray="3 3"/>
-        <!-- wordmark on the crown -->
-        <image href="assets/brand/13-mono-horizontal-white.svg" x="86" y="50" width="88" height="30" preserveAspectRatio="xMidYMid meet"/>
-      </g>
-    </svg>
-    
-  </div>
   <div class="wrap hero-grid">
     <div class="hv-left">
       <h1>
@@ -688,6 +605,24 @@
           <small>Your quote and one follow-up from the founder. No spam.</small>
         </form>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- SHIPS FROM HERE: product strip -->
+<section class="ships" id="ships" aria-label="Packaging that ships from ShipBay">
+  <div class="wrap">
+    <div class="ships-head">
+      <span class="eyebrow" data-reveal>What ships from Hillsborough</span>
+      <h2 data-reveal style="--i:1">Your packaging. Your brand. Our floor<span class="dot">.</span></h2>
+      <p data-reveal style="--i:2">Client-supplied boxes and mailers go out exactly as you designed them &mdash; inserts, tissue, labels, all of it. Standard poly mailers are included in the pick fee.</p>
+    </div>
+    <div class="ships-row">
+      <figure class="ship" style="--i:0;--r:-5deg"><div class="ship-img"><img src="assets/media/boxes/elysian-bloom.jpg" alt="Teal skincare mailer box with a serum, lavender and a silk scarf" loading="lazy" width="520" height="596"></div><figcaption><b>Skincare &amp; botanicals</b><span>Fragile inserts, tissue, cold-sensitive stock</span></figcaption></figure>
+      <figure class="ship" style="--i:1;--r:3deg"><div class="ship-img"><img src="assets/media/boxes/terra-harvest.jpg" alt="Kraft box with a jar of spices, a wooden scoop and a bag of dried herbs" loading="lazy" width="520" height="596"></div><figcaption><b>Small-batch pantry</b><span>Lot tracking, glass, kraft mailers</span></figcaption></figure>
+      <figure class="ship lead" style="--i:2;--r:0deg"><div class="ship-img"><img src="assets/media/boxes/adept-design.jpg" alt="Black box with a leather notebook, a pen and a steel ruler" loading="lazy" width="520" height="596"></div><figcaption><b>Tools &amp; goods</b><span>Kitted sets, custom boxes, gift notes</span></figcaption></figure>
+      <figure class="ship" style="--i:3;--r:-3deg"><div class="ship-img"><img src="assets/media/boxes/midnight-roast.jpg" alt="Navy box with chocolate, a coffee bag and a wooden scoop" loading="lazy" width="520" height="596"></div><figcaption><b>Coffee &amp; confections</b><span>Subscription drops, batch shipping</span></figcaption></figure>
+      <figure class="ship" style="--i:4;--r:5deg"><div class="ship-img"><img src="assets/media/boxes/simple-good.jpg" alt="Orange wholesale shipping carton" loading="lazy" width="520" height="596"></div><figcaption><b>Wholesale &amp; B2B</b><span>Routing guides, pallet builds, case packs</span></figcaption></figure>
     </div>
   </div>
 </section>
@@ -1115,26 +1050,17 @@
   });
   addEventListener('pageshow', (e) => { if (e.persisted) body.classList.remove('leaving'); });
 
-  // ===== the fox: as tall as the headline, beside it, rising from under the hero =====
+
+  // ===== product strip: pop in once when it scrolls into view; tilt toward the pointer =====
   (function(){
-    const fox = document.querySelector('.fox'); if (!fox || reduce) return;
-    const hero = document.querySelector('.hero'), h1 = hero.querySelector('h1'); let visible = true;
-    const place = () => {
-      const hr = hero.getBoundingClientRect(), r = h1.getBoundingClientRect();
-      const w = Math.round(r.height * 0.95);
-      fox.style.width = w + 'px';
-      fox.style.left = Math.round(r.right - hr.left + 6) + 'px';
-      const top = Math.round(r.top - hr.top - r.height * 0.1); fox.style.top = top + 'px';
-      fox.style.setProperty('--rise', Math.round(hr.height - top + 40) + 'px');
-      fox.classList.add('ready');
-    };
-    place(); addEventListener('resize', place);
-    if ('IntersectionObserver' in window) new IntersectionObserver((e) => { visible = e[0].isIntersecting; }, { threshold: .3 }).observe(hero);
-    const qc = document.querySelector('.qc'); const busy = () => qc && (qc.matches(':hover') || qc.contains(document.activeElement));
-    const peek = () => { if (!visible || document.hidden || busy()) return; place(); fox.classList.remove('go'); void fox.offsetWidth; fox.classList.add('go'); };
-    const first = () => { setTimeout(peek, 1900); setInterval(peek, 20000); };
-    const ov = document.getElementById('intro');
-    if (ov && !ov.classList.contains('off')) { const t = setInterval(() => { if (ov.classList.contains('off') || ov.classList.contains('go')) { clearInterval(t); first(); } }, 150); } else first();
+    const sec = document.getElementById('ships'); if (!sec) return;
+    const show = () => sec.classList.add('in');
+    if (reduce || !('IntersectionObserver' in window)) return show();
+    new IntersectionObserver((e, o) => { if (e[0].isIntersecting) { show(); o.disconnect(); } }, { threshold: .25 }).observe(sec);
+    sec.querySelectorAll('.ship').forEach((f) => {
+      f.addEventListener('pointermove', (ev) => { const r = f.getBoundingClientRect(); const x = (ev.clientX - r.left) / r.width - .5; f.style.setProperty('--ty', (x * 10).toFixed(1) + 'deg'); });
+      f.addEventListener('pointerleave', () => f.style.removeProperty('--ty'));
+    });
   })();
 })();
 
