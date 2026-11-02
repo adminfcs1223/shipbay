@@ -2,9 +2,9 @@
 // token lives in sessionStorage so it goes away when the tab closes). Financials, Sales, Settings.
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib';
-import { ownerFn, getToken, setToken } from './util';
+import { ownerFn, getToken, setToken, ago } from './util';
 import Financials from './Financials';
-import Sales from './Sales';
+import Hub from '../hub/Hub';
 import Strategies from './Strategies';
 import Compliance from '../Compliance';
 import AdminSettings from '../AdminSettings';
@@ -48,7 +48,7 @@ export default function Owner({ me, go: nav, params }) {
       {flash && <div className={`msg ${flash.kind} flash`}>{flash.text || (flash.kind === 'ok' ? 'QuickBooks connected.' : 'QuickBooks connection failed.')}<button onClick={() => setFlash(null)} aria-label="Dismiss">×</button></div>}
       <div className="card ownertabs"><div className="tabs">{TABS.map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}</div></div>
       {tab === 'fin' && <Financials status={status} refreshStatus={refresh} />}
-      {tab === 'sales' && <Sales me={me} status={status} refreshStatus={refresh} nav={nav} />}
+      {tab === 'sales' && <div className="hubwrap"><Hub me={me} status={status} refreshStatus={refresh} nav={nav} /></div>}
       {tab === 'team' && <Team />}
       {tab === 'strat' && <Strategies status={status} />}
       {tab === 'docs' && <div className="embed"><Compliance me={me} /></div>}
@@ -96,7 +96,8 @@ function Settings({ status, refreshStatus }) {
   const [msg, setMsg] = useState(null);
   const [cur, setCur] = useState(''); const [n1, setN1] = useState(''); const [n2, setN2] = useState('');
   const [qid, setQid] = useState(''); const [qsec, setQsec] = useState('');
-  const [slk, setSlk] = useState(''); const [slc, setSlc] = useState(status.smartlead_campaigns || ''); const [cal, setCal] = useState(''); const [gcal, setGcal] = useState(''); const [booking, setBooking] = useState('');
+  const [slk, setSlk] = useState(''); const [slc, setSlc] = useState(status.smartlead_campaigns || ''); const [cal, setCal] = useState(''); const [gcal, setGcal] = useState(''); const [booking, setBooking] = useState(''); const [hst, setHst] = useState(''); const [hsRes, setHsRes] = useState(null);
+  const hub = status.hubspot || {};
   useEffect(() => { supabase.from('fin_settings').select('value').eq('key', 'booking_link').maybeSingle().then(({ data }) => setBooking(data?.value?.url || '')); }, []);
   const [busy, setBusy] = useState(null);
 
@@ -107,6 +108,31 @@ function Settings({ status, refreshStatus }) {
   return (
     <div className="ownergrid">
       {msg && <div className={`msg ${msg.kind} flash span2`}>{msg.text}<button onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
+      <div className="card span2 hubcard">
+        <div className="cardhead"><h3>HubSpot — the system of record</h3><span className="sm">Everything in the CRM lives in HubSpot and flows both ways: accounts ↔ company + contact + deal, calls / notes / emails / meetings ↔ the HubSpot timeline. The cold list stays out until someone replies or is worked.</span></div>
+        <div className="hubgrid">
+          <div>
+            <div className="field"><label>Private app token</label><input type="password" value={hst} onChange={(e) => setHst(e.target.value)} placeholder={hub.token_set ? '•••••••• (saved — paste to replace)' : 'pat-na1-…'} autoComplete="off" /></div>
+            <div className="row"><button className="btn-sm primary" disabled={!hst || !!busy} onClick={async () => { await saveSecret('HUBSPOT_TOKEN', hst, 'HubSpot token'); setHst(''); }}>Save token</button>
+              <button className="btn-sm" disabled={!hub.token_set || busy === 'hs_setup'} onClick={async () => { setBusy('hs_setup'); const r = await ownerFn({ action: 'hubspot_setup' }); setBusy(null); say(r, `HubSpot ready — pipeline "ShipBay Sales" with your stages, portal ${r.hubspot?.portal_id}.`); }}>{busy === 'hs_setup' ? 'Setting up…' : hub.pipeline_id ? 'Re-run set-up' : 'Set up HubSpot'}</button></div>
+            <p className="hint" style={{ marginTop: 10 }}>HubSpot → Settings → Integrations → Private Apps → Create. Scopes: crm.objects.contacts / companies / deals (read + write), crm.schemas.* (read + write), crm.pipelines (read + write), crm.objects.owners (read), sales-email-read, account-info.security.read.</p>
+          </div>
+          <div className="kv">
+            <div><span>Token</span><b>{hub.token_set ? 'saved' : 'missing'}</b></div>
+            <div><span>Pipeline</span><b>{hub.pipeline_id ? 'ShipBay Sales' : 'not set up'}</b></div>
+            <div><span>Owners mapped</span><b>{hub.owners ? Object.keys(hub.owners).length : 0}</b></div>
+            <div><span>Last sync</span><b>{hub.last_sync ? ago(hub.last_sync) : 'never'}</b></div>
+            {hub.last_result && <div><span>Last result</span><b>{hub.last_result.pushed} accounts · {hub.last_result.acts} activities out · {(hub.last_result.pulled?.contacts || 0) + (hub.last_result.pulled?.deals || 0)} changes in{hub.last_result.errors?.length ? ` · ${hub.last_result.errors.length} errors` : ''}</b></div>}
+            {hub.last_result?.errors?.length ? <div className="span2"><span>Errors</span><b className="bad sm">{hub.last_result.errors.join(' · ')}</b></div> : null}
+            <div className="span2 row" style={{ marginTop: 6 }}>
+              <button className="btn-sm primary" disabled={!hub.pipeline_id || busy === 'hs_sync'} onClick={async () => { setBusy('hs_sync'); const r = await ownerFn({ action: 'hubspot_sync' }); setBusy(null); setHsRes(r); say(r, `Synced — ${r.pushed} accounts and ${r.activities} activities to HubSpot, ${(r.pulled?.contacts || 0) + (r.pulled?.deals || 0) + (r.pulled?.activities || 0)} changes back.`); }}>{busy === 'hs_sync' ? 'Syncing…' : 'Sync now'}</button>
+              <button className="btn-sm" disabled={!hub.pipeline_id || busy === 'hs_sync'} title="Pushes every worked account again (first run, or after changing stages in HubSpot by hand)" onClick={async () => { if (!confirm('Push every worked account to HubSpot again? Safe — nothing is duplicated — but it takes a few minutes.')) return; setBusy('hs_sync'); const r = await ownerFn({ action: 'hubspot_sync', full: true }); setBusy(null); setHsRes(r); say(r, `Full sync done — ${r.pushed} accounts, ${r.activities} activities.`); }}>Full sync</button>
+              {hub.portal_id && <a className="btn-sm" href={`https://app.hubspot.com/contacts/${hub.portal_id}/objects/0-1/views/all/list`} target="_blank" rel="noreferrer">Open HubSpot ↗</a>}
+            </div>
+            {hsRes?.errors?.length ? <div className="span2 sm bad">{hsRes.errors.join(' · ')}</div> : null}
+          </div>
+        </div>
+      </div>
       <div className="card">
         <h3>QuickBooks app keys</h3>
         <p className="hint">Production Client ID + Secret from the Intuit developer app (redirect URI <code className="mono">https://dashboard.shipbay3pl.com/oauth/qbo</code>). {status.qbo_keys_set ? 'Keys saved.' : 'Not set yet.'}{status.qbo?.connected_at ? ` Connected to ${status.qbo.company_name || 'QuickBooks'}.` : ''}</p>

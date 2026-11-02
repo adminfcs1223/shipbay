@@ -58,6 +58,32 @@ export async function winLead(lead, quotes, say) {
 export async function findExisting({ email, domain, company }) { const { data } = await supabase.rpc('find_lead', { p_email: email || '', p_domain: domain || '', p_company: company || '' }); return data || null; }
 const firstName = (l) => (l?.contact_name || '').split(' ')[0] || '';
 
+
+/** all CRM data + the shared actions — used by the HubSpot-style shell (Hub) and the legacy tabbed shell below */
+export function useCrm({ me, rep }) {
+  const [leads, setLeads] = useState(null); const [sources, setSources] = useState([]); const [sends, setSends] = useState([]); const [people, setPeople] = useState([]);
+  const [mail, setMail] = useState([]); const [mailAccts, setMailAccts] = useState([]); const [quotes, setQuotes] = useState([]); const [orgs, setOrgs] = useState([]); const [calls, setCalls] = useState([]); const [meetings, setMeetings] = useState([]); const [touches, setTouches] = useState([]);
+  const [msg, setMsg] = useState(() => { const h = window.location.hash; if (!h.startsWith('#sales=gmail')) return null; const [, ok, m] = h.slice(7).split('|'); history.replaceState(null, '', window.location.pathname); return { kind: ok === 'ok' ? 'ok' : 'err', text: decodeURIComponent(m || '') }; });
+  useEffect(() => { supabase.from('profiles').select('id, full_name, email, is_sales, is_owner, hs_owner_id').like('role', 'shipbay%').eq('active', true).then(({ data }) => setPeople((data || []).filter((p) => p.is_sales || p.is_owner))); }, []);
+  const load = async () => {
+    const [qs, os] = await Promise.all([supabase.from('quotes').select('id, company, label, status, internal_only, org_id, lead_id, model, inputs, rates, costs, services, scenarios, updated_at'), supabase.from('orgs').select('id, name, slug, status, contact_email, sales_rep_id')]);
+    setQuotes(qs.data || []); setOrgs(os.data || []);
+    const [l, s, e, g, ga, c, m, t] = await Promise.all([fetchAll('sales_leads', '*', (qq) => qq.order('created_at', { ascending: false })), fetchAll('sales_sources'), fetchAll('sales_email_sends', '*', (qq) => qq.order('sent_at', { ascending: false })),
+      fetchAll('gmail_messages', 'id, user_id, gmail_id, thread_id, message_id_hdr, from_email, from_name, to_email, subject, snippet, at, is_sent, lead_id, read_at, hidden', (qq) => qq.order('at', { ascending: false })), supabase.from('v_gmail_accounts').select('*'),
+      fetchAll('sales_calls', '*', (qq) => qq.order('started_at', { ascending: false })), fetchAll('sales_meetings', '*', (qq) => qq.order('starts_at', { ascending: false })), fetchAll('sales_touches', '*', (qq) => qq.order('at', { ascending: false }))]);
+    setLeads(l); setSources(s); setSends(e); setMail(g); setMailAccts(ga.data || []); setCalls(c); setMeetings(m); setTouches(t);
+  };
+  useEffect(() => { load(); }, []);
+  const say = (r, ok) => { if (r?.error) setMsg({ kind: 'err', text: r.error }); else if (ok) setMsg({ kind: 'ok', text: ok }); };
+  const mine = useMemo(() => (rep ? (leads || []).filter((l) => l.assigned_to === me.id) : leads || []), [leads, rep, me.id]);
+  const mineIds = useMemo(() => new Set(mine.map((l) => l.id)), [mine]);
+  const mySends = useMemo(() => (rep ? sends.filter((s) => mineIds.has(s.lead_id)) : sends), [sends, mineIds, rep]);
+  const counts = useMemo(() => { const c = { total: 0 }; for (const l of mine) { c.total++; c[l.stage] = (c[l.stage] || 0) + 1; } return c; }, [mine]);
+  const stopped = useMemo(() => new Set((leads || []).filter((l) => l.stage === 'dnc').map((l) => l.id)), [leads]);
+  const unread = mySends.filter((s) => s.replied && !s.read_at && !s.bounced && !s.mailbox && !stopped.has(s.lead_id)).length + mail.filter((m) => m.user_id === me.id && !m.is_sent && !m.read_at && !m.hidden).length;
+  return { leads, sources, sends, people, mail, mailAccts, quotes, orgs, calls, meetings, touches, msg, setMsg, say, reload: load, mine, mySends, counts, unread };
+}
+
 export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
   const [sub, setSub] = useState(() => (window.location.hash.startsWith('#sales=gmail') ? 'settings' : 'overview'));
   const [leads, setLeads] = useState(null); const [sources, setSources] = useState([]); const [sends, setSends] = useState([]);
@@ -120,7 +146,7 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
 }
 
 /* =================== Dashboard =================== */
-function Overview({ me, rep, leads, pool, sends, sources, counts, go, goTab, openLead, nav }) {
+export function Overview({ me, rep, leads, pool, sends, sources, counts, go, goTab, openLead, nav }) {
   const [calls, setCalls] = useState([]);
   useEffect(() => { fetchAll('sales_calls', 'id, lead_id, outcome, started_at, seconds, by_user').then((c) => setCalls(rep ? c.filter((x) => x.by_user === me.id) : c)); }, []);
   const available = (pool || leads).filter((l) => l.stage === 'new' && !l.assigned_to && l.phone).length;
@@ -193,7 +219,7 @@ function Overview({ me, rep, leads, pool, sends, sources, counts, go, goTab, ope
   );
 }
 /* Your accounts: the clients this rep owns (orgs.sales_rep_id), with onboarding progress; opens Onboarding for that brand */
-function Accounts({ me, rep, nav }) {
+export function Accounts({ me, rep, nav }) {
   const [rows, setRows] = useState(null);
   useEffect(() => { supabase.from('v_onboarding_progress').select('*').order('created_at', { ascending: false }).then(async ({ data }) => { const { data: orgs } = await supabase.from('orgs').select('id, sales_rep_id, sales_rep, go_live_date, go_live_status, contact_name, contact_email, founding_account'); setRows((data || []).map((a) => ({ ...a, ...(orgs || []).find((o) => o.id === a.org_id) }))); }); }, []);
   if (rows === null) return <div className="card"><div className="cardhead"><h3>Your accounts</h3></div><div className="empty">Loading…</div></div>;
@@ -234,7 +260,7 @@ export function byListRows(leads) {
 
 /* =================== Pipeline: the deals board =================== */
 const COLS = [['contacted', 'Contacted'], ['replied', 'Replied'], ['call_booked', 'Call booked'], ['quoted', 'Quoted'], ['signed', 'Won']];
-function Pipeline({ me, rep, leads, sources, people, reload, say, openLead, quotes }) {
+export function Pipeline({ me, rep, leads, sources, people, reload, say, openLead, quotes }) {
   const val = (l) => expectedMonthly(l, quotes).value || 0;
   const [adding, setAdding] = useState(false); const [src, setSrc] = useState(''); const [list, setList] = useState(''); const [who, setWho] = useState(''); const [sort, setSort] = useState('value'); const [more, setMore] = useState({}); const [drag, setDrag] = useState(null); const [over, setOver] = useState(null);
   const pool = leads.filter((l) => (!src || l.source === src) && (!list || l.filter_id === list) && (!who || (who === 'none' ? !l.assigned_to : l.assigned_to === who)));
@@ -288,7 +314,7 @@ function Pipeline({ me, rep, leads, sources, people, reload, say, openLead, quot
 
 
 /* =================== Master =================== */
-function Master({ me, rep, leads, sources, reload, say, openLead }) {
+export function Master({ me, rep, leads, sources, reload, say, openLead }) {
   const [dupes, setDupes] = useState(false); const dupeGroups = useMemo(() => findDupes(leads), [leads]);
   const [q, setQ] = useState(''); const [src, setSrc] = useState(''); const [stage, setStage] = useState(''); const [list, setList] = useState(''); const [phoneOnly, setPhoneOnly] = useState(false); const [showOut, setShowOut] = useState(false); const [pushing, setPushing] = useState(false);
   const [adding, setAdding] = useState(false); const [importing, setImporting] = useState(false);
@@ -489,7 +515,7 @@ export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say,
 
 /* =================== Conversations: the reply inbox =================== */
 /* =================== Conversations: SB Blast (Smartlead replies) or Email (your own Gmail) =================== */
-function Conversations(props) {
+export function Conversations(props) {
   const { focus, sends, mailAccts, me } = props;
   const [src, setSrc] = useState(() => { try { return localStorage.getItem('shipbay-conv-src') || 'blast'; } catch { return 'blast'; } });
   const pick = (v) => { setSrc(v); try { localStorage.setItem('shipbay-conv-src', v); } catch { /* ignore */ } };
@@ -882,7 +908,7 @@ const OUTCOMES = [['no_answer', 'No answer', ''], ['voicemail', 'Voicemail', '']
 const PICKUP = new Set(['gatekeeper', 'connected', 'booked', 'not_fit']); const CONNECT = new Set(['connected', 'booked', 'not_fit']);
 const grade = (bookedPer100, dials) => (dials < 30 ? '—' : bookedPer100 >= 3 ? 'A' : bookedPer100 >= 1.5 ? 'B' : bookedPer100 >= 0.5 ? 'C' : 'D');
 
-function Calls({ me, rep, leads, people, reload, say, openLead }) {
+export function Calls({ me, rep, leads, people, reload, say, openLead }) {
   const [list, setList] = useState(''); const [who, setWho] = useState(''); const kit = useReplyKit(me); const booking = kit.booking; const [calls, setCalls] = useState([]); const [sessions, setSessions] = useState([]);
   const [session, setSession] = useState(() => { try { return JSON.parse(sessionStorage.getItem('shipbay-call-session') || 'null'); } catch { return null; } });
   const [cur, setCur] = useState(null); const [callStart, setCallStart] = useState(null); const [note, setNote] = useState(''); const [tick, setTick] = useState(0); const [skipped, setSkipped] = useState([]);
@@ -1000,7 +1026,7 @@ function Board({ s, time }) {
 
 
 /* =================== Bonus =================== */
-function Bonus({ me, rep, leads, people, go }) {
+export function Bonus({ me, rep, leads, people, go }) {
   const [goals] = useGoals(); const [calls, setCalls] = useState([]);
   useEffect(() => { fetchAll('sales_calls', 'id, lead_id, outcome, started_at, by_user').then(setCalls); }, []);
   if (!goals) return <div className="card"><div className="empty">Loading…</div></div>;
@@ -1024,7 +1050,7 @@ function Bonus({ me, rep, leads, people, go }) {
 
 
 /* =================== Settings: my reply template + my Gmail =================== */
-function RepSettings({ me, rep, people, say, status }) {
+export function RepSettings({ me, rep, people, say, status }) {
   const booking = useBookingLink();
   const [t, setT] = useState(null); const [saving, setSaving] = useState(false); const [accts, setAccts] = useState([]); const [busy, setBusy] = useState(false);
   const load = async () => {

@@ -19,7 +19,7 @@ const json = (b: unknown, status = 200) => Response.json(b, { status, headers: c
 const DASH = 'https://dashboard.shipbay3pl.com/';
 const QBO_REDIRECT = 'https://dashboard.shipbay3pl.com/oauth/qbo';
 const QBO_API = 'https://quickbooks.api.intuit.com';
-const SECRET_KEYS = new Set(['QBO_CLIENT_ID', 'QBO_CLIENT_SECRET', 'SMARTLEAD_API_KEY', 'SMARTLEAD_CAMPAIGNS', 'CALENDLY_TOKEN', 'GCAL_ICS_URL', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']);
+const SECRET_KEYS = new Set(['QBO_CLIENT_ID', 'QBO_CLIENT_SECRET', 'SMARTLEAD_API_KEY', 'SMARTLEAD_CAMPAIGNS', 'CALENDLY_TOKEN', 'GCAL_ICS_URL', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'HUBSPOT_TOKEN']);
 const GOOGLE_REDIRECT = 'https://dashboard.shipbay3pl.com/oauth/google';
 const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email';
 const SL = 'https://server.smartlead.ai/api/v1';
@@ -380,6 +380,213 @@ async function gmailSend(uid: string, b: any) {
   return { ok: true, id: j.id, thread_id: j.threadId };
 }
 
+
+// ============================================================ HubSpot: the system of record ============================================================
+// Portal ↔ HubSpot, both ways. Accounts (sales_leads) ↔ company + contact + deal; calls / touches / meetings / mailbox ↔ engagements.
+// The cold list stays out: only accounts that were worked (stage past New) or came from a non-cold channel are pushed.
+const HS = 'https://api.hubapi.com';
+const HS_STAGES: [string, string, number][] = [['contacted', 'Contacted', 0.1], ['replied', 'Replied', 0.25], ['call_booked', 'Call booked', 0.4], ['quoted', 'Quoted', 0.6], ['signed', 'Closed won', 1], ['lost', 'Closed lost', 0]];
+const HS_LEAD_STATUS: Record<string, string> = { new: 'NEW', contacted: 'ATTEMPTED_TO_CONTACT', replied: 'OPEN', call_booked: 'IN_PROGRESS', quoted: 'OPEN_DEAL', signed: 'CONNECTED', lost: 'UNQUALIFIED', dnc: 'UNQUALIFIED' };
+const HS_OUTCOME: Record<string, string> = { connected: 'Connected', voicemail: 'Left voicemail', no_answer: 'No answer', gatekeeper: 'Left live message', booked: 'Connected', not_fit: 'Connected', wrong_number: 'Wrong number', busy: 'Busy' };
+let hsDispositions: Record<string, string> | null = null;
+async function hs(path: string, init: RequestInit = {}, tok?: string) {
+  const token = tok || await secret('HUBSPOT_TOKEN'); if (!token) throw new Error('HubSpot token is missing — paste it under Admin → Connections.');
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const r = await fetch(`${HS}${path}`, { ...init, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers || {}) } });
+    if (r.status === 429) { await new Promise((res) => setTimeout(res, 1100 * (attempt + 1))); continue; }
+    const text = await r.text(); let j: any = null; try { j = text ? JSON.parse(text) : null; } catch { j = { raw: text }; }
+    if (!r.ok) { const e: any = new Error(`HubSpot ${r.status} on ${path}: ${(j?.message || text || '').slice(0, 220)}`); e.status = r.status; e.body = j; throw e; }
+    return j;
+  }
+  throw new Error('HubSpot rate limit — try again in a minute.');
+}
+const hsCfg = async () => (await getSetting('hubspot')) || {};
+const saveHsCfg = (c: unknown) => setSetting('hubspot', c);
+const hsPortal = async () => { const c = await hsCfg(); return c.portal_id ? `https://app.hubspot.com/contacts/${c.portal_id}` : null; };
+
+/** one-time: pipeline with the portal's stages, custom properties, owner map, portal id */
+async function hubspotSetup() {
+  const cfg = await hsCfg();
+  const acct = await hs('/account-info/v3/details'); cfg.portal_id = acct.portalId; cfg.timezone = acct.timeZone;
+  // pipeline
+  const pipes = await hs('/crm/v3/pipelines/deals');
+  let pipe = (pipes.results || []).find((p: any) => p.id === cfg.pipeline_id) || (pipes.results || []).find((p: any) => p.label === 'ShipBay Sales');
+  if (!pipe) pipe = await hs('/crm/v3/pipelines/deals', { method: 'POST', body: JSON.stringify({ label: 'ShipBay Sales', displayOrder: 0, stages: HS_STAGES.map(([, label, p], i) => ({ label, displayOrder: i, metadata: { probability: String(p) } })) }) });
+  const have = new Map<string, string>((pipe.stages || []).map((st: any) => [st.label, st.id]));
+  for (const [k, label, p] of HS_STAGES) if (!have.has(label)) { const st = await hs(`/crm/v3/pipelines/deals/${pipe.id}/stages`, { method: 'POST', body: JSON.stringify({ label, displayOrder: have.size, metadata: { probability: String(p) } }) }); have.set(label, st.id); }
+  cfg.pipeline_id = pipe.id; cfg.stage_ids = Object.fromEntries(HS_STAGES.map(([k, label]) => [k, have.get(label)])); cfg.stage_keys = Object.fromEntries(HS_STAGES.map(([k, label]) => [have.get(label), k]));
+  // custom properties so a record always points back at its portal row
+  const ensureProp = async (obj: string, name: string, label: string, group: string) => { try { await hs(`/crm/v3/properties/${obj}/${name}`); } catch (e: any) { if (e.status !== 404) throw e; await hs(`/crm/v3/properties/${obj}`, { method: 'POST', body: JSON.stringify({ name, label, type: 'string', fieldType: 'text', groupName: group }) }); } };
+  await ensureProp('contacts', 'shipbay_account_id', 'ShipBay account id', 'contactinformation');
+  await ensureProp('contacts', 'shipbay_source', 'ShipBay channel', 'contactinformation');
+  await ensureProp('contacts', 'shipbay_list', 'ShipBay list', 'contactinformation');
+  await ensureProp('companies', 'shipbay_account_id', 'ShipBay account id', 'companyinformation');
+  await ensureProp('deals', 'shipbay_account_id', 'ShipBay account id', 'dealinformation');
+  // owners ↔ staff by email
+  const owners = await hs('/crm/v3/owners?limit=100'); const { data: staff } = await admin.from('profiles').select('id, email').like('role', 'shipbay%');
+  cfg.owners = {}; cfg.owner_users = {};
+  for (const o of owners.results || []) { const p = (staff || []).find((x: any) => String(x.email).toLowerCase() === String(o.email).toLowerCase()); if (p) { cfg.owners[p.id] = String(o.id); cfg.owner_users[String(o.id)] = p.id; await admin.from('profiles').update({ hs_owner_id: String(o.id) }).eq('id', p.id); } }
+  cfg.setup_at = new Date().toISOString(); await saveHsCfg(cfg); return cfg;
+}
+const hsMoney = (v: unknown) => (v == null || v === '' ? undefined : String(Math.round(Number(v) || 0)));
+const splitName = (n: string) => { const parts = String(n || '').trim().split(/\s+/); return { firstname: parts.shift() || '', lastname: parts.join(' ') }; };
+const pushable = (l: any) => l.stage !== 'new' || !['cold_email', 'cold_call'].includes(l.source);
+/** portal → HubSpot for one account: company (by domain), contact (by email), deal (stage past New) */
+async function hsPushLead(l: any, cfg: any) {
+  const owner = l.assigned_to ? cfg.owners?.[l.assigned_to] : undefined;
+  const patch: any = { hs_synced_at: new Date().toISOString() };
+  // company
+  if (l.company || l.domain) {
+    const props: any = { name: l.company || l.domain, domain: l.domain || undefined, phone: l.phone || undefined, city: l.city || undefined, state: l.state || undefined, shipbay_account_id: l.id, hubspot_owner_id: owner, description: l.notes ? String(l.notes).slice(0, 5000) : undefined };
+    let cid = l.hs_company_id;
+    if (!cid && l.domain) { const f = await hs('/crm/v3/objects/companies/search', { method: 'POST', body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'domain', operator: 'EQ', value: l.domain.toLowerCase() }] }], limit: 1 }) }); cid = f.results?.[0]?.id; }
+    if (!cid) { const f = await hs('/crm/v3/objects/companies/search', { method: 'POST', body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'shipbay_account_id', operator: 'EQ', value: l.id }] }], limit: 1 }) }); cid = f.results?.[0]?.id; }
+    if (cid) await hs(`/crm/v3/objects/companies/${cid}`, { method: 'PATCH', body: JSON.stringify({ properties: props }) }); else cid = (await hs('/crm/v3/objects/companies', { method: 'POST', body: JSON.stringify({ properties: props }) })).id;
+    patch.hs_company_id = String(cid);
+  }
+  // contact
+  if (l.email || l.contact_name) {
+    const props: any = { ...splitName(l.contact_name || ''), email: l.email || undefined, phone: l.phone || undefined, jobtitle: l.title || undefined, city: l.city || undefined, state: l.state || undefined, company: l.company || undefined, website: l.domain || undefined, hs_lead_status: HS_LEAD_STATUS[l.stage] || 'NEW', lifecyclestage: l.stage === 'signed' ? 'customer' : ['quoted', 'call_booked'].includes(l.stage) ? 'opportunity' : l.stage === 'replied' ? 'salesqualifiedlead' : 'lead', shipbay_account_id: l.id, shipbay_source: l.source, shipbay_list: l.filter_id || undefined, hubspot_owner_id: owner };
+    let pid = l.hs_contact_id;
+    if (!pid && l.email) { const f = await hs('/crm/v3/objects/contacts/search', { method: 'POST', body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'email', operator: 'EQ', value: l.email.toLowerCase() }] }], limit: 1 }) }); pid = f.results?.[0]?.id; }
+    try { if (pid) await hs(`/crm/v3/objects/contacts/${pid}`, { method: 'PATCH', body: JSON.stringify({ properties: props }) }); else pid = (await hs('/crm/v3/objects/contacts', { method: 'POST', body: JSON.stringify({ properties: props }) })).id; }
+    catch (e: any) { const m = String(e.message).match(/Existing ID:\s*(\d+)/); if (!m) throw e; pid = m[1]; await hs(`/crm/v3/objects/contacts/${pid}`, { method: 'PATCH', body: JSON.stringify({ properties: props }) }); }
+    patch.hs_contact_id = String(pid);
+    if (patch.hs_company_id) await hs(`/crm/v4/objects/contacts/${pid}/associations/default/companies/${patch.hs_company_id}`, { method: 'PUT' }).catch(() => {});
+  }
+  // deal
+  const stageId = cfg.stage_ids?.[l.stage];
+  if (stageId && cfg.pipeline_id) {
+    const { data: q } = await admin.from('quotes').select('inputs, rates, model, status, internal_only').eq('lead_id', l.id).eq('internal_only', false).neq('status', 'superseded').order('updated_at', { ascending: false }).limit(1).maybeSingle();
+    const monthly = l.deal_value != null ? Number(l.deal_value) : null;
+    const props: any = { dealname: `${l.company || l.email} — fulfillment`, pipeline: cfg.pipeline_id, dealstage: stageId, amount: monthly != null ? hsMoney(monthly * 12) : undefined, hubspot_owner_id: owner, shipbay_account_id: l.id, closedate: l.won_at || undefined, description: monthly != null ? `Expected services ${Math.round(monthly)}/mo (annualized amount)${q ? ' · quote in the portal' : ''}` : undefined };
+    let did = l.hs_deal_id;
+    if (!did) { const f = await hs('/crm/v3/objects/deals/search', { method: 'POST', body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'shipbay_account_id', operator: 'EQ', value: l.id }] }], limit: 1 }) }); did = f.results?.[0]?.id; }
+    if (did) await hs(`/crm/v3/objects/deals/${did}`, { method: 'PATCH', body: JSON.stringify({ properties: props }) }); else did = (await hs('/crm/v3/objects/deals', { method: 'POST', body: JSON.stringify({ properties: props }) })).id;
+    patch.hs_deal_id = String(did);
+    if (patch.hs_contact_id) await hs(`/crm/v4/objects/deals/${did}/associations/default/contacts/${patch.hs_contact_id}`, { method: 'PUT' }).catch(() => {});
+    if (patch.hs_company_id) await hs(`/crm/v4/objects/deals/${did}/associations/default/companies/${patch.hs_company_id}`, { method: 'PUT' }).catch(() => {});
+  }
+  await admin.from('sales_leads').update(patch).eq('id', l.id);
+  return { ...l, ...patch };
+}
+const assoc = (cid?: string, did?: string, kind = 'contacts') => [...(cid ? [{ to: { id: cid }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: kind === 'notes' ? 202 : kind === 'calls' ? 194 : kind === 'emails' ? 198 : kind === 'meetings' ? 200 : 202 }] }] : []), ...(did ? [{ to: { id: did }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: kind === 'notes' ? 214 : kind === 'calls' ? 206 : kind === 'emails' ? 210 : kind === 'meetings' ? 212 : 214 }] }] : [])];
+/** portal → HubSpot engagements for an account */
+async function hsPushActivity(l: any, cfg: any, since: string | null) {
+  const owner = l.assigned_to ? cfg.owners?.[l.assigned_to] : undefined; let n = 0;
+  const { data: calls } = await admin.from('sales_calls').select('*').eq('lead_id', l.id).is('hs_id', null);
+  for (const c of calls || []) {
+    const r = await hs('/crm/v3/objects/calls', { method: 'POST', body: JSON.stringify({ properties: { hs_timestamp: c.started_at, hs_call_title: `Call — ${c.outcome.replace('_', ' ')}`, hs_call_body: c.note || '', hs_call_duration: String((c.seconds || 0) * 1000), hs_call_status: 'COMPLETED', hs_call_direction: 'OUTBOUND', hubspot_owner_id: cfg.owners?.[c.by_user] || owner }, associations: assoc(l.hs_contact_id, l.hs_deal_id, 'calls') }) });
+    await admin.from('sales_calls').update({ hs_id: String(r.id) }).eq('id', c.id); n++;
+  }
+  const { data: touches } = await admin.from('sales_touches').select('*').eq('lead_id', l.id).is('hs_id', null);
+  for (const t of touches || []) {
+    if (t.kind === 'email_sent' && String(t.note || '').startsWith('gmail:')) { await admin.from('sales_touches').update({ hs_id: 'skip' }).eq('id', t.id); continue; }   // the mailbox row carries it
+    const isNote = t.kind !== 'email_sent';
+    const r = isNote
+      ? await hs('/crm/v3/objects/notes', { method: 'POST', body: JSON.stringify({ properties: { hs_timestamp: t.at, hs_note_body: `${t.kind === 'sms' ? 'SMS: ' : t.kind === 'meeting_note' ? 'Meeting note: ' : ''}${t.note || ''}`, hubspot_owner_id: cfg.owners?.[t.by_user] || owner }, associations: assoc(l.hs_contact_id, l.hs_deal_id, 'notes') }) })
+      : await hs('/crm/v3/objects/emails', { method: 'POST', body: JSON.stringify({ properties: { hs_timestamp: t.at, hs_email_direction: 'EMAIL', hs_email_status: 'SENT', hs_email_subject: 'Email sent (logged in portal)', hs_email_text: t.note || '', hubspot_owner_id: cfg.owners?.[t.by_user] || owner }, associations: assoc(l.hs_contact_id, l.hs_deal_id, 'emails') }) });
+    await admin.from('sales_touches').update({ hs_id: String(r.id) }).eq('id', t.id); n++;
+  }
+  const { data: mails } = await admin.from('gmail_messages').select('*').eq('lead_id', l.id).is('hs_id', null).order('at').limit(50);
+  for (const m of mails || []) {
+    const r = await hs('/crm/v3/objects/emails', { method: 'POST', body: JSON.stringify({ properties: { hs_timestamp: m.at, hs_email_direction: m.is_sent ? 'EMAIL' : 'INCOMING_EMAIL', hs_email_status: 'SENT', hs_email_subject: m.subject || '', hs_email_text: (m.body || m.snippet || '').slice(0, 60000), hs_email_headers: JSON.stringify({ from: { email: m.from_email, firstName: m.from_name || '' }, to: String(m.to_email || '').split(',').map((e: string) => ({ email: e.trim() })).filter((x: any) => x.email) }), hubspot_owner_id: cfg.owners?.[m.user_id] || owner }, associations: assoc(l.hs_contact_id, l.hs_deal_id, 'emails') }) });
+    await admin.from('gmail_messages').update({ hs_id: String(r.id) }).eq('id', m.id); n++;
+  }
+  const { data: sends } = await admin.from('sales_email_sends').select('*').eq('lead_id', l.id).eq('replied', true).is('mailbox', null).gt('reply_at', since || '2000-01-01').limit(20);
+  for (const s of sends || []) {
+    const key = `sl:${s.id}`; const { data: dup } = await admin.from('sales_touches').select('id').eq('hs_id', key).maybeSingle(); if (dup) continue;
+    await hs('/crm/v3/objects/emails', { method: 'POST', body: JSON.stringify({ properties: { hs_timestamp: s.reply_at, hs_email_direction: 'INCOMING_EMAIL', hs_email_status: 'SENT', hs_email_subject: s.reply_subject || `Re: ${s.subject || ''}`, hs_email_text: (s.reply_body || '').slice(0, 60000), hubspot_owner_id: owner }, associations: assoc(l.hs_contact_id, l.hs_deal_id, 'emails') }) });
+    await admin.from('sales_touches').insert({ lead_id: l.id, kind: 'note', note: `Smartlead reply mirrored to HubSpot`, at: s.reply_at, by_user: null, hs_id: key }); n++;
+  }
+  const { data: meets } = await admin.from('sales_meetings').select('*').eq('lead_id', l.id).is('hs_id', null);
+  for (const m of meets || []) {
+    const r = await hs('/crm/v3/objects/meetings', { method: 'POST', body: JSON.stringify({ properties: { hs_timestamp: m.starts_at, hs_meeting_title: m.name || 'Sales call', hs_meeting_start_time: m.starts_at, hs_meeting_end_time: m.ends_at || m.starts_at, hs_meeting_body: [m.location, m.notes, m.outcome].filter(Boolean).join('\n'), hs_meeting_outcome: m.status === 'canceled' ? 'CANCELED' : new Date(m.starts_at) < new Date() ? 'COMPLETED' : 'SCHEDULED', hubspot_owner_id: cfg.owners?.[m.assigned_to] || owner }, associations: assoc(l.hs_contact_id, l.hs_deal_id, 'meetings') }) });
+    await admin.from('sales_meetings').update({ hs_id: String(r.id) }).eq('id', m.id); n++;
+  }
+  return n;
+}
+/** HubSpot → portal: contacts / companies / deals / engagements changed since the last pull */
+async function hsPull(cfg: any) {
+  const since = cfg.last_pull ? new Date(new Date(cfg.last_pull).getTime() - 120000).toISOString() : '2000-01-01T00:00:00Z';
+  const ms = String(new Date(since).getTime()); const out = { contacts: 0, deals: 0, companies: 0, activities: 0, created: 0 };
+  const search = async (obj: string, props: string[]) => { const rows: any[] = []; let after: string | undefined; for (let i = 0; i < 10; i++) { const j = await hs(`/crm/v3/objects/${obj}/search`, { method: 'POST', body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'hs_lastmodifieddate', operator: 'GTE', value: ms }] }], properties: props, sorts: [{ propertyName: 'hs_lastmodifieddate', direction: 'ASCENDING' }], limit: 100, ...(after ? { after } : {}) }) }); rows.push(...(j.results || [])); after = j.paging?.next?.after; if (!after) break; } return rows; };
+  // contacts
+  for (const c of await search('contacts', ['firstname', 'lastname', 'email', 'phone', 'jobtitle', 'company', 'website', 'city', 'state', 'hs_lead_status', 'hubspot_owner_id', 'shipbay_account_id', 'lifecyclestage'])) {
+    const p = c.properties; const email = (p.email || '').toLowerCase();
+    let { data: l } = await admin.from('sales_leads').select('*').eq('hs_contact_id', String(c.id)).maybeSingle();
+    if (!l && p.shipbay_account_id) ({ data: l } = await admin.from('sales_leads').select('*').eq('id', p.shipbay_account_id).maybeSingle());
+    if (!l && email) { const { data: id } = await admin.rpc('find_lead', { p_email: email, p_domain: '', p_company: p.company || '' }); if (id) ({ data: l } = await admin.from('sales_leads').select('*').eq('id', id).maybeSingle()); }
+    const domain = (p.website || '').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '').toLowerCase() || null;
+    const fields: any = { contact_name: [p.firstname, p.lastname].filter(Boolean).join(' ') || undefined, email: email || undefined, phone: p.phone || undefined, title: p.jobtitle || undefined, city: p.city || undefined, state: p.state || undefined, hs_contact_id: String(c.id), hs_owner_id: p.hubspot_owner_id || undefined, assigned_to: cfg.owner_users?.[p.hubspot_owner_id] || undefined, hs_synced_at: new Date().toISOString() };
+    Object.keys(fields).forEach((k) => fields[k] === undefined && delete fields[k]);
+    if (l) { await admin.from('sales_leads').update(fields).eq('id', l.id); out.contacts++; }
+    else if (email || p.company) { const { data: ins } = await admin.from('sales_leads').insert({ ...fields, company: p.company || (domain ? domain.split('.')[0] : null) || email, domain, source: 'inbound', stage: p.lifecyclestage === 'customer' ? 'signed' : p.hs_lead_status === 'UNQUALIFIED' ? 'lost' : 'new', notes: 'Created in HubSpot.', last_touch_at: new Date().toISOString() }).select('id').single(); if (ins) { await hs(`/crm/v3/objects/contacts/${c.id}`, { method: 'PATCH', body: JSON.stringify({ properties: { shipbay_account_id: ins.id } }) }).catch(() => {}); out.created++; } }
+  }
+  // companies: name / domain / phone changes on linked accounts
+  for (const c of await search('companies', ['name', 'domain', 'phone', 'city', 'state', 'shipbay_account_id', 'hubspot_owner_id'])) {
+    const p = c.properties; const { data: l } = await admin.from('sales_leads').select('id, domain').eq('hs_company_id', String(c.id)).maybeSingle(); if (!l) continue;
+    const fields: any = { company: p.name || undefined, phone: p.phone || undefined, city: p.city || undefined, state: p.state || undefined, hs_synced_at: new Date().toISOString() }; if (p.domain && !l.domain) fields.domain = p.domain.toLowerCase();
+    Object.keys(fields).forEach((k) => fields[k] === undefined && delete fields[k]); await admin.from('sales_leads').update(fields).eq('id', l.id); out.companies++;
+  }
+  // deals: stage + amount + owner
+  for (const d of await search('deals', ['dealstage', 'pipeline', 'amount', 'hubspot_owner_id', 'shipbay_account_id', 'closedate'])) {
+    const p = d.properties; if (p.pipeline !== cfg.pipeline_id) continue;
+    let { data: l } = await admin.from('sales_leads').select('id, stage, deal_value, org_id').eq('hs_deal_id', String(d.id)).maybeSingle();
+    if (!l && p.shipbay_account_id) ({ data: l } = await admin.from('sales_leads').select('id, stage, deal_value, org_id').eq('id', p.shipbay_account_id).maybeSingle()); if (!l) continue;
+    const stage = cfg.stage_keys?.[p.dealstage]; const fields: any = { hs_deal_id: String(d.id), hs_synced_at: new Date().toISOString() };
+    if (p.amount) fields.deal_value = Math.round(Number(p.amount) / 12);
+    if (p.hubspot_owner_id && cfg.owner_users?.[p.hubspot_owner_id]) fields.assigned_to = cfg.owner_users[p.hubspot_owner_id];
+    if (stage && stage !== l.stage) { if (stage === 'signed' && !l.org_id) { await admin.from('sales_leads').update(fields).eq('id', l.id); await admin.rpc('win_lead', { p_lead_id: l.id, p_deal_value: fields.deal_value ?? null }); out.deals++; continue; } fields.stage = stage; if (stage === 'signed') fields.won_at = p.closedate || new Date().toISOString(); fields.last_touch_at = new Date().toISOString(); }
+    await admin.from('sales_leads').update(fields).eq('id', l.id); out.deals++;
+  }
+  // engagements created in HubSpot (notes, calls, meetings, logged emails) → portal timeline
+  const leadByContact = async (ids: string[]) => { for (const id of ids) { const { data } = await admin.from('sales_leads').select('id').eq('hs_contact_id', id).maybeSingle(); if (data) return data.id; } return null; };
+  const withAssoc = async (obj: string, id: string) => (await hs(`/crm/v3/objects/${obj}/${id}?associations=contacts&properties=hs_body_preview`)).associations?.contacts?.results?.map((r: any) => String(r.id)) || [];
+  for (const n of await search('notes', ['hs_note_body', 'hs_timestamp', 'hubspot_owner_id', 'hs_created_by_user_id'])) {
+    const { data: dup } = await admin.from('sales_touches').select('id').eq('hs_id', String(n.id)).maybeSingle(); if (dup) continue;
+    const leadId = await leadByContact(await withAssoc('notes', n.id)); if (!leadId) continue;
+    await admin.from('sales_touches').insert({ lead_id: leadId, kind: 'note', note: String(n.properties.hs_note_body || '').replace(/<[^>]+>/g, '').slice(0, 4000), at: n.properties.hs_timestamp, by_user: cfg.owner_users?.[n.properties.hubspot_owner_id] || null, hs_id: String(n.id) }); out.activities++;
+  }
+  for (const c of await search('calls', ['hs_call_title', 'hs_call_body', 'hs_call_duration', 'hs_call_disposition', 'hs_timestamp', 'hubspot_owner_id'])) {
+    const { data: dup } = await admin.from('sales_calls').select('id').eq('hs_id', String(c.id)).maybeSingle(); if (dup) continue;
+    const leadId = await leadByContact(await withAssoc('calls', c.id)); if (!leadId) continue;
+    if (!hsDispositions) { const m: Record<string, string> = {}; try { for (const d of await hs('/calling/v1/dispositions')) m[d.id] = d.label; } catch { /* optional */ } hsDispositions = m; }
+    const label = (hsDispositions as Record<string, string>)[c.properties.hs_call_disposition] || ''; const outcome = /voicemail/i.test(label) ? 'voicemail' : /no answer/i.test(label) ? 'no_answer' : /wrong/i.test(label) ? 'wrong_number' : /busy/i.test(label) ? 'busy' : /live message/i.test(label) ? 'gatekeeper' : 'connected';
+    await admin.from('sales_calls').insert({ lead_id: leadId, started_at: c.properties.hs_timestamp, seconds: Math.round(Number(c.properties.hs_call_duration || 0) / 1000), outcome, note: [c.properties.hs_call_title, String(c.properties.hs_call_body || '').replace(/<[^>]+>/g, '')].filter(Boolean).join(' — ').slice(0, 2000), by_user: cfg.owner_users?.[c.properties.hubspot_owner_id] || null, hs_id: String(c.id) }); 
+    await admin.from('sales_leads').update({ last_touch_at: c.properties.hs_timestamp, last_outcome: outcome }).eq('id', leadId); out.activities++;
+  }
+  for (const m of await search('meetings', ['hs_meeting_title', 'hs_meeting_start_time', 'hs_meeting_end_time', 'hs_meeting_body', 'hs_meeting_outcome', 'hubspot_owner_id'])) {
+    const { data: dup } = await admin.from('sales_meetings').select('id').eq('hs_id', String(m.id)).maybeSingle(); if (dup) continue;
+    const leadId = await leadByContact(await withAssoc('meetings', m.id)); if (!leadId || !m.properties.hs_meeting_start_time) continue;
+    const { data: l } = await admin.from('sales_leads').select('contact_name, email, assigned_to').eq('id', leadId).maybeSingle();
+    await admin.from('sales_meetings').insert({ external_id: `hs:${m.id}`, source: 'hubspot', name: m.properties.hs_meeting_title || 'Meeting', starts_at: m.properties.hs_meeting_start_time, ends_at: m.properties.hs_meeting_end_time || null, status: m.properties.hs_meeting_outcome === 'CANCELED' ? 'canceled' : 'active', invitee_name: l?.contact_name || null, invitee_email: l?.email || null, lead_id: leadId, assigned_to: cfg.owner_users?.[m.properties.hubspot_owner_id] || l?.assigned_to || null, notes: String(m.properties.hs_meeting_body || '').replace(/<[^>]+>/g, '').slice(0, 2000) || null, hs_id: String(m.id) }); out.activities++;
+  }
+  for (const e of await search('emails', ['hs_email_subject', 'hs_email_text', 'hs_email_direction', 'hs_timestamp', 'hubspot_owner_id'])) {
+    const { data: dup1 } = await admin.from('gmail_messages').select('id').eq('hs_id', String(e.id)).maybeSingle(); if (dup1) continue;
+    const { data: dup2 } = await admin.from('sales_touches').select('id').eq('hs_id', String(e.id)).maybeSingle(); if (dup2) continue;
+    const leadId = await leadByContact(await withAssoc('emails', e.id)); if (!leadId) continue;
+    const p = e.properties; const incoming = p.hs_email_direction === 'INCOMING_EMAIL';
+    await admin.from('sales_touches').insert({ lead_id: leadId, kind: incoming ? 'note' : 'email_sent', note: `${incoming ? 'Email received' : 'Email'} (HubSpot): ${p.hs_email_subject || ''}\n${String(p.hs_email_text || '').slice(0, 2000)}`.trim(), at: p.hs_timestamp, by_user: cfg.owner_users?.[p.hubspot_owner_id] || null, hs_id: String(e.id) }); out.activities++;
+  }
+  cfg.last_pull = new Date().toISOString(); await saveHsCfg(cfg); return out;
+}
+/** the whole round trip: pull HubSpot's changes, then push the portal's */
+async function hubspotSync(full = false) {
+  const cfg = await hsCfg(); if (!cfg.pipeline_id) throw new Error('Run HubSpot set-up first (Admin → Connections).');
+  const pulled = await hsPull(cfg);
+  const since = full ? null : cfg.last_push || null;
+  let q = admin.from('sales_leads').select('*').order('updated_at', { ascending: true }).limit(full ? 2000 : 300);
+  if (!full) q = q.or(`hs_synced_at.is.null,updated_at.gt.hs_synced_at`);
+  const { data: leads } = await q; let pushed = 0, acts = 0; const errors: string[] = [];
+  for (const l of leads || []) {
+    if (!pushable(l)) continue;
+    try { const l2 = await hsPushLead(l, cfg); acts += await hsPushActivity(l2, cfg, since); pushed++; } catch (e) { errors.push(`${l.company || l.email}: ${String((e as Error).message).slice(0, 140)}`); if (errors.length > 8) break; }
+  }
+  cfg.last_push = new Date().toISOString(); cfg.last_sync = cfg.last_push; cfg.last_result = { pulled, pushed, acts, errors: errors.slice(0, 5) }; await saveHsCfg(cfg);
+  return { ok: true, pulled, pushed, activities: acts, errors };
+}
+
 // ---------- Calendly ----------
 async function calendlySync(uid: string) {
   const tok = await secret('CALENDLY_TOKEN'); if (!tok) return { error: 'Paste a Calendly personal access token under Settings first.' };
@@ -491,7 +698,7 @@ Deno.serve(async (req) => {
   if (!me) return json({ error: 'not signed in' }, 401);
   const { data: prof } = await admin.from('profiles').select('is_owner, is_sales, role').eq('id', me.id).single();
   const b = await req.json().catch(() => ({}));
-  const REP_ACTIONS = new Set(['smartlead_stop_lead', 'gmail_connect', 'gmail_sync', 'gmail_disconnect', 'gmail_send']);   // sales reps may do these without the owner passphrase
+  const REP_ACTIONS = new Set(['smartlead_stop_lead', 'gmail_connect', 'gmail_sync', 'gmail_disconnect', 'gmail_send', 'hubspot_sync', 'hubspot_push_one', 'hubspot_links']);   // sales reps may do these without the owner passphrase
   const gmailConnect = async () => { const id = await secret('GOOGLE_CLIENT_ID'); if (!id) return json({ error: 'Google app keys are missing.' }, 400); const state = crypto.randomUUID(); await setSetting(`google_state:${state}`, { uid: me.id, at: new Date().toISOString() }); return json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({ client_id: id, redirect_uri: GOOGLE_REDIRECT, response_type: 'code', scope: GOOGLE_SCOPES, access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state })}` }); };
   const repAction = async () => {
     if (b.action === 'smartlead_stop_lead') return json(await smartleadStopLead(String(b.email || '')));
@@ -499,6 +706,9 @@ Deno.serve(async (req) => {
     if (b.action === 'gmail_sync') return json(await gmailSync(me.id, !!prof?.is_owner && !!b.all));
     if (b.action === 'gmail_disconnect') { await admin.from('gmail_accounts').delete().eq('user_id', me.id); return json({ ok: true }); }
     if (b.action === 'gmail_send') return json(await gmailSend(me.id, b));
+    if (b.action === 'hubspot_links') { const c = await hsCfg(); return json({ portal_id: c.portal_id || null, pipeline_id: c.pipeline_id || null, setup: !!c.pipeline_id, last_sync: c.last_sync || null, last_result: c.last_result || null }); }
+    if (b.action === 'hubspot_sync') { try { return json(await hubspotSync(false)); } catch (e) { return json({ error: String((e as Error).message) }, 500); } }
+    if (b.action === 'hubspot_push_one') { try { const cfg = await hsCfg(); const { data: l } = await admin.from('sales_leads').select('*').eq('id', String(b.lead_id)).single(); const l2 = await hsPushLead(l, cfg); await hsPushActivity(l2, cfg, null); return json({ ok: true, hs_contact_id: l2.hs_contact_id, hs_deal_id: l2.hs_deal_id, hs_company_id: l2.hs_company_id }); } catch (e) { return json({ error: String((e as Error).message) }, 500); } }
     return null;
   };
   if (!prof?.is_owner) {
@@ -511,7 +721,7 @@ Deno.serve(async (req) => {
 
   if (b.action === 'status') {
     const { data: qbo } = await admin.from('fin_qbo_status').select('*').eq('id', 1).maybeSingle();
-    return json({ passphrase_set: !!stored, unlocked, qbo, smartlead_key_set: !!(await secret('SMARTLEAD_API_KEY')), smartlead_campaigns: await secret('SMARTLEAD_CAMPAIGNS'), qbo_keys_set: !!(await secret('QBO_CLIENT_ID')) && !!(await secret('QBO_CLIENT_SECRET')), smartlead_last_sync: await getSetting('smartlead_last_sync'), calendly_set: !!(await secret('CALENDLY_TOKEN')), calendly_last_sync: await getSetting('calendly_last_sync'), gcal_set: !!(await secret('GCAL_ICS_URL')), gcal_last_sync: await getSetting('gcal_last_sync'), google_keys_set: !!(await secret('GOOGLE_CLIENT_ID')) && !!(await secret('GOOGLE_CLIENT_SECRET')) });
+    return json({ passphrase_set: !!stored, unlocked, qbo, smartlead_key_set: !!(await secret('SMARTLEAD_API_KEY')), smartlead_campaigns: await secret('SMARTLEAD_CAMPAIGNS'), qbo_keys_set: !!(await secret('QBO_CLIENT_ID')) && !!(await secret('QBO_CLIENT_SECRET')), smartlead_last_sync: await getSetting('smartlead_last_sync'), calendly_set: !!(await secret('CALENDLY_TOKEN')), calendly_last_sync: await getSetting('calendly_last_sync'), gcal_set: !!(await secret('GCAL_ICS_URL')), gcal_last_sync: await getSetting('gcal_last_sync'), google_keys_set: !!(await secret('GOOGLE_CLIENT_ID')) && !!(await secret('GOOGLE_CLIENT_SECRET')), hubspot: { token_set: !!(await secret('HUBSPOT_TOKEN')), ...(await hsCfg()) } });
   }
 
   if (b.action === 'set_passphrase') {
@@ -546,6 +756,9 @@ Deno.serve(async (req) => {
   if (b.action === 'smartlead_stop_lead') { try { return json(await smartleadStopLead(String(b.email || ''))); } catch (e) { return json({ error: String(e) }, 500); } }
   if (b.action === 'smartlead_add_leads') { try { return json(await smartleadAddLeads(Array.isArray(b.lead_ids) ? b.lead_ids : [], b.campaign_id)); } catch (e) { return json({ error: String(e) }, 500); } }
   if (b.action === 'smartlead_schedule') { try { return json(await smartleadSchedule(String(b.campaign_id || ''), !!b.weekends)); } catch (e) { return json({ error: String(e) }, 500); } }
+  if (b.action === 'hubspot_setup') { try { return json({ ok: true, hubspot: await hubspotSetup() }); } catch (e) { return json({ error: String((e as Error).message) }, 500); } }
+  if (b.action === 'hubspot_sync') { try { return json(await hubspotSync(!!b.full)); } catch (e) { return json({ error: String((e as Error).message) }, 500); } }
+  if (b.action === 'hubspot_push_one') { try { const cfg = await hsCfg(); const { data: l } = await admin.from('sales_leads').select('*').eq('id', String(b.lead_id)).single(); const l2 = await hsPushLead(l, cfg); await hsPushActivity(l2, cfg, null); return json({ ok: true, hs_contact_id: l2.hs_contact_id, hs_deal_id: l2.hs_deal_id, hs_company_id: l2.hs_company_id }); } catch (e) { return json({ error: String((e as Error).message) }, 500); } }
   if (b.action === 'gcal_sync') { try { return json(await gcalSync(me.id)); } catch (e) { return json({ error: String(e) }, 500); } }
   if (b.action === 'calendly_sync') { try { return json(await calendlySync(me.id)); } catch (e) { return json({ error: String(e) }, 500); } }
 

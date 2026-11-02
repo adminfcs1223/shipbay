@@ -1231,3 +1231,9 @@ table.bill tr.tot td { font-weight: 800; font-size: 15px; padding-top: 10px; col
 
 /* full pages hosted inside the CRM (Quotes, Onboarding) — their own page head stays, just tucked under the tabs */
 .owner .subpage > .pagehead { margin-top: 4px; }
+
+/* ---- Admin → Connections: HubSpot ---- */
+.owner .hubcard { border-top: 3px solid #FF7A59; }
+.owner .hubgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 24px; align-items: start; }
+.owner .hubgrid .kv .span2 { grid-column: 1 / -1; }
+@media (max-width: 900px) { .owner .hubgrid { grid-template-columns: minmax(0, 1fr); } }
