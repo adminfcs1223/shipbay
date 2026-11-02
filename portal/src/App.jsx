@@ -115,12 +115,12 @@ function SetPassword({ session, onDone }) {
     <div className="split">
       <aside className="brandside">
         <div>
-          <a className="logo" href="https://www.shipbay3pl.com"><img src="/brand/06-horizontal-reverse.svg" alt="shipbay." /></a>
-          <div className="tagline">shipbay.dashboard — client portal</div>
+          <a className="logo" href="https://www.shipbay3pl.com"><img src="/brand/13-mono-horizontal-white.svg" alt="shipbay." /></a>
+          <div className="tagline">The dashboard</div>
         </div>
         <h1>Choose a new password<em>.</em></h1>
-        <p className="sub">You’re signed in as <b style={{ color: '#fff' }}>{session.user?.email}</b>. Pick a password you’ll remember and you’ll go straight to your dashboard.</p>
-        <div className="foot">© 2026 shipbay. · 115 Stryker Ln, Unit 10, Hillsborough Township, NJ</div>
+        <p className="sub">You’re signed in as <b>{session.user?.email}</b>. Pick a password you’ll remember and you’ll go straight to your dashboard.</p>
+        <div className="foot">© 2026 ShipBay 3PL · 115 Stryker Ln, Building 4, Hillsborough, NJ</div>
       </aside>
       <section className="formside">
         <div className="top">&nbsp;</div>
@@ -165,27 +165,27 @@ function SignIn({ note }) {
     <div className="split">
       <aside className="brandside">
         <div>
-          <a className="logo" href="https://www.shipbay3pl.com"><img src="/brand/06-horizontal-reverse.svg" alt="shipbay." /></a>
-          <div className="tagline">shipbay.dashboard — client portal</div>
+          <a className="logo" href="https://www.shipbay3pl.com"><img src="/brand/13-mono-horizontal-white.svg" alt="shipbay." /></a>
+          <div className="tagline">The dashboard</div>
         </div>
-        <h1>Your whole operation,<br />one dashboard<em>.</em></h1>
-        <p className="sub">Live inventory, orders, and itemized billing across your shipbay warehouse — synced straight from your store.</p>
+        <h1>Your orders, inventory and billing. Live<em>.</em></h1>
+        <p className="sub">Everything happening to your brand on our floor in Hillsborough, as it happens — synced from your store, down to the label.</p>
         <div className="mock" aria-hidden="true">
-          <div className="mh"><b>shipbay.dashboard</b><span className="pill">PRODUCT PREVIEW</span></div>
+          <div className="mh"><b>Today on the floor</b><span className="pill">Live</span></div>
           <div className="mstats">
-            <div className="ms"><b>2,847</b><small>Orders today</small></div>
+            <div className="ms"><b>2,847</b><small>Orders shipped</small></div>
             <div className="ms"><b>14,208</b><small>Units on hand</small></div>
-            <div className="ms"><b>99.8%</b><small>Accuracy — 30d</small></div>
+            <div className="ms"><b>99.8%</b><small>Pick accuracy, 30 days</small></div>
           </div>
         </div>
-        <div className="foot">© 2026 shipbay. · 115 Stryker Ln, Hillsborough Township, NJ</div>
+        <div className="foot">© 2026 ShipBay 3PL · 115 Stryker Ln, Building 4, Hillsborough, NJ</div>
       </aside>
 
       <section className="formside">
-        <div className="top">New to shipbay?&nbsp;<a href="https://www.shipbay3pl.com/book">Book a free consultation →</a></div>
+        <div className="top">New to ShipBay?&nbsp;<a href="https://www.shipbay3pl.com/book">Book a call</a></div>
         <form className="formbox" onSubmit={submit}>
-          <h2>Sign in to your portal<span className="dot">.</span></h2>
-          <p className="lead">Track orders, inventory, and billing for your brand.</p>
+          <h2>Sign in<span className="dot">.</span></h2>
+          <p className="lead">Orders, inventory and billing for your brand.</p>
           {msg && <div className={`msg ${msg.kind}`}>{msg.text}</div>}
           <div className="field"><label htmlFor="email">Work email</label><input id="email" type="email" placeholder="you@yourbrand.com" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus /></div>
           <div className="field"><label htmlFor="pw">Password</label><input id="pw" type="password" placeholder="••••••••••" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} required /></div>
@@ -193,10 +193,10 @@ function SignIn({ note }) {
             <label><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Keep me signed in</label>
             <button type="button" className="linkbtn" onClick={reset}>Forgot password?</button>
           </div>
-          <button className="btn" disabled={busy}>{busy ? 'Signing in…' : 'Sign in to shipbay.dashboard'}</button>
-          <div className="signup-note"><b>Don’t have a login yet?</b> Portal access is created by your onboarding manager when your brand goes live with shipbay — or <a href="https://www.shipbay3pl.com/book" style={{ color: 'var(--orange-soft)', fontWeight: 600 }}>book a consultation</a> to get started.</div>
+          <button className="btn" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+          <div className="signup-note"><b>No login yet?</b> Your account manager creates it when your brand goes live with ShipBay — or <a href="https://www.shipbay3pl.com/book" style={{ color: 'var(--ink)', fontWeight: 600 }}>book a call</a> to get started.</div>
         </form>
-        <div className="legal">Trouble signing in? <a href="mailto:derekh@shipbay3pl.com">Contact us</a> · <a href="https://www.shipbay3pl.com">shipbay</a></div>
+        <div className="legal">Trouble signing in? <a href="mailto:derekh@shipbay3pl.com">Email us</a> · <a href="https://www.shipbay3pl.com">shipbay3pl.com</a></div>
       </section>
     </div>
   );
@@ -261,27 +261,28 @@ function Shell({ me }) {
   return (
     <div className="app">
       <aside className="sidenav">
-        <a className="logo" href="/"><img src="/brand/06-horizontal-reverse.svg" alt="shipbay." /></a>
-        <div className="tagline">shipbay.dashboard</div>
+        <a className="logo" href="/"><img src="/brand/01-horizontal.svg" alt="shipbay." /></a>
         {nav.map((n, i) => n.group
           ? <div key={`g${i}`} className="section">{n.group}</div>
           : <button key={n.key} className={`navitem ${page === n.key ? 'active' : ''}`} onClick={() => go(n.key)}>{n.icon}{n.label}</button>)}
-        {me?.isStaff && (
-          <div className="brandchip">
-            <small>Working in</small>
-            {brand ? <><b>{brandName || '…'}</b><button onClick={() => setBrand(null)} title="Back to all brands">×</button></> : <b className="all">All brands</b>}
-          </div>
-        )}
         <div className="me">
-          {me && <><b>{me.full_name || me.email}</b>{me.orgName || me.email}<br /><span className="role">{me.isStaff ? 'shipbay staff' : 'client'}</span></>}
+          {me && <><b>{me.full_name || me.email}</b>{me.orgName || me.email}<br /><span className="role">{me.isStaff ? 'ShipBay staff' : 'Client'}</span></>}
           <br /><button onClick={signOut}>Sign out</button>
         </div>
       </aside>
       <main className="content">
-        {Page ? <>
-          <PageHelp page={page} />
-          <Page key={page} me={me} go={go} params={params} brand={brand} setBrand={setBrand} />
-        </> : (
+        {Page && <PageHelp page={page} />}
+        {Page ? <div className="page-enter" key={page}>
+          {me?.isStaff && active?.brandFirst && (
+            <div className="workbar">
+              <span>Working in</span>
+              {brand
+                ? <span className="chip"><i />{brandName || '…'}<button onClick={() => setBrand(null)} title="Back to all brands" aria-label="Back to all brands">×</button></span>
+                : <span className="chip all"><i />All brands</span>}
+            </div>
+          )}
+          <Page me={me} go={go} params={params} brand={brand} setBrand={setBrand} />
+        </div> : (
           <div className="stage">
             <div className="blank">
               <img className="mark" src="/brand/09-mark.svg" alt="" />
