@@ -102,6 +102,25 @@ function replyText(html: string) {
   const cut = lines.findIndex((l, i) => /^>/.test(l.trim()) || /^On .{5,160}wrote:?$/.test(l.trim()) || /^-{2,}\s*Original Message/i.test(l.trim()) || (/^From:/.test(l.trim()) && i > 0));
   return (cut > 0 ? lines.slice(0, cut) : lines).join('\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000);
 }
+// one email per new reply, via Resend: to the lead's rep, Derek (owner) copied when the rep is someone else; unassigned → Derek
+const escH = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+async function emailReplyAlert(x: { company?: string | null; name?: string | null; email: string; subject?: string | null; body?: string | null; assigned_to?: string | null }) {
+  const key = Deno.env.get('RESEND_API_KEY'); if (!key) { console.log('reply email: no RESEND_API_KEY'); return false; }
+  const { data: owner } = await admin.from('profiles').select('id, email').eq('is_owner', true).limit(1).maybeSingle();
+  const { data: rep } = x.assigned_to ? await admin.from('profiles').select('email, full_name').eq('id', x.assigned_to).maybeSingle() : { data: null } as any;
+  const to = [...new Set([rep?.email, owner?.email].filter(Boolean))] as string[]; if (!to.length) return false;
+  const who = x.company || x.name || x.email;
+  const html = `<div style="font-family:Archivo,Helvetica,Arial,sans-serif;color:#0F1B2A;max-width:560px">
+    <p style="font-size:22px;font-weight:700;margin:0 0 6px">${escH(who)} replied</p>
+    <p style="color:#5B6675;margin:0 0 18px">${escH(x.name || '')} &lt;${escH(x.email)}&gt; · re: ${escH(x.subject || 'cold email')}${rep?.full_name ? ` · rep: ${escH(rep.full_name)}` : ' · unassigned'}</p>
+    <div style="white-space:pre-wrap;border-left:3px solid #FF6B15;padding:4px 0 4px 14px;font-size:15px;line-height:1.5">${escH(String(x.body || 'The reply text is still loading — open the portal to read it.').slice(0, 2500))}</div>
+    <p style="margin:24px 0 0"><a href="${DASH}" style="background:#FF6B15;color:#fff;text-decoration:none;padding:11px 20px;border-radius:6px;font-weight:700;display:inline-block">Answer it in the portal</a></p>
+    <p style="color:#8A93A3;font-size:12px;margin-top:18px">A cold-email reply is a conversation — answer it yourself; don't put it in a sequence.</p></div>`;
+  const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: 'ShipBay Portal <derekh@shipbay3pl.com>', to, subject: `Reply from ${who}`, html }) });
+  if (!r.ok) console.log('resend', r.status, (await r.text()).slice(0, 200));
+  return r.ok;
+}
 async function smartleadSync(uid: string) {
   const key = await secret('SMARTLEAD_API_KEY'); if (!key) return { error: 'Add the Smartlead API key under Owner → Settings first.' };
   const campaigns = (await secret('SMARTLEAD_CAMPAIGNS') || '4039101').split(',').map((s) => s.trim()).filter(Boolean);
@@ -187,7 +206,7 @@ async function smartleadSync(uid: string) {
     const neg = [...new Set(rows.filter((r) => r.reply_type === 'Negative').map((r) => r.lead_id).filter(Boolean))] as string[];
     if (neg.length) await admin.from('sales_leads').update({ stage: 'dnc' }).in('id', neg);
     // tell someone: each new reply → HubSpot task for the lead's owner, due now, with a reminder (HubSpot pushes it to the app + email)
-    let alerted = 0;
+    let alerted = 0; let emailed = 0;
     for (const r of fresh) {
       try {
         const { data: sent } = await admin.from('sales_email_sends').select('reply_body, reply_subject, subject').eq('external_id', r.external_id).maybeSingle();
@@ -204,8 +223,14 @@ async function smartleadSync(uid: string) {
         if (t?.id && cid) await hs(`/crm/v4/objects/tasks/${t.id}/associations/default/contacts/${cid}`, { method: 'PUT' }).catch(() => {});
         alerted++;
       } catch (e) { console.log('reply alert failed', r.lead_email, String(e)); }
+      // and an email to the people who work it: the lead's rep (round-robin owner) + Derek on every reply that isn't his
+      try {
+        const { data: l1 } = r.lead_id ? await admin.from('sales_leads').select('company, contact_name, assigned_to').eq('id', r.lead_id).maybeSingle() : { data: null } as any;
+        const { data: sent } = await admin.from('sales_email_sends').select('reply_body, subject').eq('external_id', r.external_id).maybeSingle();
+        if (await emailReplyAlert({ company: l1?.company, name: r.lead_name || l1?.contact_name, email: r.lead_email, subject: sent?.subject || r.subject, body: sent?.reply_body, assigned_to: l1?.assigned_to })) emailed++;
+      } catch (e) { console.log('reply email failed', r.lead_email, String(e)); }
     }
-    out[label] = { leads: leads.length, sends: rows.length, reply_bodies: bodies, new_replies: fresh.length, alerted, analytics: await (await fetch(`${base}/campaigns/${cid}/analytics?api_key=${key}`)).json().catch(() => null) };
+    out[label] = { leads: leads.length, sends: rows.length, reply_bodies: bodies, new_replies: fresh.length, alerted, emailed, analytics: await (await fetch(`${base}/campaigns/${cid}/analytics?api_key=${key}`)).json().catch(() => null) };
   }
   await setSetting('smartlead_last_sync', { at: new Date().toISOString(), by: uid, out });
   return { ok: true, campaigns: out };
@@ -752,11 +777,8 @@ Deno.serve(async (req) => {
         // one scheduled pass: everything that can move, each guarded so one failure doesn't stop the rest
         const out: Record<string, unknown> = {};
         for (const [k, fn] of [['hubspot', () => hubspotSync(false)], ['gmail', () => gmailSync('', true)]] as [string, () => Promise<unknown>][]) { try { out[k] = await fn(); } catch (e) { out[k] = { error: String((e as Error).message).slice(0, 200) }; } }
-        // Smartlead every ~9 minutes (the tick runs every 3): sends, replies, round-robin, reply alerts
-        try {
-          const last = (await getSetting('smartlead_tick_at')) as any; const due = !last?.at || Date.now() - new Date(last.at).getTime() > 8.5 * 60000;
-          if (due) { await setSetting('smartlead_tick_at', { at: new Date().toISOString() }); const { data: owner } = await admin.from('profiles').select('id').eq('is_owner', true).limit(1).maybeSingle(); out.smartlead = await smartleadSync(owner?.id || ''); }
-        } catch (e) { out.smartlead = { error: String((e as Error).message).slice(0, 200) }; }
+        // Smartlead is NOT in the tick: with it the tick ran past pg_net's 120 s and backed up the queue the Power
+        // enrollment cron shares. It has its own cron, `shipbay-smartlead-sync` (every 5 min → action smartlead_sync).
         return json({ ok: true, ...out });
       }
       return json({ error: 'unknown system action' }, 400);
