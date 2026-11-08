@@ -1495,3 +1495,32 @@ label.dbr-to { display: flex; align-items: center; gap: 10px; }
 label.dbr-to input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 8px; font: 600 14px var(--font); color: var(--ink); background: #fff; }
 label.dbr-to input:focus { outline: 2px solid var(--orange); outline-offset: -1px; }
 label.dbr-to span { color: var(--muted); }
+
+/* Careers (Admin → Admin settings → Careers, 2026-11-08) */
+.careers .opsbar .tabs { display: flex; gap: 22px; }
+.careers .opsbar .tabs button { flex: none; padding: 10px 0; font-size: 14px; }
+.careers .missing { color: var(--orange-soft); font-weight: 600; }
+.careers td.num { font-variant-numeric: tabular-nums; font-weight: 700; }
+.careers .linkbtn { font: 700 14px var(--font-body); color: var(--ink); }
+.careers .linkbtn.strong { font-size: 14.5px; }
+.careers .linkbtn:hover { color: var(--orange-soft); }
+.careers tr.unread td:first-child { box-shadow: inset 3px 0 0 var(--orange); }
+.careers tr.unread .linkbtn { font-weight: 800; }
+.careers .cardhead.row { display: flex; gap: 10px; padding-bottom: 12px; }
+.careers select.pick { padding: 8px 12px; border: 1.5px solid var(--line); border-radius: 9px; font: 600 13px var(--font-body); background: #fff; color: var(--ink); }
+.careers select.statuspick { padding: 4px 8px; font-size: 12.5px; border-radius: 99px; }
+.careers select.statuspick.warn { border-color: var(--orange); color: var(--orange-soft); }
+.careers select.statuspick.ok { border-color: #1E9E6F; color: #177A56; }
+.careers select.statuspick.muted { color: var(--muted); }
+.careers tr.appdetail td { background: var(--paper, #F7F6F3); padding: 20px 22px; }
+.careers .appgrid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 28px; }
+.careers .appgrid .lbl { font-size: 12.5px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+.careers .appgrid p { font-size: 14.5px; line-height: 1.55; margin-bottom: 14px; white-space: pre-wrap; }
+.careers .appgrid textarea { width: 100%; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 10px; font: 14px var(--font-body); background: #fff; resize: vertical; }
+.modal.wide { width: min(860px, 100%); max-height: calc(100vh - 40px); overflow: auto; }
+.roleeditor .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 12px; }
+.roleeditor .span2 { grid-column: 1 / -1; }
+.roleeditor .field textarea, .roleeditor .field select { width: 100%; padding: 12px 14px; border: 1.5px solid var(--line-2); border-radius: var(--r); font: 14.5px var(--font-body); color: var(--ink); background: #fff; resize: vertical; line-height: 1.5; }
+.roleeditor .field textarea:focus, .roleeditor .field select:focus { outline: none; border-color: var(--orange); box-shadow: 0 0 0 4px var(--orange-tint); }
+.roleeditor .field label .sm { font-weight: 500; color: var(--muted-2); }
+@media (max-width: 760px) { .careers .appgrid, .roleeditor .grid3, .modal.wide .grid2 { grid-template-columns: 1fr; } }

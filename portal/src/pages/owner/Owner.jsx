@@ -11,9 +11,10 @@ import AdminSettings from '../AdminSettings';
 import ClientSettings from '../ClientSettings';
 import Marketplaces from '../Marketplaces';
 import Team from './Team';
+import Careers from './Careers';
 
 const TABS = [['sales', 'Sales'], ['fin', 'Financials'], ['team', 'Team'], ['strat', 'Strategies'], ['docs', 'Documents review'], ['admin', 'Admin settings']];
-const ADMIN_SECTIONS = [['staff', 'Staff & access'], ['clients', 'Client settings'], ['integrations', 'Integrations'], ['connections', 'Connections & keys']];
+const ADMIN_SECTIONS = [['staff', 'Staff & access'], ['clients', 'Client settings'], ['integrations', 'Integrations'], ['connections', 'Connections & keys'], ['careers', 'Careers']];
 
 export default function Owner({ me, go: nav, params }) {
   const [status, setStatus] = useState(null);     // from action:status
@@ -59,6 +60,7 @@ export default function Owner({ me, go: nav, params }) {
           {section === 'clients' && <div className="embed"><ClientSettings params={params} /></div>}
           {section === 'integrations' && <div className="embed"><Marketplaces /></div>}
           {section === 'connections' && <Settings status={status} refreshStatus={refresh} />}
+          {section === 'careers' && <Careers />}
         </>
       )}
     </div>

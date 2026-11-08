@@ -74,6 +74,7 @@ export const HELP = {
       'Sales → Overview is the command center: the funnel, who’s waiting on you, and how each channel and list is doing. All leads, Email, Calls and Third party are the detail behind it.',
       'Email shows each reply in full — tag it Positive or Negative. Calls is the dialer. Third party is where Fulfill.com and partner leads go.',
       'Strategies: one card per play with its live numbers and a log. Add a note when something changes.',
+      'Admin settings → Careers: the roles on shipbay3pl.com/careers. Edit a role’s pay, description or status (only Open roles show on the site), add a new one, and read every application sent from the site.',
     ],
   },
   salesdesk: {
