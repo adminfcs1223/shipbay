@@ -57,7 +57,7 @@ export default function App() {
       const { data: p } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
       let orgName = null;
       if (p?.org_id) { const { data: o } = await supabase.from('orgs').select('name').eq('id', p.org_id).single(); orgName = o?.name ?? null; }
-      setMe({ ...p, isStaff: STAFF.includes(p?.role), orgName });
+      setMe({ ...p, isStaff: STAFF.includes(p?.role), isSetter: p?.role === 'shipbay_setter', orgName });
     })();
   }, [session]);
 
@@ -236,6 +236,11 @@ const STAFF_NAV = [
 ];
 // Onboarding, Quotes, Documents review, Client settings, Integrations and Admin settings live inside CRM / Admin now;
 // the pages stay importable so deep links (go('onboarding', …)) still resolve.
+// An appointment setter gets one screen: dial, script, book. No warehouse, no CRM, no client data.
+const SETTER_NAV = [
+  { group: 'Sales' },
+  { key: 'apptsetting', label: 'Appt. Setting', icon: Ico.appt, page: ApptSetting },
+];
 const HIDDEN_PAGES = { onboarding: Onboarding, quotes: Quotes, compliance: Compliance, settings: ClientSettings, markets: Marketplaces, admin: AdminSettings };
 const CLIENT_NAV = [
   { group: 'Your account' },
@@ -246,7 +251,7 @@ const CLIENT_NAV = [
 ];
 
 function Shell({ me }) {
-  const nav = (!me ? [] : me.isStaff ? STAFF_NAV : CLIENT_NAV).filter((n) => (!n.adminOnly || me?.role === 'shipbay_admin') && (!n.ownerOnly || me?.is_owner) && (!n.salesOnly || me?.is_sales));
+  const nav = (!me ? [] : me.isStaff ? STAFF_NAV : me.isSetter ? SETTER_NAV : CLIENT_NAV).filter((n) => (!n.adminOnly || me?.role === 'shipbay_admin') && (!n.ownerOnly || me?.is_owner) && (!n.salesOnly || me?.is_sales));
   const items = nav.filter((n) => n.key);
   const [page, setPage] = useState(null);
   const [params, setParams] = useState({});
@@ -269,7 +274,7 @@ function Shell({ me }) {
           ? <div key={`g${i}`} className="section">{n.group}</div>
           : <button key={n.key} className={`navitem ${page === n.key ? 'active' : ''}`} onClick={() => go(n.key)}>{n.icon}{n.label}</button>)}
         <div className="me">
-          {me && <><b>{me.full_name || me.email}</b>{me.orgName || me.email}<br /><span className="role">{me.isStaff ? 'ShipBay staff' : 'Client'}</span></>}
+          {me && <><b>{me.full_name || me.email}</b>{me.orgName || me.email}<br /><span className="role">{me.isStaff ? 'ShipBay staff' : me.isSetter ? 'Appointment setter' : 'Client'}</span></>}
           <br /><button onClick={signOut}>Sign out</button>
         </div>
       </aside>

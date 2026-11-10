@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase, fn } from '../lib';
 import { useBrands } from '../shared';
 
-const ROLES = [['shipbay_admin', 'ShipBay admin', 'Everything, including this page'], ['shipbay_staff', 'ShipBay staff', 'Warehouse screens and client accounts'], ['client_admin', 'Client admin', 'A brand’s portal: orders, documents, settings'], ['client_user', 'Client user', 'A brand’s portal, read-only']];
+const ROLES = [['shipbay_admin', 'ShipBay admin', 'Everything, including this page'], ['shipbay_staff', 'ShipBay staff', 'Warehouse screens and client accounts'], ['shipbay_setter', 'Appointment setter', 'Appt. Setting only: the call queue, the script, booking calls for a closer'], ['client_admin', 'Client admin', 'A brand’s portal: orders, documents, settings'], ['client_user', 'Client user', 'A brand’s portal, read-only']];
 const roleLabel = (r) => ROLES.find((x) => x[0] === r)?.[1] || r;
 
 export default function AdminSettings({ me }) {

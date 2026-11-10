@@ -10,6 +10,7 @@ import { compute, phases } from '../../quote';
 import Quotes from '../Quotes';
 import Onboarding from '../Onboarding';
 import { Debrief, DebriefBoard, PowerButton, saveDebrief } from './Debrief';
+import { Book, BookModal, Script, Setters, Availability, RecentCalls, logCall, flushOutbox, outbox, dropFromOutbox, fmtWhen, cancelMeeting } from './Appt';
 import ImportLeads from './ImportLeads';
 
 /** the quotes that belong to an account (by the account row, or its client org) — best first */
@@ -20,10 +21,10 @@ export const quoteMonthly = (q) => { try { const ph = phases(q); const p = ph.fi
 /** expected services $/month for an account: its quote if it has one, else the hand-typed deal value */
 export const expectedMonthly = (lead, quotes) => { const q = quotesFor(lead, quotes).find((x) => !x.internal_only && x.status !== 'declined' && x.status !== 'superseded'); const v = q ? quoteMonthly(q) : null; return v != null ? { value: v, from: q } : { value: lead?.deal_value ? Number(lead.deal_value) : null, from: null }; };
 
-const SUB = [['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['calendar', 'Calendar'], ['quotes', 'Quotes'], ['onboarding', 'Onboarding'], ['bonus', 'Bonus'], ['settings', 'Settings']];
+const SUB = [['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['book', 'Book'], ['calendar', 'Calendar'], ['setters', 'Setters'], ['quotes', 'Quotes'], ['onboarding', 'Onboarding'], ['bonus', 'Bonus'], ['settings', 'Settings']];
 /** Appt. Setting (Derek, 2026-11-10): dialing + replies, where a new rep starts. CRM: everything else. Admin → Sales shows all of it. */
-export const APPT_TABS = ['calls', 'email', 'settings'];
-export const CRM_TABS = ['overview', 'pipeline', 'master', 'calendar', 'quotes', 'onboarding', 'bonus', 'settings'];
+export const APPT_TABS = ['calls', 'book', 'email', 'settings'];
+export const CRM_TABS = ['overview', 'pipeline', 'master', 'calendar', 'setters', 'quotes', 'onboarding', 'bonus', 'settings'];
 export const LIST_NAMES = { A1: 'Self-ship brands · NJ metro', A2: 'Already on a 3PL · NJ metro', A3: 'Self-ship brands · Northeast', A4: 'Shopify Plus upgrades', B1: 'Founder-run · NJ metro', C1: 'Amazon sellers · Northeast', C2: 'Q4 overflow', X0: 'Control group' };
 export const listName = (code) => (code && LIST_NAMES[code] ? `${code} · ${LIST_NAMES[code]}` : code || '—');
 export const srcLabel = (sources, k) => sources.find((s) => s.key === k)?.label || k;
@@ -36,7 +37,7 @@ export function useBookingLink() { const [u, setU] = useState(''); useEffect(() 
 export const DEFAULT_TPL = { reply_subject: '{company} — tried you by phone', reply_body: 'Hi {first},\n\nTried you by phone just now and missed you. I\u2019m with ShipBay, a 3PL in Hillsborough, NJ: no order minimums, $0 setup, postage runs on your own carrier account, and orders in by 2pm ET ship the same day.\n\nIf fulfillment is the thing you\u2019d fix first, 15 minutes here: {booking}\n\nOr reply with rough monthly orders and I\u2019ll send what your month costs.\n\n{me}', signature: '' };
 export const TPL_VARS = [['{first}', "prospect's first name"], ['{company}', 'their brand'], ['{booking}', 'your booking link'], ['{me}', 'your first name']];
 /** fill a template with a lead's details */
-export const fillTpl = (t, lead, me, booking) => (t || '').replace(/\{first\}/g, firstName(lead) || 'there').replace(/\{company\}/g, lead?.company || lead?.domain || 'your brand').replace(/\{booking\}/g, booking || '').replace(/\{me\}/g, (me?.full_name || '').split(' ')[0] || '');
+export const fillTpl = (t, lead, me, booking, closer) => (t || '').replace(/\{closer\}/g, closer || (me?.full_name || '').split(' ')[0] || '').replace(/\{first\}/g, firstName(lead) || 'there').replace(/\{company\}/g, lead?.company || lead?.domain || 'your brand').replace(/\{booking\}/g, booking || '').replace(/\{me\}/g, (me?.full_name || '').split(' ')[0] || '');
 /** everything needed to open a pre-filled Gmail reply: the rep's own template (Sales → Settings) + the booking link */
 export function useReplyKit(me) {
   const booking = useBookingLink(); const [tpl, setTpl] = useState(null);
@@ -75,7 +76,7 @@ export function useCrm({ me, rep }) {
     setQuotes(qs.data || []); setOrgs(os.data || []);
     const [l, s, e, g, ga, c, m, t] = await Promise.all([fetchAll('sales_leads', '*', (qq) => qq.order('created_at', { ascending: false })), fetchAll('sales_sources'), fetchAll('sales_email_sends', '*', (qq) => qq.order('sent_at', { ascending: false })),
       fetchAll('gmail_messages', 'id, user_id, gmail_id, thread_id, message_id_hdr, from_email, from_name, to_email, subject, snippet, at, is_sent, lead_id, read_at, hidden', (qq) => qq.order('at', { ascending: false })), supabase.from('v_gmail_accounts').select('*'),
-      fetchAll('sales_calls', '*', (qq) => qq.order('started_at', { ascending: false })), fetchAll('sales_meetings', '*', (qq) => qq.order('starts_at', { ascending: false })), fetchAll('sales_touches', '*', (qq) => qq.order('at', { ascending: false }))]);
+      fetchAll('sales_calls', '*', (qq) => qq.is('voided_at', null).order('started_at', { ascending: false })), fetchAll('sales_meetings', '*', (qq) => qq.order('starts_at', { ascending: false })), fetchAll('sales_touches', '*', (qq) => qq.order('at', { ascending: false }))]);
     setLeads(l); setSources(s); setSends(e); setMail(g); setMailAccts(ga.data || []); setCalls(c); setMeetings(m); setTouches(t);
   };
   useEffect(() => { load(); }, []);
@@ -90,7 +91,7 @@ export function useCrm({ me, rep }) {
 }
 
 export default function Sales({ me, status, refreshStatus, rep = false, nav, tabs = null, initial = 'overview' }) {
-  const TABS = tabs ? SUB.filter(([k]) => tabs.includes(k)) : SUB;
+  const TABS = tabs ? tabs.map((k) => SUB.find(([x]) => x === k)).filter(Boolean) : SUB;
   const [sub, setSub] = useState(() => (window.location.hash.startsWith('#sales=gmail') ? 'settings' : initial));
   const [leads, setLeads] = useState(null); const [sources, setSources] = useState([]); const [sends, setSends] = useState([]);
   const [msg, setMsg] = useState(() => {       // Gmail connect round-trip lands with #sales=gmail|ok|msg
@@ -144,6 +145,8 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav, tab
       {sub === 'master' && <Master {...ctx} leads={mine} />}
       {sub === 'email' && <Conversations {...ctx} leads={mine} allLeads={leads} sends={mySends} mail={mail} mailAccts={mailAccts} status={status} refreshStatus={refreshStatus} focus={focus} clearFocus={() => setFocus(null)} />}
       {sub === 'calls' && <Calls {...ctx} leads={leads} />}
+      {sub === 'book' && <Book {...ctx} leads={leads} />}
+      {sub === 'setters' && <Setters me={me} people={people} />}
       {sub === 'calendar' && <Calendar {...ctx} leads={leads} status={status} refreshStatus={refreshStatus} mineOnly={rep} focusDate={focus} />}
       {sub === 'bonus' && <Bonus {...ctx} leads={leads} />}
       {panelLead && <LeadPanel {...ctx} lead={panelLead} sends={sends.filter((s) => s.lead_id === panelLead.id)} onClose={() => setPanel(null)} />}
@@ -409,13 +412,10 @@ export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say,
     upd(patch);
   };
   const addNote = async () => { if (!note.trim()) return; await upd({ notes: [lead.notes, `${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${(me.full_name || me.email).split(' ')[0]}: ${note.trim()}`].filter(Boolean).join('\n'), last_touch_at: new Date().toISOString() }); setNote(''); };
-  const logCall = async (outcome) => {
-    await supabase.from('sales_calls').insert({ lead_id: lead.id, started_at: new Date().toISOString(), ended_at: new Date().toISOString(), seconds: 0, outcome, note: note || null, by_user: me.id });
-    const next = { no_answer: 2, voicemail: 3, gatekeeper: 1, connected: 7 }[outcome];
-    const patch = { attempts: (lead.attempts || 0) + 1, last_outcome: outcome, last_touch_at: new Date().toISOString(), next_action_at: next ? new Date(Date.now() + next * 86400000).toISOString() : null };
-    if (outcome === 'booked') patch.stage = 'call_booked'; else if (outcome === 'not_fit') patch.stage = 'lost'; else if (outcome === 'wrong_number') patch.in_calls = false; else if (lead.stage === 'new') patch.stage = 'contacted';
-    if (note) patch.notes = [lead.notes, `${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${outcome.replace('_', ' ')}: ${note}`].filter(Boolean).join('\n');
-    await upd(patch, 'Call logged.'); setNote(''); setLogging(false);
+  const quickLog = async (outcome) => {
+    const r = await logCall({ lead_id: lead.id, outcome, note: note || '', seconds: 0 });
+    if (r.error) return say({ error: r.error });
+    say(null, r.queued ? 'No connection. The call is saved in this browser and goes up when you are back online.' : 'Call logged.'); setNote(''); setLogging(false); reload();
     const { data } = await supabase.from('sales_calls').select('*').eq('lead_id', lead.id).order('started_at', { ascending: false }); setCalls(data || []);
   };
   const markRead = async (s) => { if (!s.read_at) { await supabase.from('sales_email_sends').update({ read_at: new Date().toISOString(), read_by: me.id }).eq('id', s.id); reload(); } };
@@ -454,7 +454,7 @@ export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say,
           {lead.stage === 'replied' && (lead.answered_at ? <button className="btn-sm ok" onClick={() => upd({ answered_at: null })}>✓ Answered — undo</button> : <button className="btn-sm" onClick={() => upd({ answered_at: new Date().toISOString() }, 'Marked answered.')}>Mark answered</button>)}
           {lead.stage !== 'dnc' && <button className="btn-sm" onClick={() => setStage('dnc')}>Do not contact</button>}
         </div>
-        {logging && <div className="plog"><textarea rows={2} placeholder="What happened on the call…" value={note} onChange={(e) => setNote(e.target.value)} /><div className="outcomes">{PANEL_OUT.map(([k, l, cls]) => <button key={k} className={`oc ${cls}`} onClick={() => logCall(k)}>{l}</button>)}</div></div>}
+        {logging && <div className="plog"><textarea rows={2} placeholder="What happened on the call…" value={note} onChange={(e) => setNote(e.target.value)} /><div className="outcomes">{PANEL_OUT.map(([k, l, cls]) => <button key={k} className={`oc ${cls}`} onClick={() => quickLog(k)}>{l}</button>)}</div></div>}
         <div className="tabs ptabs"><button className={tab === 'activity' ? 'on' : ''} onClick={() => setTab('activity')}>Activity{replies.length ? <i>{replies.length}</i> : null}</button><button className={tab === 'details' ? 'on' : ''} onClick={() => setTab('details')}>Details</button></div>
         <div className="pbody">
           <div className="acct">
@@ -919,6 +919,13 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
   const [list, setList] = useState(''); const [who, setWho] = useState(''); const kit = useReplyKit(me); const booking = kit.booking; const [calls, setCalls] = useState([]); const [sessions, setSessions] = useState([]);
   const [session, setSession] = useState(() => { try { return JSON.parse(sessionStorage.getItem('shipbay-call-session') || 'null'); } catch { return null; } });
   const [cur, setCur] = useState(null); const [callStart, setCallStart] = useState(null); const [note, setNote] = useState(''); const [tick, setTick] = useState(0); const [skipped, setSkipped] = useState([]); const [debrief, setDebrief] = useState(false); const [emailed, setEmailed] = useState(null);
+  // the lead on the card is pinned while a call is open: booking moves it to the closer, and it must not vanish mid-call
+  const [pin, setPin] = useState(null); const [booked, setBooked] = useState(null); const [bookOpen, setBookOpen] = useState(false); const [callId, setCallId] = useState(() => crypto.randomUUID());
+  const [scriptOpen, setScriptOpen] = useState(() => { try { return localStorage.getItem('shipbay-script-open') === '1'; } catch { return false; } });
+  const [waiting, setWaiting] = useState(() => outbox());
+  const toggleScript = () => { const v = !scriptOpen; setScriptOpen(v); try { localStorage.setItem('shipbay-script-open', v ? '1' : '0'); } catch { /* ignore */ } };
+  const retryWaiting = async () => { const r = await flushOutbox(); setWaiting(outbox()); if (r.sent) { say(null, `${r.sent} saved call${r.sent === 1 ? '' : 's'} went up.`); reload(); loadCalls(); } };
+  useEffect(() => { if (outbox().length) retryWaiting(); const on = () => retryWaiting(); window.addEventListener('online', on); return () => window.removeEventListener('online', on); }, []);
   useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t); }, []);
   const loadCalls = async () => { const [c, s] = await Promise.all([fetchAll('sales_calls', '*', (q) => q.order('started_at', { ascending: false })), fetchAll('sales_call_sessions', '*', (q) => q.order('started_at', { ascending: false }))]); setCalls(c); setSessions(s); };
   useEffect(() => { loadCalls(); }, []);
@@ -928,32 +935,38 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
     return leads.filter((l) => l.in_calls && l.phone && !['dnc', 'lost', 'signed'].includes(l.stage) && (rep ? (!l.assigned_to || l.assigned_to === me.id) : (!who || (who === 'none' ? !l.assigned_to : l.assigned_to === who))) && (!list || l.filter_id === list) && !skipped.includes(l.id) && (!l.next_action_at || new Date(l.next_action_at).getTime() <= now))
       .sort((a, b) => (a.stage === 'replied' ? -1 : 0) - (b.stage === 'replied' ? -1 : 0) || (a.attempts || 0) - (b.attempts || 0) || (b.est_sales_usd || 0) - (a.est_sales_usd || 0));
   }, [leads, list, skipped, who]);
-  const lead = cur ? leads.find((l) => l.id === cur) : queue[0];
+  const lead = pin || (cur ? leads.find((l) => l.id === cur) : queue[0]);
   const repName = (id) => { const p = (people || []).find((x) => x.id === id); return p ? (p.full_name || p.email).split(' ')[0] : ''; };
 
   const startSession = async () => { const { data } = await supabase.from('sales_call_sessions').insert({ started_at: new Date().toISOString(), by_user: me.id, note: list || null }).select().single(); const s = { id: data.id, started_at: data.started_at }; setSession(s); sessionStorage.setItem('shipbay-call-session', JSON.stringify(s)); };
   const endSession = async () => { const secs = Math.round((Date.now() - new Date(session.started_at)) / 1000); await supabase.from('sales_call_sessions').update({ ended_at: new Date().toISOString(), seconds: secs }).eq('id', session.id); setSession(null); sessionStorage.removeItem('shipbay-call-session'); if (callStart) setCallStart(null); loadCalls(); };
-  const startCall = () => { if (!session) startSession(); setCallStart(Date.now()); };
+  const startCall = () => { if (!session) startSession(); setCallStart(Date.now()); setPin(lead); };
+  const nextLead = () => { setDebrief(false); setCallStart(null); setNote(''); setCur(null); setEmailed(null); setPin(null); setBooked(null); setCallId(crypto.randomUUID()); };
   // every dial ends in the debrief (Derek, 2026-11-02; rev 4 11-10): the answers → sales_calls + lead; the rep's own email; Booked → a call on a closer's calendar
   const [closing, setClosing] = useState(false);
   const closeCall = async (answers) => {
     if (!lead) return;
     const started = callStart || Date.now(); const secs = Math.round((Date.now() - started) / 1000);
     setClosing(true);
-    const r = await saveDebrief({ lead, me, started, seconds: secs, note, a: answers, emailedNow: emailed === lead.id });
+    const r = await saveDebrief({ lead, me, started, seconds: secs, note, a: answers, emailedNow: emailed === lead.id, sessionId: session?.id, meeting: booked, clientId: callId });
     setClosing(false);
-    if (r?.error) say({ error: r.error }); else if (answers.send === 'yes') say(null, `Call logged and your email went to ${answers.draft?.to}.`);
-    setDebrief(false); setCallStart(null); setNote(''); setCur(null); setEmailed(null); reload(); loadCalls();
+    if (r?.saved === false) { say({ error: r.error }); return; }          // nothing was saved: the debrief stays open with every answer in it
+    if (r?.queued) { setWaiting(outbox()); say(null, 'No connection. The call is saved in this browser and goes up when you are back online.'); }
+    else if (r?.error) say({ error: r.error });
+    else if (answers.result === 'booked') say(null, 'Call logged and booked.');
+    else if (answers.send === 'yes') say(null, `Call logged and your email went to ${answers.draft?.to}.`);
+    nextLead(); reload(); loadCalls();
   };
-  const skip = () => { if (lead) setSkipped([...skipped, lead.id]); setCur(null); setCallStart(null); };
+  const skip = () => { if (lead) setSkipped([...skipped, lead.id]); nextLead(); };
 
   const board = useMemo(() => {
     const today = new Date().toDateString();
     const stat = (C) => { const dials = C.length; const pick = C.filter((c) => PICKUP.has(c.outcome)).length; const conn = C.filter((c) => CONNECT.has(c.outcome)).length; const booked = C.filter((c) => c.outcome === 'booked').length; const bad = C.filter((c) => c.outcome === 'wrong_number').length; const talk = C.filter((c) => CONNECT.has(c.outcome)).reduce((s, c) => s + c.seconds, 0); const per100 = dials ? (booked / dials) * 100 : 0; return { dials, pick, conn, booked, bad, talk, pickRate: dials ? pick / dials : 0, connRate: dials ? conn / dials : 0, per100, grade: grade(per100, dials), minPerConn: conn ? talk / 60 / conn : 0 }; };
-    const todayCalls = calls.filter((c) => new Date(c.started_at).toDateString() === today);
-    const byList = {}; for (const c of calls) { const k = leads.find((l) => l.id === c.lead_id)?.filter_id || '—'; (byList[k] = byList[k] || []).push(c); }
+    const live = calls.filter((c) => !c.voided_at);
+    const todayCalls = live.filter((c) => new Date(c.started_at).toDateString() === today);
+    const byList = {}; for (const c of live) { const k = leads.find((l) => l.id === c.lead_id)?.filter_id || '—'; (byList[k] = byList[k] || []).push(c); }
     const sessTime = (S) => S.reduce((s, x) => s + (x.seconds || (x.ended_at ? 0 : Math.round((Date.now() - new Date(x.started_at)) / 1000))), 0);
-    return { today: stat(todayCalls), all: stat(calls), byList: Object.entries(byList).map(([k, C]) => ({ k, ...stat(C) })).sort((a, b) => b.dials - a.dials), timeToday: sessTime(sessions.filter((s) => new Date(s.started_at).toDateString() === today)), timeAll: sessTime(sessions) };
+    return { today: stat(todayCalls), all: stat(live), byList: Object.entries(byList).map(([k, C]) => ({ k, ...stat(C) })).sort((a, b) => b.dials - a.dials), timeToday: sessTime(sessions.filter((s) => new Date(s.started_at).toDateString() === today)), timeAll: sessTime(sessions) };
   }, [calls, sessions, leads, tick]);
 
   const sessSecs = session ? Math.round((Date.now() - new Date(session.started_at)) / 1000) : 0;
@@ -965,9 +978,13 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
         {!rep && <select value={who} onChange={(e) => { setWho(e.target.value); setCur(null); }}><option value="">Everyone’s</option>{(people || []).map((p) => <option key={p.id} value={p.id}>{(p.full_name || p.email).split(' ')[0]}’s</option>)}<option value="none">Unassigned only</option></select>}
         {booking && <span className="sm">Book them: <a href={booking} target="_blank" rel="noreferrer">{booking.replace(/^https?:\/\//, '')}</a></span>}
         <div className="spacer" />
+        <button className={`btn-sm ${scriptOpen ? 'on' : ''}`} onClick={toggleScript}>Script</button>
         {session ? <><span className="mono">Session {hhmm(sessSecs)} {mmss(sessSecs % 60)}</span><button className="btn-sm" onClick={endSession}>End session</button></> : <button className="btn-sm primary" onClick={startSession}>Start session</button>}
       </div>
-      <div className="callgrid">
+      {waiting.length > 0 && <div className="msg warn waiting"><b>{waiting.length} call{waiting.length === 1 ? '' : 's'} saved in this browser, not on the server yet.</b>
+        {waiting.filter((w) => w.failed).map((w) => <span key={w.client_id}> The server refused one: {w.failed} <button className="btn-xs" onClick={() => { dropFromOutbox(w.client_id); setWaiting(outbox()); }}>Discard it</button></span>)}
+        <button className="btn-xs" onClick={retryWaiting}>Send now</button></div>}
+      <div className={`callgrid ${scriptOpen ? 'withscript' : ''}`}>
         <div className="card dialer">
           {!lead ? <div className="empty">Queue is empty for this list. Import more leads or clear the filter.</div> : (
             <>
@@ -979,16 +996,21 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
                 {lead.notes && <pre className="notes">{lead.notes}</pre>}
               </div>
               <div className="timer">{callStart ? <><b>{mmss(callSecs)}</b><span>on the call</span></> : <button className="btn primary big" onClick={startCall}>Start call</button>}
-                {lead.email && <span className="emailacts"><a className="btn-sm" href={kit.link(lead.email, null, lead)} target="_blank" rel="noreferrer" onClick={() => setEmailed(lead.id)}>Compose email</a><PowerButton lead={lead} me={me} note={note} say={say} onDone={() => { reload(); loadCalls(); }} /></span>}
+                <span className="emailacts">
+                  {booked ? <span className="statuspill ok">Booked · {fmtWhen(booked.starts_at)}</span> : <button className="btn-sm primary" onClick={() => { setPin(lead); setBookOpen(true); }}>Book a call</button>}
+                  {lead.email && <><a className="btn-sm" href={kit.link(lead.email, null, lead)} target="_blank" rel="noreferrer" onClick={() => setEmailed(lead.id)}>Compose email</a><PowerButton lead={lead} me={me} note={note} say={say} onDone={() => { if (!pin) reload(); loadCalls(); }} /></>}
+                </span>
               </div>
               <textarea className="callnote" rows={2} placeholder="One line: who you spoke to, what they said, when to call back…" value={note} onChange={(e) => setNote(e.target.value)} />
-              <div className="outcomes end"><button className="oc solid" onClick={() => setDebrief(true)}>{callStart ? 'End call' : 'Log this dial'}</button></div>
-              {debrief && <Debrief lead={lead} me={me} people={people} saving={closing} seconds={Math.round((Date.now() - (callStart || Date.now())) / 1000)} note={note} setNote={setNote} emailedNow={emailed === lead.id} onSave={closeCall} onCancel={() => setDebrief(false)} />}
+              <div className="outcomes end"><button className="oc solid" onClick={() => { setPin(lead); setDebrief(true); }}>{callStart ? 'End call' : 'Log this dial'}</button></div>
+              {bookOpen && <BookModal me={me} lead={lead} people={people} onBooked={(m) => setBooked(m)} onClose={() => setBookOpen(false)} />}
+              {debrief && <Debrief lead={lead} me={me} people={people} meeting={booked} saving={closing} seconds={Math.round((Date.now() - (callStart || Date.now())) / 1000)} note={note} setNote={setNote} emailedNow={emailed === lead.id} onSave={closeCall} onCancel={() => setDebrief(false)} />}
               <div className="row"><button className="btn-xs" onClick={skip}>Skip for now</button><div className="spacer" /><span className="sm">Next up: {queue.filter((q) => q.id !== lead.id).slice(0, 3).map((q) => q.company).join(' · ') || '—'}</span></div>
             </>
           )}
         </div>
         <div className="scorecol">
+          {scriptOpen && <Script me={me} lead={lead} people={people} booking={booking} fill={fillTpl} />}
           <div className="card"><h3>Today</h3><Board s={board.today} time={board.timeToday} /></div>
           <div className="card"><h3>All time</h3><Board s={board.all} time={board.timeAll} /></div>
         </div>
@@ -1000,7 +1022,8 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
           <tbody>{board.byList.map((r) => <tr key={r.k}><td><b className="mono">{r.k}</b>{LIST_NAMES[r.k] && <span className="sm"> {LIST_NAMES[r.k]}</span>}</td><td className="n">{r.dials}</td><td className="n">{pct(r.pickRate)}</td><td className="n">{pct(r.connRate)}</td><td className="n">{r.booked}</td><td className="n">{r.per100.toFixed(1)}</td><td className="n">{pct(r.dials ? r.bad / r.dials : 0)}</td><td className="n">{r.minPerConn.toFixed(1)}</td><td><b className={`grade g${r.grade}`}>{r.grade}</b></td></tr>)}
             {!board.byList.length && <tr><td colSpan={9} className="empty">No calls logged yet.</td></tr>}</tbody></table>
       </div>
-      <DebriefBoard calls={calls} leads={leads} />
+      <RecentCalls me={me} calls={calls} leads={leads} say={say} onChange={() => { reload(); loadCalls(); }} />
+      <DebriefBoard calls={calls.filter((c) => !c.voided_at)} leads={leads} />
     </>
   );
 }
@@ -1025,7 +1048,7 @@ function Board({ s, time }) {
 /* =================== Bonus =================== */
 export function Bonus({ me, rep, leads, people, go }) {
   const [goals] = useGoals(); const [calls, setCalls] = useState([]);
-  useEffect(() => { fetchAll('sales_calls', 'id, lead_id, outcome, started_at, by_user').then(setCalls); }, []);
+  useEffect(() => { fetchAll('sales_calls', 'id, lead_id, outcome, started_at, by_user', (q) => q.is('voided_at', null)).then(setCalls); }, []);
   if (!goals) return <div className="card"><div className="empty">Loading…</div></div>;
   const reps = rep ? [me] : people;
   return (
@@ -1084,6 +1107,7 @@ export function RepSettings({ me, rep, people, say, status }) {
           </div>
         </div>
       </div>
+      {(me.is_sales || me.is_owner) && <Availability me={me} say={say} />}
       <div className="card">
         <div className="cardhead"><h3>My Gmail</h3><span className="sm">Replies from prospects land in Conversations; emails you send them count as touches.</span><div className="spacer" />
           {mine ? <><button className="btn-sm" disabled={busy} onClick={() => sync(false)}>Check now</button><button className="btn-sm danger" disabled={busy} onClick={disconnect}>Disconnect</button></> : <button className="btn-sm primary" disabled={busy || status?.google_keys_set === false} onClick={connect}>{busy ? 'Opening Google…' : 'Connect Gmail'}</button>}
@@ -1126,7 +1150,7 @@ export function Calendar({ me, leads, status, reload, say, refreshStatus, mineOn
     <>
       <div className="opsbar wrap">
         <div className="period"><button className="btn-sm" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>‹</button><b className="monthtitle">{month.toLocaleString('en-US', { month: 'long', year: 'numeric' })}</b><button className="btn-sm" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>›</button><button className="btn-xs" onClick={() => { const d = new Date(); setMonth(new Date(d.getFullYear(), d.getMonth(), 1)); }}>Today</button></div>
-        <span className="sm"><i className="sw cal" /> Calendly &nbsp; <i className="sw gcal" /> Google Calendar</span>
+        <span className="sm"><i className="sw portal" /> Booked here &nbsp; <i className="sw cal" /> Calendly &nbsp; <i className="sw gcal" /> Google Calendar</span>
         <div className="spacer" />
         {!mineOnly && <>
           {status?.calendly_set ? <button className="btn-sm" disabled={!!busy} onClick={() => sync('calendly')}>{busy === 'calendly' ? '…' : 'Sync Calendly'}</button> : <span className="sm">Calendly token → Settings</span>}
@@ -1156,15 +1180,16 @@ export function Calendar({ me, leads, status, reload, say, refreshStatus, mineOn
       {sel && (() => { const m = sel; const l = leads?.find((x) => x.id === m.lead_id); const isPast = new Date(m.starts_at).getTime() < now; return (
         <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setSel(null)}><div className="modal">
           <h3>{m.name}</h3>
-          <p className="lead">{new Date(m.starts_at).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{m.ends_at ? ` – ${fmtT(m.ends_at)}` : ''} · <span className={`pill ${m.source === 'google' ? '' : 'connected'}`}>{m.source === 'google' ? 'Google Calendar' : 'Calendly'}</span></p>
+          <p className="lead">{new Date(m.starts_at).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{m.ends_at ? ` – ${fmtT(m.ends_at)}` : ''} · <span className={`pill ${m.source === 'google' ? '' : 'connected'}`}>{m.source === 'google' ? 'Google Calendar' : m.source === 'portal' ? 'Booked here' : m.source === 'hubspot' ? 'HubSpot' : 'Calendly'}</span></p>
           <div className="confirm">
             {(m.invitee_name || m.invitee_email) && <div><small>With</small><b>{m.invitee_name || m.invitee_email}</b>{m.invitee_email && m.invitee_name && <span className="muted"> · {m.invitee_email}</span>}{l && <> · <button className="btn-xs" onClick={() => { setSel(null); openLead(l); }}>Open contact</button></>}</div>}
             {m.location && <div><small>Where</small>{/^https?:/.test(m.location) ? <a href={m.location} target="_blank" rel="noreferrer">{m.location.includes('meet.google') ? 'Google Meet' : m.location.includes('zoom') ? 'Zoom' : 'Join link'} ↗</a> : <b>{m.location}</b>}</div>}
             {m.description && <div><small>Notes</small><pre className="notes">{m.description.slice(0, 600)}</pre></div>}
+            {m.booked_by && <div><small>Booked by</small><b>{who(m.booked_by)}</b>{m.source === 'portal' && <span className="muted"> · {m.invite_sent_at ? 'invite sent' : m.invite_error || 'no invite sent'}</span>}</div>}
             <div><small>Taken by</small>{mineOnly ? <b>{who(m.assigned_to)}</b> : <select className="statusselect" value={m.assigned_to || ''} onChange={(e) => { upd(m, { assigned_to: e.target.value || null }); setSel({ ...m, assigned_to: e.target.value || null }); }}><option value="">— nobody —</option>{people.map((p) => <option key={p.id} value={p.id}>{(p.full_name || p.email).split(' ')[0]}</option>)}</select>}</div>
             {m.status === 'canceled' ? <div><small>Status</small><span className="statuspill bad">Canceled</span></div> : isPast && <div><small>How did it go?</small><select className="statusselect" value={m.outcome || ''} onChange={(e) => { upd(m, { outcome: e.target.value || null, status: 'done' }); setSel({ ...m, outcome: e.target.value }); }}><option value="">—</option><option value="quoted">Quoted</option><option value="follow_up">Follow up</option><option value="signed">Signed</option><option value="not_fit">Not a fit</option><option value="no_show">No-show</option></select></div>}
           </div>
-          <div className="row"><div className="spacer" /><button className="btn-sm" onClick={() => setSel(null)}>Close</button></div>
+          <div className="row">{m.source === 'portal' && m.status !== 'canceled' && !isPast && <button className="btn-sm danger" onClick={async () => { const why = window.prompt('Cancel this call? The prospect and the closer get a cancellation. Reason (optional):', ''); if (why === null) return; const r = await cancelMeeting(m.id, why); say(r.error ? r : r.mailError ? { error: `Canceled here, but the cancellation email did not go: ${r.mailError}` } : null, 'Canceled. Both sides were told.'); setSel(null); load(); reload?.(); }}>Cancel the call</button>}<div className="spacer" /><button className="btn-sm" onClick={() => setSel(null)}>Close</button></div>
         </div></div>
       ); })()}
     </>

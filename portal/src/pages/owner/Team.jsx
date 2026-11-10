@@ -99,8 +99,8 @@ export function useTeamData() {
   const [d, setD] = useState(null);
   const load = async () => {
     const [people, calls, sessions, leads, meetings, rr] = await Promise.all([
-      supabase.from('profiles').select('id, full_name, email, role, is_sales, is_owner, active, last_seen_at').like('role', 'shipbay%').order('full_name'),
-      fetchAll('sales_calls', 'id, lead_id, outcome, started_at, seconds, by_user'),
+      supabase.from('profiles').select('id, full_name, email, role, is_sales, is_owner, active, last_seen_at, closer_id').like('role', 'shipbay%').order('full_name'),
+      fetchAll('sales_calls', 'id, lead_id, outcome, started_at, seconds, by_user', (q) => q.is('voided_at', null)),
       fetchAll('sales_call_sessions', 'id, started_at, ended_at, seconds, by_user'),
       fetchAll('sales_leads', 'id, company, email, stage, assigned_to, answered_at, deal_value, won_at, last_touch_at, source, filter_id'),
       fetchAll('sales_meetings', 'id, starts_at, status, outcome, assigned_to, invitee_name, lead_id'),
@@ -115,7 +115,7 @@ export function useTeamData() {
 export function teamStats(d, range) {
   const since = range === 'today' ? new Date(new Date().setHours(0, 0, 0, 0)).getTime() : range === 'week' ? Date.now() - 7 * 86400000 : range === 'month' ? Date.now() - 30 * 86400000 : 0;
   const inR = (iso) => iso && new Date(iso).getTime() >= since;
-  const reps = d.people.filter((p) => p.is_sales || p.is_owner);
+  const reps = d.people.filter((p) => p.active !== false && (p.is_sales || p.is_owner || p.role === 'shipbay_setter'));
   return reps.map((p) => {
     const C = d.calls.filter((c) => c.by_user === p.id && inR(c.started_at));
     const L = d.leads.filter((l) => l.assigned_to === p.id);
@@ -179,6 +179,8 @@ export default function Team() {
   if (!d) return <div className="card"><div className="empty">Loading…</div></div>;
   const say = (r, ok) => { if (r?.error) setMsg({ kind: 'err', text: r.error }); else if (ok) setMsg({ kind: 'ok', text: ok }); };
   const toggleSales = async (p) => { const { error } = await supabase.from('profiles').update({ is_sales: !p.is_sales }).eq('id', p.id); if (error) return say({ error: error.message }); reload(); };
+  const setCloser = async (p, v) => { const { error } = await supabase.from('profiles').update({ closer_id: v || null }).eq('id', p.id); if (error) return say({ error: error.message }); reload(); };
+  const closers = d ? d.people.filter((p) => p.active !== false && p.role !== 'shipbay_setter' && (p.is_sales || p.is_owner)) : [];
   const toggleRR = async (p) => { const members = d.rr.members.includes(p.id) ? d.rr.members.filter((x) => x !== p.id) : [...d.rr.members, p.id]; const { error } = await supabase.from('fin_settings').upsert({ key: 'round_robin', value: { ...d.rr, members, next: 0 } }); if (error) return say({ error: error.message }); reload(); };
   const who = (id) => { const p = d.people.find((x) => x.id === id); return p ? name(p) : '—'; };
   const leadName = (id) => d.leads.find((l) => l.id === id)?.company || d.leads.find((l) => l.id === id)?.email || 'a lead';
@@ -214,14 +216,14 @@ export default function Team() {
           {feed.length === 0 ? <div className="empty">Nothing logged yet.</div> : <ul className="feed">{feed.map((f, i) => <li key={i} className={f.kind}><span className="sm">{ago(f.at)}</span><b>{who(f.who)}</b><span>{f.text}</span></li>)}</ul>}
         </div>
         <div className="card">
-          <div className="cardhead"><h3>Goals</h3><select className="statusselect" value={gRep} onChange={(e) => setGRep(e.target.value)}><option value="">Team</option>{d.people.filter((p) => p.is_sales || p.is_owner).map((p) => <option key={p.id} value={p.id}>{name(p)}</option>)}</select></div>
+          <div className="cardhead"><h3>Goals</h3><select className="statusselect" value={gRep} onChange={(e) => setGRep(e.target.value)}><option value="">Team</option>{d.people.filter((p) => p.is_sales || p.is_owner || p.role === 'shipbay_setter').map((p) => <option key={p.id} value={p.id}>{name(p)}</option>)}</select></div>
           <p className="hint">{gRep ? 'This person’s own targets (blank = team default).' : 'Team targets. Progress shows on the Dashboard; each rep sees their own on their Sales page.'}</p>
           <table className="ordertable fin goalsedit"><thead><tr><th /><th className="n">Per day</th><th className="n">Per week</th></tr></thead><tbody>
             {['dials', 'emails', 'booked'].map((k) => <tr key={k}><td>{GOAL_LABELS[k]}</td><td className="n"><input className="cellnum" type="number" min="0" value={cur[`${k}_day`] ?? ''} onChange={(e) => setGoal(`${k}_day`, e.target.value)} /></td><td className="n"><input className="cellnum" type="number" min="0" value={cur[`${k}_week`] ?? ''} onChange={(e) => setGoal(`${k}_week`, e.target.value)} /></td></tr>)}
           </tbody></table>
         </div>
         <div className="card">
-          <div className="cardhead"><h3>Bonus rules</h3><select className="statusselect" value={gRep} onChange={(e) => setGRep(e.target.value)}><option value="">Team</option>{d.people.filter((p) => p.is_sales || p.is_owner).map((p) => <option key={p.id} value={p.id}>{name(p)}</option>)}</select></div>
+          <div className="cardhead"><h3>Bonus rules</h3><select className="statusselect" value={gRep} onChange={(e) => setGRep(e.target.value)}><option value="">Team</option>{d.people.filter((p) => p.is_sales || p.is_owner || p.role === 'shipbay_setter').map((p) => <option key={p.id} value={p.id}>{name(p)}</option>)}</select></div>
           {goals && (() => { const b = gRep ? { ...goals.bonus, ...(goals.bonus_reps[gRep] || {}) } : goals.bonus; const setB = (k, v) => saveGoals(gRep ? { ...goals, bonus_reps: { ...goals.bonus_reps, [gRep]: { ...(goals.bonus_reps[gRep] || {}), [k]: v } } } : { ...goals, bonus: { ...goals.bonus, [k]: v } }); return (
             <div className="addgrid two">
               {(b.rules?.length ? b.rules : DEFAULT_BONUS.rules).map((r, i) => <div key={i} className="wide2 rulerow"><span className="sm">{i === 0 ? 'Hit this' : 'OR this'}</span><select value={r.metric} onChange={(e) => { const rules = [...(b.rules || DEFAULT_BONUS.rules)]; rules[i] = { ...rules[i], metric: e.target.value }; setB('rules', rules); }}>{Object.entries(BONUS_METRICS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select><input className="cellnum" type="number" min="0" value={r.target} onChange={(e) => { const rules = [...(b.rules || DEFAULT_BONUS.rules)]; rules[i] = { ...rules[i], target: Number(e.target.value) || 0 }; setB('rules', rules); }} />{i > 0 && <button className="btn-xs" onClick={() => setB('rules', (b.rules || []).filter((_, j) => j !== i))}>×</button>}</div>)}
@@ -235,11 +237,12 @@ export default function Team() {
         </div>
         <div className="card">
           <div className="cardhead"><h3>Who’s on the team</h3></div>
-          <p className="hint">Sales team members see the Sales page: their own leads, the untouched call pool, their booked calls. Round-robin decides who gets each new email reply, in turn.</p>
-          <table className="ordertable fin"><thead><tr><th>Staff</th><th>On sales team</th><th>Email round-robin</th></tr></thead>
+          <p className="hint">Closers see Appt. Setting and the CRM. A setter sees Appt. Setting only and books calls for the closer picked here. Add a setter under Admin settings → Users with the Appointment setter role. Round-robin decides who gets each new email reply, in turn.</p>
+          <table className="ordertable fin"><thead><tr><th>Staff</th><th>On sales team</th><th>Sets appointments for</th><th>Email round-robin</th></tr></thead>
             <tbody>{d.people.filter((p) => p.active !== false).map((p) => (
               <tr key={p.id}><td><b>{p.full_name || p.email}</b><div className="sm">{p.email}</div></td>
-                <td><label className="chk"><input type="checkbox" checked={!!p.is_sales} onChange={() => toggleSales(p)} /> {p.is_sales ? 'yes' : 'no'}</label></td>
+                <td>{p.role === 'shipbay_setter' ? <span className="pill navy">Setter</span> : <label className="chk"><input type="checkbox" checked={!!p.is_sales} onChange={() => toggleSales(p)} /> {p.is_sales ? 'yes' : 'no'}</label>}</td>
+                <td>{p.role === 'shipbay_setter' ? <select className="statusselect" value={p.closer_id || ''} onChange={(e) => setCloser(p, e.target.value)}><option value="">— nobody yet —</option>{closers.map((c) => <option key={c.id} value={c.id}>{c.full_name || c.email}</option>)}</select> : <span className="sm">{d.people.filter((x) => x.closer_id === p.id && x.active !== false).map((x) => name(x)).join(', ') || '—'}</span>}</td>
                 <td><label className="chk"><input type="checkbox" disabled={!p.is_sales && !p.is_owner} checked={d.rr.members.includes(p.id)} onChange={() => toggleRR(p)} /> {d.rr.members.includes(p.id) ? `in rotation${d.rr.members[d.rr.next % Math.max(1, d.rr.members.length)] === p.id ? ' · next up' : ''}` : 'out'}</label></td></tr>
             ))}</tbody></table>
         </div>

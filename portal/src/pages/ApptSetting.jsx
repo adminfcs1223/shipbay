@@ -1,9 +1,10 @@
-// Appt. Setting — where a new salesperson starts (Derek, 2026-11-10): dial the queue, send your email after the call,
-// answer replies, book calls for the closers. Nothing else. Same data and rules as the CRM, scoped to the signed-in rep.
+// Appt. Setting — where a new salesperson starts (Derek, 2026-11-10): dial the queue with the script open, book the call
+// on the closer's calendar while the prospect is on the line, send your email after the call, answer replies. Nothing else.
+// Setters (role shipbay_setter) see only this; closers and the owner get it next to the CRM.
 import Sales, { APPT_TABS } from './owner/Sales';
 
 export default function ApptSetting({ me, go }) {
-  if (!me?.is_sales && !me?.is_owner) return <div className="card"><div className="empty">Ask Derek to add you to the sales team (Owner → Team).</div></div>;
+  if (!me?.is_sales && !me?.is_owner && me?.role !== 'shipbay_setter') return <div className="card"><div className="empty">Ask Derek to add you to the sales team (Owner → Team).</div></div>;
   return (
     <div className="owner">
       <div className="pagehead">

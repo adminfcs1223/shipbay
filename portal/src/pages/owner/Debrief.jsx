@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib';
 import { ownerFn, pct } from './util';
 import { listName, useReplyKit, fillTpl } from './Sales';
+import { logCall, sendInvite, SlotPicker, useCloser, fmtWhen } from './Appt';
 
 export const DIAL = [['no_answer', 'No answer'], ['voicemail', 'Voicemail'], ['bad_number', 'Bad number'], ['gatekeeper', 'Gatekeeper'], ['decision_maker', 'Reached decision-maker']];
 export const PICKED = [['owner_founder', 'Owner / founder'], ['ops', 'Ops'], ['cs', 'Customer service'], ['retail_floor', 'Retail floor']];
@@ -84,62 +85,47 @@ export function PowerButton({ lead, me, note, onDone, say }) {
 
 const label = (list, k) => (list.find(([x]) => x === k) || [])[1] || k || '—';
 
-/** the legacy outcome the scoreboards and stages run on, derived from the answers */
+/** The outcome the boards and stages run on. The server (log_call) decides; this mirrors it for display only.
+ *  A booking or a hard no counts whoever picked up, gatekeeper included. */
 export function outcomeFor(a) {
   if (a.dial_result === 'no_answer') return 'no_answer';
   if (a.dial_result === 'voicemail') return 'voicemail';
   if (a.dial_result === 'bad_number') return 'wrong_number';
-  if (a.dial_result === 'gatekeeper') return 'gatekeeper';
   if (a.result === 'booked') return 'booked';
   if (a.result === 'hard_no') return 'dnc';
+  if (a.dial_result === 'gatekeeper') return 'gatekeeper';
   if (a.fit === 'not_fit') return 'not_fit';
   return 'connected';
 }
-const etHour = (d) => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }).format(d)) % 24;
 
-/** Save one debriefed call: sales_calls row, lead patch, Blitz hand-off, HubSpot push. Returns the outcome. */
-export async function saveDebrief({ lead, me, started, seconds, note, a, emailedNow }) {
-  const outcome = outcomeFor(a);
-  const now = new Date();
-  const row = { lead_id: lead.id, started_at: new Date(started).toISOString(), ended_at: now.toISOString(), seconds, outcome, note: note || null, by_user: me.id, list_id: lead.filter_id || null, hour_block: etHour(new Date(started)),
-    dial_result: a.dial_result || null, picked_up: a.picked_up || null, fit: a.fit || null, not_fit_reason: a.fit === 'not_fit' ? a.not_fit_reason || null : null, not_fit_detail: a.fit === 'not_fit' ? a.not_fit_detail || null : null,
-    orders_month: a.orders_month ? Number(a.orders_month) : null, current_setup: a.current_setup || null, pain: a.pain || null, result: a.result || null, callback_at: a.result === 'callback' && a.callback_at ? new Date(a.callback_at).toISOString() : null, email_result: a.email_result || null };
-  // the lead: attempts, next action, stage, the durable answers
-  const next = { no_answer: 2, voicemail: 3, gatekeeper: 1, connected: 7 }[outcome];
-  const patch = { attempts: (lead.attempts || 0) + 1, last_outcome: outcome, last_touch_at: now.toISOString(), assigned_to: lead.assigned_to || me.id, next_action_at: row.callback_at || (next ? new Date(Date.now() + next * 86400000).toISOString() : null) };
-  if (row.picked_up) patch.picked_up = row.picked_up;
-  // the rep can correct the address before it sends (a different person, a better inbox)
-  const newEmail = (a.send === 'yes' && a.to_email && a.to_email.toLowerCase() !== (lead.email || '').toLowerCase()) ? a.to_email.toLowerCase() : null;
-  if (newEmail) { patch.email = newEmail; patch.notes = [patch.notes || lead.notes, `${now.toLocaleDateString()} email changed ${lead.email || '—'} → ${newEmail}`].filter(Boolean).join('\n'); }
-  if (row.orders_month != null) patch.orders_month_actual = row.orders_month;
-  if (row.current_setup) patch.current_setup = row.current_setup;
-  if (row.pain && row.pain !== 'none') patch.pain = row.pain;
-  if (row.not_fit_reason) patch.not_fit_reason = row.not_fit_reason;
-  if (outcome === 'booked') {
-    patch.stage = 'call_booked';
-    // Appt. Setting (Derek, 11-10): the setter books the call for a closer — the lead moves to the closer, the call lands on their calendar
-    const closer = a.book_for || lead.assigned_to || me.id; const at = a.book_at ? new Date(a.book_at) : null;
-    patch.assigned_to = closer; if (at && !isNaN(at)) patch.next_action_at = at.toISOString();
-    if (at && !isNaN(at)) await supabase.from('sales_meetings').insert({ external_id: `portal:${crypto.randomUUID()}`, source: 'portal', name: `Discovery call — ${lead.company || lead.domain || lead.email}`, starts_at: at.toISOString(), ends_at: new Date(at.getTime() + 20 * 60000).toISOString(), status: 'active', invitee_name: lead.contact_name || null, invitee_email: lead.email || null, lead_id: lead.id, assigned_to: closer, notes: [`Booked by ${me.full_name || me.email} from the dialer`, note].filter(Boolean).join('\n') }).then(() => {}, () => {});
+/** Save one debriefed call. The call row, every effect on the lead and a booking are ONE transaction on the server
+ *  (log_call), so a half-saved call cannot happen and a retry is never a second call. Email, invite and the Smartlead
+ *  stop run after it; if one of those fails the call is still saved and the message says exactly what did not happen.
+ *  Returns the outcome, { outcome, error } when a follow-up step failed, { saved: false, error } when nothing was saved,
+ *  or { queued: true } when the connection dropped and the call is waiting in this browser. */
+export async function saveDebrief({ lead, me, started, seconds, note, a, emailedNow, sessionId, meeting, clientId }) {
+  const send = a.send === 'yes' && !!a.draft?.to;
+  const p = {
+    ...(clientId ? { client_id: clientId } : {}), lead_id: lead.id, started_at: new Date(started).toISOString(), seconds, note: note || '', session_id: sessionId || '',
+    dial_result: a.dial_result || '', picked_up: a.picked_up || '', fit: a.fit || '', not_fit_reason: a.not_fit_reason || '', not_fit_detail: a.not_fit_detail || '',
+    orders_month: a.orders_month || '', current_setup: a.current_setup || '', pain: a.pain || '', result: a.result || '',
+    callback_at: a.result === 'callback' && a.callback_at ? new Date(a.callback_at).toISOString() : '', to_email: send ? a.draft.to : '',
+    meeting_id: a.result === 'booked' && meeting ? meeting.id : '',
+    ...(a.result === 'booked' && !meeting && a.book_at ? { book: { closer_id: a.book_for || '', starts_at: a.book_at, invitee_email: a.book_email || '' } } : {}),
+  };
+  const r = await logCall(p);
+  if (r.error) return { saved: false, error: r.error };
+  if (r.queued) return { queued: true };
+  const problems = [];
+  if (r.meeting_id && !meeting) { const inv = await sendInvite(r.meeting_id); if (inv?.error) problems.push(`The call is on the calendar, but the invite did not go: ${inv.error}`); }
+  if (send && !['booked', 'dnc', 'not_fit'].includes(r.outcome)) {
+    const m = await sendRepEmail({ to: a.draft.to, subject: a.draft.subject, body: a.draft.body, lead });
+    await supabase.rpc('call_email_result', { p_call: r.call_id, p_result: m.error ? 'failed' : 'sent' });
+    if (m.error) problems.push(`Call saved, but the email didn't go: ${m.error}`);
   }
-  else if (outcome === 'dnc') patch.stage = 'dnc';
-  else if (outcome === 'not_fit') patch.stage = 'lost';
-  else if (outcome === 'wrong_number') { patch.in_calls = false; patch.tags = [...new Set([...(lead.tags || []), 'bad_number'])]; }
-  else if (lead.stage === 'new') patch.stage = 'contacted';
-  if (a.result === 'soft_no') patch.next_action_at = new Date(Date.now() + 45 * 86400000).toISOString();
-  if (note) patch.notes = [patch.notes || lead.notes, `${now.toLocaleDateString()} ${label(DIAL, a.dial_result)}${a.result ? ` → ${label(RESULT, a.result)}` : ''}: ${note}`].filter(Boolean).join('\n');
-  if ((lead.attempts || 0) + 1 >= 4 && !['booked', 'connected', 'gatekeeper'].includes(outcome)) patch.in_calls = false;   // 4 tries with no human → park it
-  // The email (rev 4): the rep's own, sent now from their address. email_result records what happened: sent / failed / none.
-  let sendErr = null;
-  if (a.send === 'yes' && a.draft?.to && !(outcome === 'booked' || outcome === 'dnc' || outcome === 'not_fit')) {
-    const r = await sendRepEmail({ to: a.draft.to, subject: a.draft.subject, body: a.draft.body, lead });
-    if (r.error) { sendErr = r.error; row.email_result = 'failed'; } else { row.email_result = 'sent'; if (!lead.first_email_at) patch.first_email_at = now.toISOString(); }
-  }
-  if (emailedNow && !lead.first_email_at) patch.first_email_at = now.toISOString();
-  await supabase.from('sales_leads').update(patch).eq('id', lead.id);
-  await supabase.from('sales_calls').insert(row);
-  if (outcome === 'dnc' && lead.email) ownerFn({ action: 'smartlead_stop_lead', email: lead.email });
-  return sendErr ? { outcome, error: `Call saved, but the email didn't go: ${sendErr}` } : outcome;
+  if (emailedNow && !lead.first_email_at) await supabase.from('sales_leads').update({ first_email_at: new Date().toISOString() }).eq('id', lead.id);
+  if (r.outcome === 'dnc' && lead.email) { const stop = await ownerFn({ action: 'smartlead_stop_lead', email: lead.email }); if (stop?.error) problems.push(`Marked do-not-contact here, but the email campaign did not confirm the stop: ${stop.error}`); }
+  return problems.length ? { outcome: r.outcome, error: problems.join(' ') } : r.outcome;
 }
 
 function Pick({ options, value, onChange, cols = 3 }) {
@@ -147,9 +133,9 @@ function Pick({ options, value, onChange, cols = 3 }) {
 }
 
 /** The modal. Quick path for no-answer / voicemail / bad number; full path when a human picked up. */
-export function Debrief({ lead, me, people = [], seconds, note, setNote, emailedNow, onSave, onCancel, saving = false }) {
-  const kit = useReplyKit(me);
-  const [a, setA] = useState({ dial_result: '', picked_up: '', fit: '', not_fit_reason: '', not_fit_detail: '', orders_month: '', current_setup: '', pain: '', result: '', callback_at: '', send: '', to_email: lead.email || '', email_result: '', draft: null, book_for: me?.id || '', book_at: '' });
+export function Debrief({ lead, me, people = [], seconds, note, setNote, emailedNow, onSave, onCancel, saving = false, meeting = null }) {
+  const kit = useReplyKit(me); const book = useCloser(me, people);
+  const [a, setA] = useState({ dial_result: '', picked_up: '', fit: '', not_fit_reason: '', not_fit_detail: '', orders_month: '', current_setup: '', pain: '', result: '', callback_at: '', send: '', to_email: lead.email || '', email_result: '', draft: null, book_for: '', book_at: '', book_email: lead.email || '' });
   const setDraft = (d) => setA((x) => ({ ...x, draft: d, to_email: d.to }));
   const set = (k) => (v) => setA((x) => ({ ...x, [k]: v }));
   const human = a.dial_result === 'gatekeeper' || a.dial_result === 'decision_maker';
@@ -159,7 +145,7 @@ export function Debrief({ lead, me, people = [], seconds, note, setNote, emailed
   const askSend = !!lead.email && !inSeq && (NO_PICKUP.includes(a.dial_result) || (human && !!a.result && !NO_EMAIL_AFTER.includes(a.result) && a.fit !== 'not_fit'));
   const toOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a.to_email || '');
   const sendDone = !askSend || (a.send === 'no') || (a.send === 'yes' && !!a.draft && toOk && !!a.draft.subject);
-  const bookDone = a.result !== 'booked' || (!!a.book_for && !!a.book_at);
+  const bookDone = a.result !== 'booked' || !!meeting || (!!book.closerId && !!a.book_at);
   const canSave = !!a.dial_result && sendDone && bookDone && (quick || (a.dial_result === 'gatekeeper' ? !!a.result : !!a.picked_up && !!a.fit && (a.fit !== 'not_fit' || !!a.not_fit_reason) && !!a.result));
   useEffect(() => { const k = (e) => { if (e.key === 'Escape') onCancel(); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onCancel]);
   return (
@@ -182,18 +168,20 @@ export function Debrief({ lead, me, people = [], seconds, note, setNote, emailed
         </>}
         {human && <section><div className="dbr-q">7 · Outcome</div><Pick options={RESULT} value={a.result} onChange={set('result')} cols={5} />
           {a.result === 'callback' && <div className="dbr-sub"><input type="datetime-local" value={a.callback_at} onChange={(e) => set('callback_at')(e.target.value)} /></div>}
-          {a.result === 'booked' && <div className="dbr-sub dbr-book">
-            <div className="dbr-q">Book it for</div>
-            <Pick options={(people.length ? people : [me]).map((p) => [p.id, p.id === me?.id ? `${(p.full_name || p.email || 'me').split(' ')[0]} (me)` : (p.full_name || p.email)])} value={a.book_for} onChange={set('book_for')} cols={Math.min(4, Math.max(2, people.length || 1))} />
-            <label className="dbr-to"><b>When</b><input type="datetime-local" value={a.book_at} onChange={(e) => set('book_at')(e.target.value)} /></label>
-            <span className="sm">Lands on their Calendar and moves the lead to them. Send the invite from your own calendar.</span>
-          </div>}</section>}
+          {a.result === 'booked' && (meeting
+            ? <div className="dbr-sub dbr-book"><div className="booked"><div className="booked-when">{fmtWhen(meeting.starts_at)}</div><div className="booked-who">Already booked{meeting.closer_name ? ` with ${meeting.closer_name.split(' ')[0]}` : ''} during this call.</div></div></div>
+            : <div className="dbr-sub dbr-book">
+              {book.locked ? <div className="bookfor one">For <b>{book.closer ? (book.closer.full_name || book.closer.email) : 'your closer'}</b></div>
+                : <><div className="dbr-q">Book it for</div><Pick options={(people.length ? people : [me]).map((p) => [p.id, p.id === me?.id ? `${(p.full_name || p.email || 'me').split(' ')[0]} (me)` : (p.full_name || p.email)])} value={book.closerId} onChange={(v) => { book.setCloserId(v); set('book_at')(''); }} cols={Math.min(4, Math.max(2, people.length || 1))} /></>}
+              <SlotPicker closerId={book.closerId} value={a.book_at} onChange={set('book_at')} />
+              <label className="dbr-to"><b>Invite to</b><input type="email" value={a.book_email} placeholder="their email" spellCheck={false} onChange={(e) => set('book_email')(e.target.value.trim())} /></label>
+            </div>)}</section>}
         {askSend && <section><div className="dbr-q">{human ? '8' : '2'} · Send your email now?</div><Pick options={YESNO} value={a.send} onChange={(v) => setA((x) => ({ ...x, send: v, draft: v === 'yes' ? (x.draft || draftFor(kit, lead, me)) : null }))} cols={2} />
           {a.send === 'yes' && a.draft && <div className="dbr-sub"><RepCompose draft={a.draft} setDraft={setDraft} me={me} lead={lead} sending={saving} /></div>}
         </section>}
         {!askSend && !!lead.email && inSeq && (quick || human) && <section><span className="sm">Already in a sequence — this just logs the dial.</span></section>}
         <section><textarea rows={2} placeholder="One line: who you spoke to, what they said, when to call back…" value={note} onChange={(e) => setNote(e.target.value)} /></section>
-        <div className="row"><button className="btn-sm" type="button" onClick={onCancel}>Back to the call</button><div className="spacer" /><button className="btn-sm primary" type="button" disabled={!canSave || saving} onClick={() => onSave(a)}>{saving ? (a.send === 'yes' ? 'Sending…' : 'Saving…') : a.send === 'yes' ? 'Send & close call' : 'Close call'}</button></div>
+        <div className="row"><button className="btn-sm" type="button" onClick={onCancel}>Back to the call</button><div className="spacer" /><button className="btn-sm primary" type="button" disabled={!canSave || saving} onClick={() => onSave({ ...a, book_for: book.closerId })}>{saving ? (a.send === 'yes' ? 'Sending…' : 'Saving…') : a.send === 'yes' ? 'Send & close call' : 'Close call'}</button></div>
       </div>
     </div>
   );

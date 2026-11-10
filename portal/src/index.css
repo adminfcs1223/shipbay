@@ -1541,3 +1541,72 @@ label.dbr-to span { color: var(--muted); }
 .importpage .bar, .importmodal .bar { margin-top: 14px; }
 .dbr-book { display: flex; flex-direction: column; gap: 10px; }
 .dbr-book .dbr-q { margin: 0; }
+
+/* Appt. Setting rev 6 (2026-11-10) — script, booking, setters · v3 */
+.btn-sm.on, .btn-xs.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.callgrid.withscript { grid-template-columns: 1fr 1fr; }
+.script .scriptbody { white-space: pre-wrap; font: 15px/1.62 var(--font-body); color: var(--ink); max-height: 64vh; overflow: auto; margin: 0; }
+.script .scriptedit { width: 100%; padding: 12px 14px; border: 1.5px solid var(--line-2); border-radius: 10px; font: 14.5px/1.55 var(--font-body); resize: vertical; background: #fff; }
+.script .row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.script code { font: 600 12px var(--font); background: var(--paper-2); padding: 1px 6px; border-radius: 5px; }
+.slots { display: grid; gap: 10px; }
+.slots-nav { display: flex; gap: 8px; align-items: center; }
+.slots-nav .spacer { flex: 1; }
+.slotgrid { display: grid; gap: 10px; align-items: start; max-height: 320px; overflow: auto; }
+.slotday { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.slotday > b { font-size: 13px; font-weight: 700; letter-spacing: -.01em; padding-bottom: 6px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: #fff; }
+.slotday button { padding: 8px 4px; border: 1.5px solid var(--line-2); border-radius: 8px; background: #fff; font: 600 13px var(--font); font-variant-numeric: tabular-nums; cursor: pointer; color: var(--ink); }
+.slotday button:hover { border-color: var(--ink); }
+.slotday button.on { background: var(--orange); border-color: var(--orange); color: #fff; }
+.bookform { display: grid; gap: 14px; }
+.bookform textarea { width: 100%; padding: 11px 14px; border: 1.5px solid var(--line-2); border-radius: 10px; font: 14.5px var(--font-body); resize: vertical; }
+.bookform .row, .booked .row { display: flex; align-items: center; gap: 10px; margin-top: 0; }
+.bookform .row .spacer, .booked .row .spacer { flex: 1; }
+.bookfor { font-size: 15px; display: grid; gap: 8px; }
+.booked { display: grid; gap: 6px; padding: 6px 0; }
+.booked-when { font-size: 30px; font-weight: 800; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.booked-who { font-size: 15px; color: var(--muted); }
+.bookgrid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; align-items: start; }
+.owner .bookgrid > .card { margin-top: 0; }
+.bookfind .search { width: 100%; }
+.bookwho { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 0 14px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+.bookwho b { display: block; font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
+.bookings { list-style: none; margin: 0; padding: 0; }
+.bookings li { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); font-size: 13.5px; }
+.bookings li:first-child { border-top: 0; }
+.bookings li > div:first-child { display: grid; gap: 2px; min-width: 0; }
+.bookings li b { font-variant-numeric: tabular-nums; }
+.bookings .acts { display: flex; gap: 6px; flex-shrink: 0; }
+.msg.warn { background: var(--amber-tint); border: 1px solid rgba(184,115,10,.35); color: #7A4D05; }
+.msg.waiting { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+tr.voided td { opacity: .45; text-decoration: line-through; }
+tr.voided td:last-child { text-decoration: none; }
+.glance.setters { gap: 44px; flex-wrap: wrap; }
+.glance.setters > div { display: flex; flex-direction: column-reverse; }
+.glance.setters > div > small { font: 500 13px var(--font); letter-spacing: 0; text-transform: none; color: var(--muted); margin: 6px 0 0; }
+.glance.setters > div > b { font-size: 34px; font-weight: 800; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+.setterstable tr.click { cursor: pointer; }
+.setterstable tr.detailrow td { background: var(--bg-soft); }
+.setterdetail { display: grid; grid-template-columns: 1fr 1.4fr; gap: 28px; padding: 6px 0; }
+.setterdetail h4 { font-size: 14px; font-weight: 700; margin: 0 0 8px; }
+.availgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.availgrid .wide { grid-column: 1 / -1; }
+.availgrid label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.availgrid input, .availgrid select { padding: 10px 12px; border: 1.5px solid var(--line-2); border-radius: 10px; font: 600 14.5px var(--font); color: var(--ink); background: #fff; width: 100%; }
+.availgrid .lbl { font-size: 13px; font-weight: 600; color: var(--muted); display: block; margin-bottom: 6px; }
+.daypick { display: flex; gap: 6px; flex-wrap: wrap; }
+.daypick button { padding: 8px 14px; border: 1.5px solid var(--line-2); border-radius: 99px; background: #fff; font: 600 13px var(--font); cursor: pointer; color: var(--ink); }
+.daypick button.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.calgrid .ev.portal { border-left-color: var(--orange); background: rgba(255,107,21,.1); }
+.sw.portal { background: var(--orange); }
+.timer .emailacts { align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 1000px) { .bookgrid, .callgrid.withscript, .setterdetail { grid-template-columns: 1fr; } .availgrid { grid-template-columns: 1fr 1fr; } }
+.bookfor.one { display: block; font-size: 16px; }
+.dialer .timer { flex-wrap: wrap; row-gap: 10px; }
+.timer .emailacts .btn-sm, .timer .emailacts .statuspill { white-space: nowrap; }
+.setterdetail .feed li { grid-template-columns: 64px minmax(0, 190px) minmax(0, 1fr); }
+.setterdetail .feed li b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setterstable td, .setterstable th { white-space: nowrap; }
+.setterstable td .sm { white-space: normal; }
+.card.ownertabs.withsearch .gsearch { width: 230px; }
+.card.ownertabs.withsearch .tabs button { padding: 13px 11px; }

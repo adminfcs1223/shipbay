@@ -834,7 +834,8 @@ Deno.serve(async (req) => {
     return null;
   };
   if (!prof?.is_owner) {
-    if (prof?.is_sales && REP_ACTIONS.has(b.action)) { try { const r = await repAction(); if (r) return r; } catch (e) { return json({ error: String(e) }, 500); } }
+    const SETTER_ACTIONS = new Set(['smartlead_stop_lead', 'gmail_connect', 'gmail_sync', 'gmail_disconnect', 'gmail_send', 'rep_send']);   // an appointment setter: their own mail + the DNC stop, nothing else
+    if ((prof?.is_sales && REP_ACTIONS.has(b.action)) || (prof?.role === 'shipbay_setter' && SETTER_ACTIONS.has(b.action))) { try { const r = await repAction(); if (r) return r; } catch (e) { return json({ error: String(e) }, 500); } }
     return json({ error: 'This area is for the owner only.' }, 403);
   }
   if (REP_ACTIONS.has(b.action) && b.action !== 'smartlead_stop_lead') { try { const r = await repAction(); if (r) return r; } catch (e) { return json({ error: String(e) }, 500); } }

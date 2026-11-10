@@ -77,9 +77,21 @@ export const HELP = {
       'Admin settings → Careers: the roles on shipbay3pl.com/careers. Edit a role’s pay, description or status (only Open roles show on the site), add a new one, and read every application sent from the site.',
     ],
   },
+  apptsetting: {
+    title: 'Appt. Setting',
+    what: 'Dial the queue, book the call on the closer’s calendar while the prospect is still on the line, send your email after.',
+    steps: [
+      'Calls: the next lead is on the card. Script opens your call script beside it, filled in with their name and company. Edit saves your own version; Derek sets the shared one.',
+      'Start call, talk, and press Book a call the moment they say yes. Pick one of the closer’s open times; the prospect and the closer both get a calendar invite. Two people cannot book the same time.',
+      'End call opens the debrief. Every answer, the lead’s next step and the booking are saved together on the server. If your connection drops, the call waits in this browser and goes up when you are back; it is never logged twice.',
+      'Logged the wrong lead? Your last calls → Void. It drops out of every count and the lead gets the try back. Nothing is deleted.',
+      'Book: book a call without dialing (someone called back, or replied by email), and see, resend or cancel the calls you booked.',
+      'A setter books for the closer Derek assigned them. Closers set the hours they take calls under Settings → When I take booked calls.',
+    ],
+  },
   salesdesk: {
-    title: 'Sales',
-    what: 'Your booked calls and the leads handed to you.',
-    steps: ['Booked calls come from Calendly; the join link is on the row. After the call, pick how it went.', 'Your leads: change the stage, log a call outcome, keep notes and a follow-up date. Derek hands leads over from the owner area.'],
+    title: 'CRM',
+    what: 'Your pipeline, the calls on your calendar, and what your setters are doing.',
+    steps: ['Calendar: calls booked for you in Appt. Setting (orange), Calendly and Google Calendar. After a call, open it and pick how it went; that is what the show rate counts.', 'Setters: every setter who books for you. Dials, how many reached a person, calls booked, what is coming up and how many showed. Click a name for their next appointments and last calls.', 'Your leads: change the stage, log a call outcome, keep notes and a follow-up date.', 'Settings → When I take booked calls: the days and hours setters can book you.'],
   },
 };

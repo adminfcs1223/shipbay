@@ -1,7 +1,7 @@
 // admin-users — ShipBay ADMINS only (role shipbay_admin). Manage every portal login: staff and client users.
 //   { action: 'create', email, full_name?, role, org_id?, phone?, send_email? } → auth user + profile; returns { email, password } ONCE
 //   { action: 'reset', user_id }                      → new generated password, returned once
-//   { action: 'update', user_id, full_name?, role?, org_id?, phone? }
+//   { action: 'update', user_id, full_name?, role?, org_id?, phone? }   (role shipbay_setter = Appt. Setting only; the closer is set under Admin → Team)
 //   { action: 'set_active', user_id, active }         → bans / unbans the login
 // Deploy: supabase functions deploy admin-users
 import { createClient } from 'npm:@supabase/supabase-js@2';
@@ -9,7 +9,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, apikey, x-client-info' };
 const LOGIN_URL = 'https://auth.shipbay3pl.com';
-const ROLES = ['shipbay_admin', 'shipbay_staff', 'client_admin', 'client_user'];
+const ROLES = ['shipbay_admin', 'shipbay_staff', 'shipbay_setter', 'client_admin', 'client_user'];
 const json = (b: unknown, status = 200) => Response.json(b, { status, headers: cors });
 const esc = (s: string) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 
@@ -19,7 +19,7 @@ function genPassword(len = 14): string {
   return Array.from(buf, (n) => alphabet[n % alphabet.length]).join('');
 }
 
-async function sendWelcome(email: string, password: string, first: string, staff: boolean, brand?: string | null) {
+async function sendWelcome(email: string, password: string, first: string, staff: boolean, brand?: string | null, setter = false) {
   const { data: sec } = await admin.from('platform_secrets').select('value').eq('key', 'RESEND_API_KEY').maybeSingle();
   const apiKey = sec?.value || Deno.env.get('RESEND_API_KEY');
   if (!apiKey) return { error: 'No Resend API key — add it under Integrations → Email sending.' };
@@ -28,7 +28,7 @@ async function sendWelcome(email: string, password: string, first: string, staff
     <div style="height:5px;background:#FF6B15;border-radius:3px;margin-bottom:22px"></div>
     <p style="font-size:12px;letter-spacing:.14em;color:#D14E00;margin:0 0 6px"><b>SHIPBAY.DASHBOARD</b></p>
     <h1 style="font-size:24px;margin:0 0 14px">${esc(first)}, your shipbay login is ready<span style="color:#FF6B15">.</span></h1>
-    <p>${staff ? 'You now have a staff login to shipbay.dashboard — orders, receiving, the packing station and client accounts.' : `${esc(brand || 'Your brand')} now has a login to shipbay.dashboard — inventory, orders, shipments and documents at our Hillsborough warehouse.`}</p>
+    <p>${setter ? 'You now have a login to the ShipBay sales desk: your call queue, the call script and the booking calendar.' : staff ? 'You now have a staff login to shipbay.dashboard — orders, receiving, the packing station and client accounts.' : `${esc(brand || 'Your brand')} now has a login to shipbay.dashboard — inventory, orders, shipments and documents at our Hillsborough warehouse.`}</p>
     <table style="border-collapse:collapse;background:#F6F7F9;border:1px solid #E8E6E1;border-radius:10px;margin:18px 0;width:100%">${cred('Sign in at', LOGIN_URL.replace('https://', ''))}${cred('Email', email)}${cred('Temporary password', password)}</table>
     <p style="margin:22px 0"><a href="${LOGIN_URL}" style="background:#FF6B15;color:#fff;text-decoration:none;padding:13px 24px;border-radius:9px;font-weight:bold;display:inline-block">Sign in to shipbay.dashboard →</a></p>
     <p style="font-size:13.5px;color:#5A6473">This password is temporary — use <b>Forgot password?</b> on the sign-in page any time to pick your own. Keep this email private; we'll never ask you for your password.</p>
@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
     let brand: string | null = null;
     if (org_id) { const { data: o } = await admin.from('orgs').select('name').eq('id', org_id).single(); brand = o?.name ?? null; }
     let mail: any = { skipped: true };
-    if (b.send_email) mail = await sendWelcome(email, password, (full_name || '').split(/\s+/)[0] || 'there', role.startsWith('shipbay'), brand);
+    if (b.send_email) mail = await sendWelcome(email, password, (full_name || '').split(/\s+/)[0] || 'there', role.startsWith('shipbay'), brand, role === 'shipbay_setter');
     return json({ ok: true, user_id: data.user.id, email, password, mail });
   }
 
@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
     const { error } = await admin.auth.admin.updateUserById(p.id, { password });
     if (error) return json({ error: error.message }, 400);
     let mail: any = { skipped: true };
-    if (b.send_email) { let brand: string | null = null; if (p.org_id) { const { data: o } = await admin.from('orgs').select('name').eq('id', p.org_id).single(); brand = o?.name ?? null; } mail = await sendWelcome(p.email, password, (p.full_name || '').split(/\s+/)[0] || 'there', String(p.role).startsWith('shipbay'), brand); }
+    if (b.send_email) { let brand: string | null = null; if (p.org_id) { const { data: o } = await admin.from('orgs').select('name').eq('id', p.org_id).single(); brand = o?.name ?? null; } mail = await sendWelcome(p.email, password, (p.full_name || '').split(/\s+/)[0] || 'there', String(p.role).startsWith('shipbay'), brand, p.role === 'shipbay_setter'); }
     return json({ ok: true, email: p.email, password, mail });
   }
 
@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
     const patch: any = {};
     if (b.full_name !== undefined) patch.full_name = String(b.full_name).trim() || null;
     if (b.phone !== undefined) patch.phone = b.phone || null;
-    if (b.role && ROLES.includes(b.role)) { patch.role = b.role; patch.org_id = b.role.startsWith('client') ? (b.org_id || null) : null; }
+    if (b.role && ROLES.includes(b.role)) { patch.role = b.role; patch.org_id = b.role.startsWith('client') ? (b.org_id || null) : null; if (b.role !== 'shipbay_setter') patch.closer_id = null; else patch.is_sales = false; }
     else if (b.org_id !== undefined) patch.org_id = b.org_id || null;
     const { error } = await admin.from('profiles').update(patch).eq('id', b.user_id);
     if (error) return json({ error: error.message }, 400);

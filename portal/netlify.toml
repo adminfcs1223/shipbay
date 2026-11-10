@@ -6,6 +6,14 @@
 [build.environment]
   NODE_VERSION = "22"
 
+# Baseline security headers (2026-11-10): the signed-in app cannot be framed by another site (clickjacking), no MIME sniffing.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "SAMEORIGIN"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
 # Branded, same-host endpoints for marketplaces (Shopify requires the OAuth callback host to match the App URL host).
 # Proxied (200) so the browser stays on dashboard.shipbay3pl.com; query string, headers and body pass through.
 [[redirects]]
