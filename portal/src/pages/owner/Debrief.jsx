@@ -115,7 +115,13 @@ export async function saveDebrief({ lead, me, started, seconds, note, a, emailed
   if (row.current_setup) patch.current_setup = row.current_setup;
   if (row.pain && row.pain !== 'none') patch.pain = row.pain;
   if (row.not_fit_reason) patch.not_fit_reason = row.not_fit_reason;
-  if (outcome === 'booked') patch.stage = 'call_booked';
+  if (outcome === 'booked') {
+    patch.stage = 'call_booked';
+    // Appt. Setting (Derek, 11-10): the setter books the call for a closer — the lead moves to the closer, the call lands on their calendar
+    const closer = a.book_for || lead.assigned_to || me.id; const at = a.book_at ? new Date(a.book_at) : null;
+    patch.assigned_to = closer; if (at && !isNaN(at)) patch.next_action_at = at.toISOString();
+    if (at && !isNaN(at)) await supabase.from('sales_meetings').insert({ external_id: `portal:${crypto.randomUUID()}`, source: 'portal', name: `Discovery call — ${lead.company || lead.domain || lead.email}`, starts_at: at.toISOString(), ends_at: new Date(at.getTime() + 20 * 60000).toISOString(), status: 'active', invitee_name: lead.contact_name || null, invitee_email: lead.email || null, lead_id: lead.id, assigned_to: closer, notes: [`Booked by ${me.full_name || me.email} from the dialer`, note].filter(Boolean).join('\n') }).then(() => {}, () => {});
+  }
   else if (outcome === 'dnc') patch.stage = 'dnc';
   else if (outcome === 'not_fit') patch.stage = 'lost';
   else if (outcome === 'wrong_number') { patch.in_calls = false; patch.tags = [...new Set([...(lead.tags || []), 'bad_number'])]; }
@@ -141,9 +147,9 @@ function Pick({ options, value, onChange, cols = 3 }) {
 }
 
 /** The modal. Quick path for no-answer / voicemail / bad number; full path when a human picked up. */
-export function Debrief({ lead, me, seconds, note, setNote, emailedNow, onSave, onCancel, saving = false }) {
+export function Debrief({ lead, me, people = [], seconds, note, setNote, emailedNow, onSave, onCancel, saving = false }) {
   const kit = useReplyKit(me);
-  const [a, setA] = useState({ dial_result: '', picked_up: '', fit: '', not_fit_reason: '', not_fit_detail: '', orders_month: '', current_setup: '', pain: '', result: '', callback_at: '', send: '', to_email: lead.email || '', email_result: '', draft: null });
+  const [a, setA] = useState({ dial_result: '', picked_up: '', fit: '', not_fit_reason: '', not_fit_detail: '', orders_month: '', current_setup: '', pain: '', result: '', callback_at: '', send: '', to_email: lead.email || '', email_result: '', draft: null, book_for: me?.id || '', book_at: '' });
   const setDraft = (d) => setA((x) => ({ ...x, draft: d, to_email: d.to }));
   const set = (k) => (v) => setA((x) => ({ ...x, [k]: v }));
   const human = a.dial_result === 'gatekeeper' || a.dial_result === 'decision_maker';
@@ -153,7 +159,8 @@ export function Debrief({ lead, me, seconds, note, setNote, emailedNow, onSave, 
   const askSend = !!lead.email && !inSeq && (NO_PICKUP.includes(a.dial_result) || (human && !!a.result && !NO_EMAIL_AFTER.includes(a.result) && a.fit !== 'not_fit'));
   const toOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a.to_email || '');
   const sendDone = !askSend || (a.send === 'no') || (a.send === 'yes' && !!a.draft && toOk && !!a.draft.subject);
-  const canSave = !!a.dial_result && sendDone && (quick || (a.dial_result === 'gatekeeper' ? !!a.result : !!a.picked_up && !!a.fit && (a.fit !== 'not_fit' || !!a.not_fit_reason) && !!a.result));
+  const bookDone = a.result !== 'booked' || (!!a.book_for && !!a.book_at);
+  const canSave = !!a.dial_result && sendDone && bookDone && (quick || (a.dial_result === 'gatekeeper' ? !!a.result : !!a.picked_up && !!a.fit && (a.fit !== 'not_fit' || !!a.not_fit_reason) && !!a.result));
   useEffect(() => { const k = (e) => { if (e.key === 'Escape') onCancel(); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onCancel]);
   return (
     <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
@@ -174,7 +181,13 @@ export function Debrief({ lead, me, seconds, note, setNote, emailedNow, onSave, 
           <section><div className="dbr-q">6 · Pain they named</div><Pick options={PAIN} value={a.pain} onChange={set('pain')} cols={6} /></section>
         </>}
         {human && <section><div className="dbr-q">7 · Outcome</div><Pick options={RESULT} value={a.result} onChange={set('result')} cols={5} />
-          {a.result === 'callback' && <div className="dbr-sub"><input type="datetime-local" value={a.callback_at} onChange={(e) => set('callback_at')(e.target.value)} /></div>}</section>}
+          {a.result === 'callback' && <div className="dbr-sub"><input type="datetime-local" value={a.callback_at} onChange={(e) => set('callback_at')(e.target.value)} /></div>}
+          {a.result === 'booked' && <div className="dbr-sub dbr-book">
+            <div className="dbr-q">Book it for</div>
+            <Pick options={(people.length ? people : [me]).map((p) => [p.id, p.id === me?.id ? `${(p.full_name || p.email || 'me').split(' ')[0]} (me)` : (p.full_name || p.email)])} value={a.book_for} onChange={set('book_for')} cols={Math.min(4, Math.max(2, people.length || 1))} />
+            <label className="dbr-to"><b>When</b><input type="datetime-local" value={a.book_at} onChange={(e) => set('book_at')(e.target.value)} /></label>
+            <span className="sm">Lands on their Calendar and moves the lead to them. Send the invite from your own calendar.</span>
+          </div>}</section>}
         {askSend && <section><div className="dbr-q">{human ? '8' : '2'} · Send your email now?</div><Pick options={YESNO} value={a.send} onChange={(v) => setA((x) => ({ ...x, send: v, draft: v === 'yes' ? (x.draft || draftFor(kit, lead, me)) : null }))} cols={2} />
           {a.send === 'yes' && a.draft && <div className="dbr-sub"><RepCompose draft={a.draft} setDraft={setDraft} me={me} lead={lead} sending={saving} /></div>}
         </section>}

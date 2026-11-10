@@ -802,7 +802,8 @@ Deno.serve(async (req) => {
       if (sb.action === 'tick') {
         // one scheduled pass: everything that can move, each guarded so one failure doesn't stop the rest
         const out: Record<string, unknown> = {};
-        for (const [k, fn] of [['hubspot', () => hubspotSync(false)], ['gmail', () => gmailSync('', true)]] as [string, () => Promise<unknown>][]) { try { out[k] = await fn(); } catch (e) { out[k] = { error: String((e as Error).message).slice(0, 200) }; } }
+        // HubSpot is out (Derek, 2026-11-10): the tick syncs Gmail only. hubspotSync stays callable by hand (Admin) in case the records are ever wanted again.
+        for (const [k, fn] of [['gmail', () => gmailSync('', true)]] as [string, () => Promise<unknown>][]) { try { out[k] = await fn(); } catch (e) { out[k] = { error: String((e as Error).message).slice(0, 200) }; } }
         // Smartlead is NOT in the tick: with it the tick ran past pg_net's 120 s and backed up the queue the Power
         // enrollment cron shares. It has its own cron, `shipbay-smartlead-sync` (every 5 min → action smartlead_sync).
         return json({ ok: true, ...out });

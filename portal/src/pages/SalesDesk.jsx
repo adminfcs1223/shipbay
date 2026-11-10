@@ -1,15 +1,15 @@
-// Sales — the salesperson's desk. Same CRM as the owner's Sales section, scoped to this rep: their own leads and
-// booked calls, plus the shared pool of untouched leads to call. Everything they touch becomes theirs.
-import Sales from './owner/Sales';
+// CRM — the salesperson's desk: pipeline, contacts, calendar, quotes, onboarding, bonus, settings — scoped to this rep.
+// Dialing and the reply inbox live under Appt. Setting (Derek, 2026-11-10): setters dial and book; closers work the pipeline here.
+import Sales, { CRM_TABS } from './owner/Sales';
 
 export default function SalesDesk({ me, go }) {
   if (!me?.is_sales && !me?.is_owner) return <div className="card"><div className="empty">Ask Derek to add you to the sales team (Owner → Team).</div></div>;
   return (
     <div className="owner">
       <div className="pagehead">
-        <div><h1>CRM<span className="dot">.</span></h1><p className="sub">Your pipeline, replies, calls, quotes and onboarding — and the shared pool of untouched leads.</p></div>
+        <div><h1>CRM<span className="dot">.</span></h1></div>
       </div>
-      <Sales me={me} status={null} refreshStatus={() => {}} rep nav={go} />
+      <Sales me={me} status={null} refreshStatus={() => {}} rep nav={go} tabs={CRM_TABS} />
     </div>
   );
 }

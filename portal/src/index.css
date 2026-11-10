@@ -1539,3 +1539,5 @@ label.dbr-to span { color: var(--muted); }
 .pill.navy { background: rgba(15,27,42,.08); color: var(--ink); }
 .importpage > .row, .importmodal > .row { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
 .importpage .bar, .importmodal .bar { margin-top: 14px; }
+.dbr-book { display: flex; flex-direction: column; gap: 10px; }
+.dbr-book .dbr-q { margin: 0; }

@@ -21,6 +21,9 @@ export const quoteMonthly = (q) => { try { const ph = phases(q); const p = ph.fi
 export const expectedMonthly = (lead, quotes) => { const q = quotesFor(lead, quotes).find((x) => !x.internal_only && x.status !== 'declined' && x.status !== 'superseded'); const v = q ? quoteMonthly(q) : null; return v != null ? { value: v, from: q } : { value: lead?.deal_value ? Number(lead.deal_value) : null, from: null }; };
 
 const SUB = [['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['calendar', 'Calendar'], ['quotes', 'Quotes'], ['onboarding', 'Onboarding'], ['bonus', 'Bonus'], ['settings', 'Settings']];
+/** Appt. Setting (Derek, 2026-11-10): dialing + replies, where a new rep starts. CRM: everything else. Admin → Sales shows all of it. */
+export const APPT_TABS = ['calls', 'email', 'settings'];
+export const CRM_TABS = ['overview', 'pipeline', 'master', 'calendar', 'quotes', 'onboarding', 'bonus', 'settings'];
 export const LIST_NAMES = { A1: 'Self-ship brands · NJ metro', A2: 'Already on a 3PL · NJ metro', A3: 'Self-ship brands · Northeast', A4: 'Shopify Plus upgrades', B1: 'Founder-run · NJ metro', C1: 'Amazon sellers · Northeast', C2: 'Q4 overflow', X0: 'Control group' };
 export const listName = (code) => (code && LIST_NAMES[code] ? `${code} · ${LIST_NAMES[code]}` : code || '—');
 export const srcLabel = (sources, k) => sources.find((s) => s.key === k)?.label || k;
@@ -61,7 +64,7 @@ export async function findExisting({ email, domain, company }) { const { data } 
 const firstName = (l) => (l?.contact_name || '').split(' ')[0] || '';
 
 
-/** all CRM data + the shared actions — used by the HubSpot-style shell (Hub) and the legacy tabbed shell below */
+/** all CRM data + the shared actions */
 export function useCrm({ me, rep }) {
   const [leads, setLeads] = useState(null); const [sources, setSources] = useState([]); const [sends, setSends] = useState([]); const [people, setPeople] = useState([]);
   const [mail, setMail] = useState([]); const [mailAccts, setMailAccts] = useState([]); const [quotes, setQuotes] = useState([]); const [orgs, setOrgs] = useState([]); const [calls, setCalls] = useState([]); const [meetings, setMeetings] = useState([]); const [touches, setTouches] = useState([]);
@@ -86,8 +89,9 @@ export function useCrm({ me, rep }) {
   return { leads, sources, sends, people, mail, mailAccts, quotes, orgs, calls, meetings, touches, msg, setMsg, say, reload: load, mine, mySends, counts, unread };
 }
 
-export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
-  const [sub, setSub] = useState(() => (window.location.hash.startsWith('#sales=gmail') ? 'settings' : 'overview'));
+export default function Sales({ me, status, refreshStatus, rep = false, nav, tabs = null, initial = 'overview' }) {
+  const TABS = tabs ? SUB.filter(([k]) => tabs.includes(k)) : SUB;
+  const [sub, setSub] = useState(() => (window.location.hash.startsWith('#sales=gmail') ? 'settings' : initial));
   const [leads, setLeads] = useState(null); const [sources, setSources] = useState([]); const [sends, setSends] = useState([]);
   const [msg, setMsg] = useState(() => {       // Gmail connect round-trip lands with #sales=gmail|ok|msg
     const h = window.location.hash; if (!h.startsWith('#sales=gmail')) return null;
@@ -126,7 +130,7 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav }) {
     <>
       {msg && <div className={`msg ${msg.kind} flash`}>{msg.text}<button onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
       <div className="card ownertabs withsearch">
-        <div className="tabs">{SUB.map(([k, l]) => <button key={k} className={sub === k ? 'on' : ''} onClick={() => go(k)}>{l}{k === 'email' && unread ? <i>{unread}</i> : null}</button>)}</div>
+        <div className="tabs">{TABS.map(([k, l]) => <button key={k} className={sub === k ? 'on' : ''} onClick={() => go(k)}>{l}{k === 'email' && unread ? <i>{unread}</i> : null}</button>)}</div>
         <div className="gsearch">
           <input className="search" placeholder="Search contacts…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && hits[0]) { openLead(hits[0]); setQ(''); } if (e.key === 'Escape') setQ(''); }} />
           {hits.length > 0 && <div className="hits">{hits.map((l) => <button key={l.id} onClick={() => { openLead(l); setQ(''); }}><b>{l.company || l.domain || l.email}</b><span className="sm">{[l.contact_name, l.email, l.city].filter(Boolean).join(' · ')}</span><span className={`statuspill ${stageClass(l.stage)}`}>{stageLabel(l.stage)}</span></button>)}</div>}
@@ -449,9 +453,6 @@ export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say,
           <button className="btn-sm" onClick={() => setLogging((v) => !v)}>Log a call</button>
           {lead.stage === 'replied' && (lead.answered_at ? <button className="btn-sm ok" onClick={() => upd({ answered_at: null })}>✓ Answered — undo</button> : <button className="btn-sm" onClick={() => upd({ answered_at: new Date().toISOString() }, 'Marked answered.')}>Mark answered</button>)}
           {lead.stage !== 'dnc' && <button className="btn-sm" onClick={() => setStage('dnc')}>Do not contact</button>}
-          {lead.hs_contact_id
-            ? <a className="btn-sm" href={`https://app.hubspot.com/contacts/247219014/record/0-1/${lead.hs_contact_id}`} target="_blank" rel="noreferrer" title={lead.hs_synced_at ? `In HubSpot · synced ${ago(lead.hs_synced_at)}` : 'In HubSpot'}>HubSpot ↗</a>
-            : <span className="sm" title="Goes to HubSpot on the next sync once it's worked (any stage past New, or a non-cold source)">{lead.stage !== 'new' || !['cold_email', 'cold_call'].includes(lead.source) ? 'HubSpot: syncing…' : ''}</span>}
         </div>
         {logging && <div className="plog"><textarea rows={2} placeholder="What happened on the call…" value={note} onChange={(e) => setNote(e.target.value)} /><div className="outcomes">{PANEL_OUT.map(([k, l, cls]) => <button key={k} className={`oc ${cls}`} onClick={() => logCall(k)}>{l}</button>)}</div></div>}
         <div className="tabs ptabs"><button className={tab === 'activity' ? 'on' : ''} onClick={() => setTab('activity')}>Activity{replies.length ? <i>{replies.length}</i> : null}</button><button className={tab === 'details' ? 'on' : ''} onClick={() => setTab('details')}>Details</button></div>
@@ -933,7 +934,7 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
   const startSession = async () => { const { data } = await supabase.from('sales_call_sessions').insert({ started_at: new Date().toISOString(), by_user: me.id, note: list || null }).select().single(); const s = { id: data.id, started_at: data.started_at }; setSession(s); sessionStorage.setItem('shipbay-call-session', JSON.stringify(s)); };
   const endSession = async () => { const secs = Math.round((Date.now() - new Date(session.started_at)) / 1000); await supabase.from('sales_call_sessions').update({ ended_at: new Date().toISOString(), seconds: secs }).eq('id', session.id); setSession(null); sessionStorage.removeItem('shipbay-call-session'); if (callStart) setCallStart(null); loadCalls(); };
   const startCall = () => { if (!session) startSession(); setCallStart(Date.now()); };
-  // every dial ends in the debrief (Derek, 2026-11-02): nine answers → sales_calls + lead + HubSpot; the Blitz starts a day after the first email
+  // every dial ends in the debrief (Derek, 2026-11-02; rev 4 11-10): the answers → sales_calls + lead; the rep's own email; Booked → a call on a closer's calendar
   const [closing, setClosing] = useState(false);
   const closeCall = async (answers) => {
     if (!lead) return;
@@ -982,7 +983,7 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
               </div>
               <textarea className="callnote" rows={2} placeholder="One line: who you spoke to, what they said, when to call back…" value={note} onChange={(e) => setNote(e.target.value)} />
               <div className="outcomes end"><button className="oc solid" onClick={() => setDebrief(true)}>{callStart ? 'End call' : 'Log this dial'}</button></div>
-              {debrief && <Debrief lead={lead} me={me} saving={closing} seconds={Math.round((Date.now() - (callStart || Date.now())) / 1000)} note={note} setNote={setNote} emailedNow={emailed === lead.id} onSave={closeCall} onCancel={() => setDebrief(false)} />}
+              {debrief && <Debrief lead={lead} me={me} people={people} saving={closing} seconds={Math.round((Date.now() - (callStart || Date.now())) / 1000)} note={note} setNote={setNote} emailedNow={emailed === lead.id} onSave={closeCall} onCancel={() => setDebrief(false)} />}
               <div className="row"><button className="btn-xs" onClick={skip}>Skip for now</button><div className="spacer" /><span className="sm">Next up: {queue.filter((q) => q.id !== lead.id).slice(0, 3).map((q) => q.company).join(' · ') || '—'}</span></div>
             </>
           )}
