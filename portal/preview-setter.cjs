@@ -87,7 +87,7 @@ const TABLES = { sales_rep_settings: [], v_gmail_accounts: [{ user_id: UID, emai
     const single = (req.headers()['accept'] || '').includes('object');
     const u = new URL(req.url()); let out = rows;
     for (const [k, v] of u.searchParams) { if (k === 'select' || k === 'order' || k === 'limit' || k === 'offset') continue; const [op, val] = v.split('.'); if (op === 'eq') out = out.filter((r) => String(r[k]) === val); if (op === 'is' && val === 'null') out = out.filter((r) => r[k] == null); }
-    if (req.method() !== 'GET') return route.fulfill({ status: 200, contentType: 'application/json', body: single ? JSON.stringify({ id: 'new' }) : '[]' });
+    if (req.method() !== 'GET') { let sent = {}; try { sent = req.postDataJSON() || {}; } catch { /* none */ } if (Array.isArray(sent)) sent = sent[0] || {}; return route.fulfill({ status: 200, contentType: 'application/json', body: single ? JSON.stringify({ id: 'new-' + table, ...sent }) : '[]' }); }
     route.fulfill({ status: 200, contentType: 'application/json', headers: { 'content-range': `0-${out.length}/${out.length}` }, body: JSON.stringify(single ? out[0] || null : out) });
   });
   await ctx.route(/\/functions\/v1\/owner/, async (route) => {
@@ -117,43 +117,60 @@ const TABLES = { sales_rep_settings: [], v_gmail_accounts: [{ user_id: UID, emai
       : name === 'log_call' ? { call_id: 'c-new', outcome: b.p.result === 'booked' ? 'booked' : 'no_answer', meeting_id: b.p.meeting_id || null } : null;
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
   });
-  await ctx.route(/\/functions\/v1\/appt/, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, prospect_invited: true, sent: ['x'] }) }));
+  const bookedResp = (b) => ({ ok: true, meeting: { id: 'm-new', starts_at: new Date(Date.now() + 26 * 3600000).toISOString(), closer_name: 'Xavier Delmonte', invitee_email: 'jordan@brooklyncandlestudio.com', status: 'active', source: 'calendly' }, host_name: 'Xavier Delmonte', setter_calendar: 'calendly', join_url: 'https://meet.google.com/abc-defg-hij' });
+  await ctx.route(/\/functions\/v1\/appt/, (route) => { const b = route.request().postDataJSON?.() || {}; apptCalls.push(b.action + (b.event_uri ? ' ' + b.event_uri : ''));
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b.action === 'calendly_link' ? { url: 'https://calendly.com/xavierd-shipbay3pl/intro', whose: 'Xavier Delmonte', own: true } : b.action === 'cancel' ? { ok: true } : bookedResp(b)) }); });
+  const apptCalls = [];
+  // Calendly's widget script, stubbed: draws where the page would be and reports what it was given
+  await ctx.route(/assets\.calendly\.com\/assets\/external\/widget\.js/, (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: `window.Calendly = { initInlineWidget: function (o) { window.__cal = o; o.parentElement.innerHTML = '<div style="border:1.5px dashed #D9D6CF;border-radius:12px;padding:28px;min-height:420px;display:grid;place-content:center;gap:8px;text-align:center;color:#5A6473;font:600 15px Archivo"><div style="font-size:22px;color:#0F1B2A">Calendly page loads here</div><div>' + o.url.replace(/&/g, '&amp;') + '</div><div>name: ' + o.prefill.name + ' · email: ' + o.prefill.email + '</div><div>utm: ' + JSON.stringify(o.utm) + '</div></div>'; } };` }));
+  for (const m of meetings) if (m.source === 'portal') { m.source = 'calendly'; m.reschedule_url = 'https://calendly.com/reschedulings/x'; m.location = 'https://meet.google.com/abc-defg-hij'; }
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('PAGE ERROR', e.message));
-  page.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE', m.text().slice(0, 200)); });
+  page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) console.log('CONSOLE', m.text().slice(0, 200)); });
   await page.goto('http://localhost:4173/'); await page.waitForTimeout(1400);
   fs.mkdirSync('shots', { recursive: true });
   const shot = (n) => page.screenshot({ path: `shots/${n}.png`, fullPage: false });
   const tab = async (t) => { await page.locator('.ownertabs .tabs button', { hasText: t }).first().click(); await page.waitForTimeout(900); };
+  const calendlySays = () => page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { origin: 'https://calendly.com', data: { event: 'calendly.event_scheduled', payload: { event: { uri: 'https://api.calendly.com/scheduled_events/EV123' }, invitee: { uri: 'https://api.calendly.com/scheduled_events/EV123/invitees/IN456' } } } })));
   if (AS === 'setter') {
     console.log('nav:', (await page.locator('.sidenav .navitem').allInnerTexts()).join(' | '));
-    await page.getByRole('button', { name: 'Script', exact: true }).click(); await page.waitForTimeout(600);
-    await shot('40-setter-calls-script');
     await page.getByRole('button', { name: 'Start call' }).click(); await page.waitForTimeout(300);
-    await page.getByRole('button', { name: 'Book a call' }).click(); await page.waitForTimeout(900);
-    await page.locator('.slotday button').nth(3).click(); await page.waitForTimeout(200);
-    await shot('41-setter-book-during-call');
-    await page.getByRole('button', { name: 'Book the call' }).click(); await page.waitForTimeout(700);
-    await shot('42-setter-booked');
+    await page.getByRole('button', { name: 'Book a call' }).click(); await page.waitForTimeout(1200);
+    console.log('widget got:', JSON.stringify(await page.evaluate(() => window.__cal && { url: window.__cal.url, prefill: window.__cal.prefill, utm: window.__cal.utm })));
+    await shot('50-book-during-call-calendly');
+    await calendlySays(); await page.waitForTimeout(700);
+    await shot('51-booked-on-calendly');
     await page.getByRole('button', { name: 'Done' }).click(); await page.waitForTimeout(300);
     await page.getByRole('button', { name: 'End call' }).click(); await page.waitForTimeout(500);
-    await page.locator('.dbr-pick button', { hasText: 'Reached decision-maker' }).click();
-    await page.locator('.dbr-pick button', { hasText: 'Owner / founder' }).click(); await page.locator('.dbr-pick button', { hasText: /^A fit$/ }).click();
-    await page.locator('.dbr-pick button', { hasText: /^Booked$/ }).click(); await page.waitForTimeout(400);
-    await page.locator('.modal.dbr').evaluate((el) => { el.scrollTop = el.scrollHeight; }); await page.waitForTimeout(200);
-    await shot('43-setter-debrief-already-booked');
+    await page.locator('.dbr-pick button', { hasText: 'Gatekeeper' }).click(); await page.locator('.dbr-pick button', { hasText: /^Booked$/ }).click(); await page.waitForTimeout(400);
+    await page.locator('.modal.dbr').first().evaluate((el) => { el.scrollTop = el.scrollHeight; }); await page.waitForTimeout(200);
+    await shot('52-debrief-after-calendly');
     await page.getByRole('button', { name: 'Close call' }).click(); await page.waitForTimeout(800);
-    await shot('44-setter-after-close');
-    await tab('Book'); await page.locator('.bookfind .search').fill('oak'); await page.waitForTimeout(300); await page.locator('.bookfind .uplist li').first().click(); await page.waitForTimeout(900);
-    await shot('45-setter-book-tab');
+    // a second dial: Booked chosen in the debrief first → the Calendly dialog opens on top of it
+    await page.getByRole('button', { name: 'Log this dial' }).click(); await page.waitForTimeout(400);
+    await page.locator('.dbr-pick button', { hasText: 'Gatekeeper' }).click(); await page.locator('.dbr-pick button', { hasText: /^Booked$/ }).click(); await page.waitForTimeout(300);
+    await page.getByRole('button', { name: 'Book it on Calendly' }).click(); await page.waitForTimeout(900);
+    console.log('calendly dialog on top of debrief:', await page.locator('.overlay.top .calbox').count());
+    await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+    await page.reload(); await page.waitForTimeout(1500);
+    await tab('Book'); await page.locator('.bookfind .search').fill('zzz nobody'); await page.waitForTimeout(300);
+    await shot('53-book-not-on-list');
+    await page.getByRole('button', { name: 'Add them as a client' }).click(); await page.waitForTimeout(500);
+    await page.locator('.modal.wide input').nth(0).waitFor(); const labels = page.locator('.modal.wide label');
+    await labels.filter({ hasText: /^Company/ }).locator('input').fill('Harbor Tea Co'); await labels.filter({ hasText: /^Contact/ }).locator('input').first().fill('Dana Ruiz').catch(() => {});
+    await labels.filter({ hasText: /^Email/ }).locator('input').first().fill('dana@harbortea.co').catch(() => {});
+    await shot('54-add-a-client');
+    await page.locator('.modal.wide button[type=submit], .modal.wide .btn-sm.primary').last().click(); await page.waitForTimeout(1200);
+    await shot('55-book-tab-calendly');
+    console.log('appt calls:', apptCalls.join(' | '));
   } else {
-    await page.locator('.sidenav .navitem', { hasText: /^CRM$/ }).click(); await page.waitForTimeout(1200);
-    await tab('Setters'); await page.locator('.setterstable tr.click').first().click(); await page.waitForTimeout(400);
-    await shot('46-closer-setters');
-    await tab('Settings'); await page.locator('.availgrid').scrollIntoViewIfNeeded(); await page.waitForTimeout(300);
-    await shot('47-closer-hours');
     await page.locator('.sidenav .navitem', { hasText: /^Admin$/ }).click(); await page.waitForTimeout(1200);
-    const team = page.locator('.ownertabs .tabs button', { hasText: /^Team$/ }); if (await team.count()) { await team.first().click(); await page.waitForTimeout(1200); const t = page.locator('h3', { hasText: 'on the team' }); if (await t.count()) await t.first().scrollIntoViewIfNeeded(); await page.waitForTimeout(300); await shot('48-admin-team-setters'); }
+    await page.locator('.ownertabs .tabs button', { hasText: /Admin settings/ }).first().click(); await page.waitForTimeout(700);
+    await page.locator('button', { hasText: /^Call script$/ }).first().click(); await page.waitForTimeout(900);
+    await shot('56-admin-call-script');
+    await page.locator('.sidenav .navitem', { hasText: /^CRM$/ }).click(); await page.waitForTimeout(1200);
+    await tab('Settings'); await page.locator('h3', { hasText: 'My Calendly link' }).scrollIntoViewIfNeeded(); await page.waitForTimeout(300);
+    await shot('57-closer-calendly-link');
   }
   await browser.close(); srv.close(); console.log('done', AS);
 })();

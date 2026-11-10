@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib';
 import { ownerFn, pct } from './util';
 import { listName, useReplyKit, fillTpl } from './Sales';
-import { logCall, sendInvite, SlotPicker, useCloser, fmtWhen } from './Appt';
+import { logCall, fmtWhen } from './Appt';
 
 export const DIAL = [['no_answer', 'No answer'], ['voicemail', 'Voicemail'], ['bad_number', 'Bad number'], ['gatekeeper', 'Gatekeeper'], ['decision_maker', 'Reached decision-maker']];
 export const PICKED = [['owner_founder', 'Owner / founder'], ['ops', 'Ops'], ['cs', 'Customer service'], ['retail_floor', 'Retail floor']];
@@ -111,13 +111,11 @@ export async function saveDebrief({ lead, me, started, seconds, note, a, emailed
     orders_month: a.orders_month || '', current_setup: a.current_setup || '', pain: a.pain || '', result: a.result || '',
     callback_at: a.result === 'callback' && a.callback_at ? new Date(a.callback_at).toISOString() : '', to_email: send ? a.draft.to : '',
     meeting_id: a.result === 'booked' && meeting ? meeting.id : '',
-    ...(a.result === 'booked' && !meeting && a.book_at ? { book: { closer_id: a.book_for || '', starts_at: a.book_at, invitee_email: a.book_email || '' } } : {}),
   };
   const r = await logCall(p);
   if (r.error) return { saved: false, error: r.error };
   if (r.queued) return { queued: true };
   const problems = [];
-  if (r.meeting_id && !meeting) { const inv = await sendInvite(r.meeting_id); if (inv?.error) problems.push(`The call is on the calendar, but the invite did not go: ${inv.error}`); }
   if (send && !['booked', 'dnc', 'not_fit'].includes(r.outcome)) {
     const m = await sendRepEmail({ to: a.draft.to, subject: a.draft.subject, body: a.draft.body, lead });
     await supabase.rpc('call_email_result', { p_call: r.call_id, p_result: m.error ? 'failed' : 'sent' });
@@ -133,9 +131,9 @@ function Pick({ options, value, onChange, cols = 3 }) {
 }
 
 /** The modal. Quick path for no-answer / voicemail / bad number; full path when a human picked up. */
-export function Debrief({ lead, me, people = [], seconds, note, setNote, emailedNow, onSave, onCancel, saving = false, meeting = null }) {
-  const kit = useReplyKit(me); const book = useCloser(me, people);
-  const [a, setA] = useState({ dial_result: '', picked_up: '', fit: '', not_fit_reason: '', not_fit_detail: '', orders_month: '', current_setup: '', pain: '', result: '', callback_at: '', send: '', to_email: lead.email || '', email_result: '', draft: null, book_for: '', book_at: '', book_email: lead.email || '' });
+export function Debrief({ lead, me, people = [], seconds, note, setNote, emailedNow, onSave, onCancel, saving = false, meeting = null, onBook = null }) {
+  const kit = useReplyKit(me);
+  const [a, setA] = useState({ dial_result: '', picked_up: '', fit: '', not_fit_reason: '', not_fit_detail: '', orders_month: '', current_setup: '', pain: '', result: '', callback_at: '', send: '', to_email: lead.email || '', email_result: '', draft: null, booked_elsewhere: false });
   const setDraft = (d) => setA((x) => ({ ...x, draft: d, to_email: d.to }));
   const set = (k) => (v) => setA((x) => ({ ...x, [k]: v }));
   const human = a.dial_result === 'gatekeeper' || a.dial_result === 'decision_maker';
@@ -145,7 +143,7 @@ export function Debrief({ lead, me, people = [], seconds, note, setNote, emailed
   const askSend = !!lead.email && !inSeq && (NO_PICKUP.includes(a.dial_result) || (human && !!a.result && !NO_EMAIL_AFTER.includes(a.result) && a.fit !== 'not_fit'));
   const toOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a.to_email || '');
   const sendDone = !askSend || (a.send === 'no') || (a.send === 'yes' && !!a.draft && toOk && !!a.draft.subject);
-  const bookDone = a.result !== 'booked' || !!meeting || (!!book.closerId && !!a.book_at);
+  const bookDone = a.result !== 'booked' || !!meeting || !!a.booked_elsewhere;
   const canSave = !!a.dial_result && sendDone && bookDone && (quick || (a.dial_result === 'gatekeeper' ? !!a.result : !!a.picked_up && !!a.fit && (a.fit !== 'not_fit' || !!a.not_fit_reason) && !!a.result));
   useEffect(() => { const k = (e) => { if (e.key === 'Escape') onCancel(); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onCancel]);
   return (
@@ -171,17 +169,15 @@ export function Debrief({ lead, me, people = [], seconds, note, setNote, emailed
           {a.result === 'booked' && (meeting
             ? <div className="dbr-sub dbr-book"><div className="booked"><div className="booked-when">{fmtWhen(meeting.starts_at)}</div><div className="booked-who">Already booked{meeting.closer_name ? ` with ${meeting.closer_name.split(' ')[0]}` : ''} during this call.</div></div></div>
             : <div className="dbr-sub dbr-book">
-              {book.locked ? <div className="bookfor one">For <b>{book.closer ? (book.closer.full_name || book.closer.email) : 'your closer'}</b></div>
-                : <><div className="dbr-q">Book it for</div><Pick options={(people.length ? people : [me]).map((p) => [p.id, p.id === me?.id ? `${(p.full_name || p.email || 'me').split(' ')[0]} (me)` : (p.full_name || p.email)])} value={book.closerId} onChange={(v) => { book.setCloserId(v); set('book_at')(''); }} cols={Math.min(4, Math.max(2, people.length || 1))} /></>}
-              <SlotPicker closerId={book.closerId} value={a.book_at} onChange={set('book_at')} />
-              <label className="dbr-to"><b>Invite to</b><input type="email" value={a.book_email} placeholder="their email" spellCheck={false} onChange={(e) => set('book_email')(e.target.value.trim())} /></label>
+              <div className="row"><button type="button" className="btn-sm primary" onClick={() => onBook?.()}>Book it on Calendly</button><span className="sm">The time, the invite and the meeting link all come from Calendly.</span></div>
+              <label className="chk"><input type="checkbox" checked={!!a.booked_elsewhere} onChange={(e) => set('booked_elsewhere')(e.target.checked)} /> They booked another way (it will come in with the Calendly sync)</label>
             </div>)}</section>}
         {askSend && <section><div className="dbr-q">{human ? '8' : '2'} · Send your email now?</div><Pick options={YESNO} value={a.send} onChange={(v) => setA((x) => ({ ...x, send: v, draft: v === 'yes' ? (x.draft || draftFor(kit, lead, me)) : null }))} cols={2} />
           {a.send === 'yes' && a.draft && <div className="dbr-sub"><RepCompose draft={a.draft} setDraft={setDraft} me={me} lead={lead} sending={saving} /></div>}
         </section>}
         {!askSend && !!lead.email && inSeq && (quick || human) && <section><span className="sm">Already in a sequence — this just logs the dial.</span></section>}
         <section><textarea rows={2} placeholder="One line: who you spoke to, what they said, when to call back…" value={note} onChange={(e) => setNote(e.target.value)} /></section>
-        <div className="row"><button className="btn-sm" type="button" onClick={onCancel}>Back to the call</button><div className="spacer" /><button className="btn-sm primary" type="button" disabled={!canSave || saving} onClick={() => onSave({ ...a, book_for: book.closerId })}>{saving ? (a.send === 'yes' ? 'Sending…' : 'Saving…') : a.send === 'yes' ? 'Send & close call' : 'Close call'}</button></div>
+        <div className="row"><button className="btn-sm" type="button" onClick={onCancel}>Back to the call</button><div className="spacer" /><button className="btn-sm primary" type="button" disabled={!canSave || saving} onClick={() => onSave(a)}>{saving ? (a.send === 'yes' ? 'Sending…' : 'Saving…') : a.send === 'yes' ? 'Send & close call' : 'Close call'}</button></div>
       </div>
     </div>
   );

@@ -10,7 +10,7 @@ import { compute, phases } from '../../quote';
 import Quotes from '../Quotes';
 import Onboarding from '../Onboarding';
 import { Debrief, DebriefBoard, PowerButton, saveDebrief } from './Debrief';
-import { Book, BookModal, Script, Setters, Availability, RecentCalls, logCall, flushOutbox, outbox, dropFromOutbox, fmtWhen, cancelMeeting } from './Appt';
+import { Book, BookModal, Script, Setters, CalendlyLink, RecentCalls, logCall, flushOutbox, outbox, dropFromOutbox, fmtWhen, cancelMeeting } from './Appt';
 import ImportLeads from './ImportLeads';
 
 /** the quotes that belong to an account (by the account row, or its client org) — best first */
@@ -145,7 +145,7 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav, tab
       {sub === 'master' && <Master {...ctx} leads={mine} />}
       {sub === 'email' && <Conversations {...ctx} leads={mine} allLeads={leads} sends={mySends} mail={mail} mailAccts={mailAccts} status={status} refreshStatus={refreshStatus} focus={focus} clearFocus={() => setFocus(null)} />}
       {sub === 'calls' && <Calls {...ctx} leads={leads} />}
-      {sub === 'book' && <Book {...ctx} leads={leads} />}
+      {sub === 'book' && <Book {...ctx} leads={leads} renderAdd={(p) => <LeadForm sources={sources} reload={load} say={say} claimAs={me.id} title="Add a client" {...p} />} />}
       {sub === 'setters' && <Setters me={me} people={people} />}
       {sub === 'calendar' && <Calendar {...ctx} leads={leads} status={status} refreshStatus={refreshStatus} mineOnly={rep} focusDate={focus} />}
       {sub === 'bonus' && <Bonus {...ctx} leads={leads} />}
@@ -810,7 +810,7 @@ export function CampaignCards({ status, say, reload }) {
 }
 
 
-export function LeadForm({ sources, onClose, reload, say, fixedSource, title = 'Add a lead', defaultStage = 'new', claimAs = null, openExisting = null }) {
+export function LeadForm({ sources, onClose, reload, say, fixedSource, title = 'Add a lead', defaultStage = 'new', claimAs = null, openExisting = null, onCreated = null }) {
   const [f, setF] = useState({ source: fixedSource || 'other', filter_id: '', company: '', domain: '', contact_name: '', email: '', phone: '', title: '', city: '', state: '', est_sales_usd: '', deal_value: '', stage: defaultStage, notes: '', in_calls: true });
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -819,9 +819,9 @@ export function LeadForm({ sources, onClose, reload, say, fixedSource, title = '
     const row = { ...f, est_sales_usd: f.est_sales_usd ? Number(f.est_sales_usd) : null, deal_value: f.deal_value ? Number(f.deal_value) : null, domain: cleanDomain(f.domain), filter_id: f.filter_id || null, won_at: f.stage === 'signed' ? new Date().toISOString() : null, last_touch_at: f.stage === 'new' ? null : new Date().toISOString(), assigned_to: claimAs };
     const dup = await findExisting({ email: row.email, domain: row.domain, company: row.company });
     if (dup) { setBusy(false); const { data: ex } = await supabase.from('sales_leads').select('company, email, stage').eq('id', dup).maybeSingle(); if (!window.confirm(`${ex?.company || ex?.email || 'This company'} is already in the system (${stageLabel(ex?.stage)}). Open that one instead of adding a copy?`)) return; onClose(); openExisting?.(dup); return; }
-    const { error } = await supabase.from('sales_leads').insert(row); setBusy(false);
+    const { data: made, error } = await supabase.from('sales_leads').insert(row).select().single(); setBusy(false);
     if (error) return say({ error: /duplicate/i.test(error.message) ? 'That domain or email is already in the list.' : error.message });
-    say(null, 'Lead added.'); reload(); onClose();
+    say(null, 'Lead added.'); reload(); if (onCreated) onCreated(made); else onClose();
   };
   return (
     <div className="overlay" onClick={onClose}><form className="modal wide" onClick={(e) => e.stopPropagation()} onSubmit={save}>
@@ -1003,8 +1003,8 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
               </div>
               <textarea className="callnote" rows={2} placeholder="One line: who you spoke to, what they said, when to call back…" value={note} onChange={(e) => setNote(e.target.value)} />
               <div className="outcomes end"><button className="oc solid" onClick={() => { setPin(lead); setDebrief(true); }}>{callStart ? 'End call' : 'Log this dial'}</button></div>
+              {debrief && <Debrief lead={lead} me={me} people={people} meeting={booked} onBook={() => setBookOpen(true)} saving={closing} seconds={Math.round((Date.now() - (callStart || Date.now())) / 1000)} note={note} setNote={setNote} emailedNow={emailed === lead.id} onSave={closeCall} onCancel={() => setDebrief(false)} />}
               {bookOpen && <BookModal me={me} lead={lead} people={people} onBooked={(m) => setBooked(m)} onClose={() => setBookOpen(false)} />}
-              {debrief && <Debrief lead={lead} me={me} people={people} meeting={booked} saving={closing} seconds={Math.round((Date.now() - (callStart || Date.now())) / 1000)} note={note} setNote={setNote} emailedNow={emailed === lead.id} onSave={closeCall} onCancel={() => setDebrief(false)} />}
               <div className="row"><button className="btn-xs" onClick={skip}>Skip for now</button><div className="spacer" /><span className="sm">Next up: {queue.filter((q) => q.id !== lead.id).slice(0, 3).map((q) => q.company).join(' · ') || '—'}</span></div>
             </>
           )}
@@ -1107,7 +1107,7 @@ export function RepSettings({ me, rep, people, say, status }) {
           </div>
         </div>
       </div>
-      {(me.is_sales || me.is_owner) && <Availability me={me} say={say} />}
+      {(me.is_sales || me.is_owner) && <CalendlyLink me={me} say={say} />}
       <div className="card">
         <div className="cardhead"><h3>My Gmail</h3><span className="sm">Replies from prospects land in Conversations; emails you send them count as touches.</span><div className="spacer" />
           {mine ? <><button className="btn-sm" disabled={busy} onClick={() => sync(false)}>Check now</button><button className="btn-sm danger" disabled={busy} onClick={disconnect}>Disconnect</button></> : <button className="btn-sm primary" disabled={busy || status?.google_keys_set === false} onClick={connect}>{busy ? 'Opening Google…' : 'Connect Gmail'}</button>}
@@ -1150,7 +1150,7 @@ export function Calendar({ me, leads, status, reload, say, refreshStatus, mineOn
     <>
       <div className="opsbar wrap">
         <div className="period"><button className="btn-sm" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>‹</button><b className="monthtitle">{month.toLocaleString('en-US', { month: 'long', year: 'numeric' })}</b><button className="btn-sm" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>›</button><button className="btn-xs" onClick={() => { const d = new Date(); setMonth(new Date(d.getFullYear(), d.getMonth(), 1)); }}>Today</button></div>
-        <span className="sm"><i className="sw portal" /> Booked here &nbsp; <i className="sw cal" /> Calendly &nbsp; <i className="sw gcal" /> Google Calendar</span>
+        <span className="sm"><i className="sw cal" /> Calendly &nbsp; <i className="sw gcal" /> Google Calendar</span>
         <div className="spacer" />
         {!mineOnly && <>
           {status?.calendly_set ? <button className="btn-sm" disabled={!!busy} onClick={() => sync('calendly')}>{busy === 'calendly' ? '…' : 'Sync Calendly'}</button> : <span className="sm">Calendly token → Settings</span>}
@@ -1185,11 +1185,11 @@ export function Calendar({ me, leads, status, reload, say, refreshStatus, mineOn
             {(m.invitee_name || m.invitee_email) && <div><small>With</small><b>{m.invitee_name || m.invitee_email}</b>{m.invitee_email && m.invitee_name && <span className="muted"> · {m.invitee_email}</span>}{l && <> · <button className="btn-xs" onClick={() => { setSel(null); openLead(l); }}>Open contact</button></>}</div>}
             {m.location && <div><small>Where</small>{/^https?:/.test(m.location) ? <a href={m.location} target="_blank" rel="noreferrer">{m.location.includes('meet.google') ? 'Google Meet' : m.location.includes('zoom') ? 'Zoom' : 'Join link'} ↗</a> : <b>{m.location}</b>}</div>}
             {m.description && <div><small>Notes</small><pre className="notes">{m.description.slice(0, 600)}</pre></div>}
-            {m.booked_by && <div><small>Booked by</small><b>{who(m.booked_by)}</b>{m.source === 'portal' && <span className="muted"> · {m.invite_sent_at ? 'invite sent' : m.invite_error || 'no invite sent'}</span>}</div>}
+            {m.booked_by && <div><small>Booked by</small><b>{who(m.booked_by)}</b>{m.booked_by !== m.assigned_to && <span className="muted"> · on the call too</span>}</div>}
             <div><small>Taken by</small>{mineOnly ? <b>{who(m.assigned_to)}</b> : <select className="statusselect" value={m.assigned_to || ''} onChange={(e) => { upd(m, { assigned_to: e.target.value || null }); setSel({ ...m, assigned_to: e.target.value || null }); }}><option value="">— nobody —</option>{people.map((p) => <option key={p.id} value={p.id}>{(p.full_name || p.email).split(' ')[0]}</option>)}</select>}</div>
             {m.status === 'canceled' ? <div><small>Status</small><span className="statuspill bad">Canceled</span></div> : isPast && <div><small>How did it go?</small><select className="statusselect" value={m.outcome || ''} onChange={(e) => { upd(m, { outcome: e.target.value || null, status: 'done' }); setSel({ ...m, outcome: e.target.value }); }}><option value="">—</option><option value="quoted">Quoted</option><option value="follow_up">Follow up</option><option value="signed">Signed</option><option value="not_fit">Not a fit</option><option value="no_show">No-show</option></select></div>}
           </div>
-          <div className="row">{m.source === 'portal' && m.status !== 'canceled' && !isPast && <button className="btn-sm danger" onClick={async () => { const why = window.prompt('Cancel this call? The prospect and the closer get a cancellation. Reason (optional):', ''); if (why === null) return; const r = await cancelMeeting(m.id, why); say(r.error ? r : r.mailError ? { error: `Canceled here, but the cancellation email did not go: ${r.mailError}` } : null, 'Canceled. Both sides were told.'); setSel(null); load(); reload?.(); }}>Cancel the call</button>}<div className="spacer" /><button className="btn-sm" onClick={() => setSel(null)}>Close</button></div>
+          <div className="row">{m.source !== 'google' && m.status !== 'canceled' && !isPast && <>{m.reschedule_url && <a className="btn-sm" href={m.reschedule_url} target="_blank" rel="noreferrer">Reschedule</a>}<button className="btn-sm danger" onClick={async () => { const why = window.prompt('Cancel this call? Calendly tells the prospect and the host. Reason (optional):', ''); if (why === null) return; const r = await cancelMeeting(m.id, why); say(r.error ? r : null, 'Canceled.'); setSel(null); load(); reload?.(); }}>Cancel the call</button></>}<div className="spacer" /><button className="btn-sm" onClick={() => setSel(null)}>Close</button></div>
         </div></div>
       ); })()}
     </>

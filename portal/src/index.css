@@ -1610,3 +1610,17 @@ tr.voided td:last-child { text-decoration: none; }
 .setterstable td .sm { white-space: normal; }
 .card.ownertabs.withsearch .gsearch { width: 230px; }
 .card.ownertabs.withsearch .tabs button { padding: 13px 11px; }
+
+/* Calendly booking (2026-11-10) */
+.calbox { min-height: 0; }
+.calbox iframe { width: 100%; min-height: 700px; border: 0; }
+.modal.dbr.calmodal { width: min(1040px, 100%); }
+.overlay.top { z-index: 60; }
+.bookform .findrow { flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--line); }
+.bookform .findrow input { flex: 1; min-width: 220px; height: 36px; padding: 0 10px; border: 1.5px solid var(--line-2); border-radius: 8px; font: 600 14px var(--font); }
+.dbr-book .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.bookings .acts a.btn-xs { text-decoration: none; }
+/* Dialogs: the page-enter animation used to keep an identity transform after it finished, which made every in-page
+   dialog (position: fixed) centre itself in the full height of the page instead of the screen. On a long page the
+   dialog opened below the fold. Let the transform go when the animation ends. */
+.page-enter { animation-fill-mode: backwards; }

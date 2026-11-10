@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib';
 import { ownerFn, getToken, setToken, ago } from './util';
 import Financials from './Financials';
-import Sales from './Sales';
+import Sales, { fillTpl } from './Sales';
+import { TeamScript } from './Appt';
 import Strategies from './Strategies';
 import Compliance from '../Compliance';
 import AdminSettings from '../AdminSettings';
@@ -15,7 +16,7 @@ import Careers from './Careers';
 import ImportLeads from './ImportLeads';
 
 const TABS = [['sales', 'Sales'], ['fin', 'Financials'], ['team', 'Team'], ['strat', 'Strategies'], ['docs', 'Documents review'], ['admin', 'Admin settings']];
-const ADMIN_SECTIONS = [['staff', 'Staff & access'], ['clients', 'Client settings'], ['integrations', 'Integrations'], ['connections', 'Connections & keys'], ['import', 'Import leads'], ['careers', 'Careers']];
+const ADMIN_SECTIONS = [['staff', 'Staff & access'], ['clients', 'Client settings'], ['integrations', 'Integrations'], ['connections', 'Connections & keys'], ['import', 'Import leads'], ['script', 'Call script'], ['careers', 'Careers']];
 
 export default function Owner({ me, go: nav, params }) {
   const [status, setStatus] = useState(null);     // from action:status
@@ -62,6 +63,7 @@ export default function Owner({ me, go: nav, params }) {
           {section === 'integrations' && <div className="embed"><Marketplaces /></div>}
           {section === 'connections' && <Settings status={status} refreshStatus={refresh} />}
           {section === 'import' && <ImportLeads status={status} />}
+          {section === 'script' && <TeamScript me={me} fill={fillTpl} />}
           {section === 'careers' && <Careers />}
         </>
       )}
