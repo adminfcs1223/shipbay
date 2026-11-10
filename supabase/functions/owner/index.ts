@@ -5,6 +5,7 @@
 //   POST { action:'unlock', passphrase }                      → { ok, token } token is sent as `x-owner-token` on data actions
 //   POST { action:'save_secret', key, value }                 → QBO_CLIENT_ID | QBO_CLIENT_SECRET | SMARTLEAD_API_KEY | SMARTLEAD_CAMPAIGNS
 //   POST { action:'smartlead_sync' }                          → pulls every campaign in SMARTLEAD_CAMPAIGNS into sales_email_sends + sales_leads
+//   POST { action:'rep_send', to, subject, body, lead_id }     → one email from the signed-in rep (their Gmail, else Resend as them); any is_sales user
 //   POST { action:'qbo_connect' }                             → { url } Intuit consent screen
 //   GET  /owner/qbo-callback?code&realmId&state               → stores tokens, redirects to the dashboard
 //   POST { action:'qbo_sync' }                                → P&L by month (this year), balance sheet, last 90 days of transactions → fin_qbo_reports
@@ -162,7 +163,10 @@ async function smartleadSync(uid: string) {
       const j = await (await fetch(`${base}/campaigns/${cid}/statistics?api_key=${key}&offset=${off}&limit=100`)).json().catch(() => ({}));
       const d = j?.data || []; stats.push(...d); if (d.length < 100) break;
     }
-    const { data: existing } = await admin.from('sales_email_sends').select('external_id, reply_type, replied').eq('campaign', label);
+    // every send row we already have for this campaign — paged, because the default read stops at 1,000 rows and the
+    // 11-09 storm (28 tasks for one "stop") was exactly that: the newest replies fell off the end and looked new on every run
+    const existing: any[] = [];
+    for (let off = 0; ; off += 1000) { const { data: page } = await admin.from('sales_email_sends').select('external_id, reply_type, replied').eq('campaign', label).range(off, off + 999); existing.push(...(page || [])); if (!page || page.length < 1000) break; }
     const wasReplied = new Set((existing || []).filter((e: any) => e.replied).map((e: any) => e.external_id));
     const keep = new Map((existing || []).map((e: any) => [e.external_id, e.reply_type]));
     const tags: Record<string, string> = (await getSetting('reply_tags')) || {};   // email → reply type, set from the Email tab; survives re-syncs and label changes
@@ -205,32 +209,21 @@ async function smartleadSync(uid: string) {
     }
     const neg = [...new Set(rows.filter((r) => r.reply_type === 'Negative').map((r) => r.lead_id).filter(Boolean))] as string[];
     if (neg.length) await admin.from('sales_leads').update({ stage: 'dnc' }).in('id', neg);
-    // tell someone: each new reply → HubSpot task for the lead's owner, due now, with a reminder (HubSpot pushes it to the app + email)
-    let alerted = 0; let emailed = 0;
+    // tell someone: each new reply → email to the lead's rep (whoever called it, else the round-robin owner) + Derek. Portal only — no HubSpot.
+    // A "stop"-type reply is handled on the spot: Smartlead unsubscribe + block list, portal stage dnc, reply tagged Negative.
+    let alerted = 0; let emailed = 0; let stopped = 0;
     for (const r of fresh) {
       try {
-        const { data: sent } = await admin.from('sales_email_sends').select('reply_body, reply_subject, subject').eq('external_id', r.external_id).maybeSingle();
-        const { data: l0 } = r.lead_id ? await admin.from('sales_leads').select('*').eq('id', r.lead_id).maybeSingle() : { data: null } as any;
-        const cfg = await hsCfg();
-        const l = l0 ? await hsPushLead(l0, cfg) : null;
-        const owner = (l0?.assigned_to && cfg.owners?.[l0.assigned_to]) || cfg.default_owner || undefined;
-        const now = new Date();
-        const t: any = await hs('/crm/v3/objects/tasks', { method: 'POST', body: JSON.stringify({ properties: {
-          hs_timestamp: now.toISOString(), hs_task_subject: `Smartlead reply — ${l0?.company || r.lead_name || r.lead_email}: answer it`,
-          hs_task_body: `${r.lead_name || ''} <${r.lead_email}> replied to "${sent?.subject || r.subject || ''}".\n\n${String(sent?.reply_body || '(open the Email tab in the portal for the text)').slice(0, 1500)}\n\nCBE reply = a human conversation. Answer from the portal Email tab; do not enroll in a sequence.`,
-          hs_task_status: 'NOT_STARTED', hs_task_priority: 'HIGH', hs_task_type: 'EMAIL', hs_task_reminders: String(now.getTime() + 60000), hubspot_owner_id: owner } }) });
-        const cid = l?.hs_contact_id || l0?.hs_contact_id;
-        if (t?.id && cid) await hs(`/crm/v4/objects/tasks/${t.id}/associations/default/contacts/${cid}`, { method: 'PUT' }).catch(() => {});
+        const { data: sent } = await admin.from('sales_email_sends').select('id, reply_body, reply_subject, subject').eq('external_id', r.external_id).maybeSingle();
+        const { data: l1 } = r.lead_id ? await admin.from('sales_leads').select('company, contact_name, assigned_to').eq('id', r.lead_id).maybeSingle() : { data: null } as any;
+        const text = String(sent?.reply_body || '').trim();
+        const isStop = /^(please\s+)?(stop|unsubscribe|remove( me)?|no thanks?|not interested|do not (contact|email))\b/i.test(text) && text.length < 80;
+        if (isStop) { await smartleadStopLead(String(r.lead_email)); if (sent?.id) await admin.from('sales_email_sends').update({ reply_type: 'Negative' }).eq('id', sent.id); stopped++; }
+        if (await emailReplyAlert({ company: l1?.company, name: r.lead_name || l1?.contact_name, email: r.lead_email, subject: sent?.subject || r.subject, body: isStop ? `${text}\n\n(Handled: unsubscribed in Smartlead, marked do-not-contact. Nothing to answer.)` : sent?.reply_body, assigned_to: l1?.assigned_to })) emailed++;
         alerted++;
       } catch (e) { console.log('reply alert failed', r.lead_email, String(e)); }
-      // and an email to the people who work it: the lead's rep (round-robin owner) + Derek on every reply that isn't his
-      try {
-        const { data: l1 } = r.lead_id ? await admin.from('sales_leads').select('company, contact_name, assigned_to').eq('id', r.lead_id).maybeSingle() : { data: null } as any;
-        const { data: sent } = await admin.from('sales_email_sends').select('reply_body, subject').eq('external_id', r.external_id).maybeSingle();
-        if (await emailReplyAlert({ company: l1?.company, name: r.lead_name || l1?.contact_name, email: r.lead_email, subject: sent?.subject || r.subject, body: sent?.reply_body, assigned_to: l1?.assigned_to })) emailed++;
-      } catch (e) { console.log('reply email failed', r.lead_email, String(e)); }
     }
-    out[label] = { leads: leads.length, sends: rows.length, reply_bodies: bodies, new_replies: fresh.length, alerted, emailed, analytics: await (await fetch(`${base}/campaigns/${cid}/analytics?api_key=${key}`)).json().catch(() => null) };
+    out[label] = { leads: leads.length, sends: rows.length, reply_bodies: bodies, new_replies: fresh.length, alerted, emailed, stopped, analytics: await (await fetch(`${base}/campaigns/${cid}/analytics?api_key=${key}`)).json().catch(() => null) };
   }
   await setSetting('smartlead_last_sync', { at: new Date().toISOString(), by: uid, out });
   return { ok: true, campaigns: out };
@@ -278,8 +271,9 @@ async function smartleadStopLead(email: string) {
 async function smartleadAddLeads(ids: string[], cid?: string) {
   const key = await secret('SMARTLEAD_API_KEY'); if (!key) return { error: 'No Smartlead key.' };
   const campaign = cid || (await slCampaigns(key))[0];
-  const { data: leads } = await admin.from('sales_leads').select('id, email, contact_name, company, domain, phone, filter_id, city, state').in('id', ids.slice(0, 2000));
-  const rows = (leads || []).filter((l) => l.email).map((l) => { const [first, ...rest] = String(l.contact_name || '').split(' '); return { email: l.email, first_name: first || '', last_name: rest.join(' '), company_name: l.company || '', website: l.domain ? `https://${l.domain}` : '', phone_number: l.phone || '', location: [l.city, l.state].filter(Boolean).join(', '), custom_fields: { list_source: l.filter_id || '' } }; });
+  const { data: leads } = await admin.from('sales_leads').select('id, email, contact_name, company, domain, phone, filter_id, city, state, title, orders_est, first_line, est_sales_usd').in('id', ids.slice(0, 2000));
+  // the live Tier A copy reads {{first_line}} and {{orders_est}} — send both so E1/E2 never render blank
+  const rows = (leads || []).filter((l) => l.email).map((l) => { const [first, ...rest] = String(l.contact_name || '').split(' '); const orders = l.orders_est || (l.est_sales_usd ? `~${(Math.round(l.est_sales_usd / 60 / 100) * 100).toLocaleString('en-US')}` : ''); return { email: l.email, first_name: first || '', last_name: rest.join(' '), company_name: l.company || '', website: l.domain ? `https://${l.domain}` : '', phone_number: l.phone || '', location: [l.city, l.state].filter(Boolean).join(', '), custom_fields: { list_source: l.filter_id || '', title: l.title || '', orders_est: orders, first_line: l.first_line || '' } }; });
   let added = 0, dup = 0, blocked = 0;
   for (let i = 0; i < rows.length; i += 100) {
     const r = await fetch(`${SL}/campaigns/${campaign}/leads?api_key=${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lead_list: rows.slice(i, i + 100), settings: { ignore_global_block_list: false, ignore_unsubscribe_list: false, ignore_duplicate_leads_in_other_campaign: false } }) });
@@ -427,6 +421,38 @@ async function gmailSend(uid: string, b: any) {
   return { ok: true, id: j.id, thread_id: j.threadId };
 }
 
+
+/** rep_send (Derek, 2026-11-10 — "CCE are direct communications from each sales agent after a call is logged"):
+ *  one email from the signed-in rep to a lead. Their own Gmail when it's connected with send rights; otherwise Resend
+ *  as their @shipbay3pl.com address (reply-to them), falling back to derekh@ as the From when the rep's address isn't
+ *  on the verified domain. Logged on the lead either way: sales_email_sends (campaign "Direct · <rep>"), a touch, first_email_at. */
+async function repSend(uid: string, b: any) {
+  const to = String(b.to || '').trim().toLowerCase(); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { error: 'That "to" address does not look right.' };
+  const subject = String(b.subject || '').trim() || '(no subject)'; const body = String(b.body || ''); const leadId = b.lead_id || null;
+  const { data: prof } = await admin.from('profiles').select('email, full_name').eq('id', uid).maybeSingle();
+  const repEmail = String(prof?.email || '').toLowerCase();
+  const when = new Date().toISOString();
+  const markLead = async () => { if (!leadId) return; const { data: l } = await admin.from('sales_leads').select('stage, assigned_to, first_email_at, email').eq('id', leadId).maybeSingle(); await admin.from('sales_leads').update({ last_touch_at: when, last_outcome: 'email_sent', first_email_at: l?.first_email_at || when, ...(l?.stage === 'new' ? { stage: 'contacted' } : {}), ...(l?.assigned_to ? {} : { assigned_to: uid }), ...(l && l.email !== to ? { email: to } : {}) }).eq('id', leadId); };
+  // 1) the rep's own Gmail
+  const g = await googleAccess(uid).catch(() => null);
+  if (g && String(g.scopes || '').includes('gmail.send')) {
+    const r: any = await gmailSend(uid, { to, subject, body, lead_id: leadId });
+    if (!r.error) { await markLead(); return { ok: true, via: 'gmail', id: r.id, from: g.email || repEmail }; }
+    console.log('rep_send gmail failed, falling back to resend', r.error);
+  }
+  // 2) Resend as the rep
+  const key = Deno.env.get('RESEND_API_KEY'); if (!key) return { error: 'No RESEND_API_KEY on the server.' };
+  const own = /@shipbay3pl\.com$/.test(repEmail);
+  const fromAddr = own ? repEmail : 'derekh@shipbay3pl.com';
+  const from = `${prof?.full_name || 'ShipBay'} <${fromAddr}>`;
+  const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from, to: [to], ...(repEmail ? { reply_to: repEmail } : {}), subject, text: body }) });
+  const j: any = await r.json().catch(() => ({})); if (!r.ok) return { error: `Resend refused: ${j?.message || r.status}` };
+  const id = j.id || crypto.randomUUID();
+  await admin.from('sales_email_sends').upsert({ external_id: `rep:${id}`, lead_id: leadId, lead_email: to, lead_name: null, campaign: `Direct · ${repEmail || fromAddr}`, mailbox: fromAddr, step: 0, subject, body: body.slice(0, 20000), sent_at: when, replied: false, bounced: false }, { onConflict: 'external_id' });
+  if (leadId) await admin.from('sales_touches').insert({ lead_id: leadId, kind: 'email_sent', note: `${subject}\n\n${body}`.slice(0, 4000), at: when, by_user: uid });
+  await markLead();
+  return { ok: true, via: 'resend', id, from: fromAddr, reply_to: repEmail || null };
+}
 
 // ============================================================ HubSpot: the system of record ============================================================
 // Portal ↔ HubSpot, both ways. Accounts (sales_leads) ↔ company + contact + deal; calls / touches / meetings / mailbox ↔ engagements.
@@ -792,7 +818,7 @@ Deno.serve(async (req) => {
   if (!me) return json({ error: 'not signed in' }, 401);
   const { data: prof } = await admin.from('profiles').select('is_owner, is_sales, role').eq('id', me.id).single();
   const b = await req.json().catch(() => ({}));
-  const REP_ACTIONS = new Set(['smartlead_stop_lead', 'gmail_connect', 'gmail_sync', 'gmail_disconnect', 'gmail_send', 'hubspot_sync', 'hubspot_push_one', 'hubspot_links']);   // sales reps may do these without the owner passphrase
+  const REP_ACTIONS = new Set(['smartlead_stop_lead', 'gmail_connect', 'gmail_sync', 'gmail_disconnect', 'gmail_send', 'rep_send', 'hubspot_sync', 'hubspot_push_one', 'hubspot_links']);   // sales reps may do these without the owner passphrase
   const gmailConnect = async () => { const id = await secret('GOOGLE_CLIENT_ID'); if (!id) return json({ error: 'Google app keys are missing.' }, 400); const state = crypto.randomUUID(); await setSetting(`google_state:${state}`, { uid: me.id, at: new Date().toISOString() }); return json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({ client_id: id, redirect_uri: GOOGLE_REDIRECT, response_type: 'code', scope: GOOGLE_SCOPES, access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state })}` }); };
   const repAction = async () => {
     if (b.action === 'smartlead_stop_lead') return json(await smartleadStopLead(String(b.email || '')));
@@ -800,6 +826,7 @@ Deno.serve(async (req) => {
     if (b.action === 'gmail_sync') return json(await gmailSync(me.id, !!prof?.is_owner && !!b.all));
     if (b.action === 'gmail_disconnect') { await admin.from('gmail_accounts').delete().eq('user_id', me.id); return json({ ok: true }); }
     if (b.action === 'gmail_send') return json(await gmailSend(me.id, b));
+    if (b.action === 'rep_send') { try { return json(await repSend(me.id, b)); } catch (e) { return json({ error: String((e as Error).message) }, 500); } }
     if (b.action === 'hubspot_links') { const c = await hsCfg(); return json({ portal_id: c.portal_id || null, pipeline_id: c.pipeline_id || null, setup: !!c.pipeline_id, last_sync: c.last_sync || null, last_result: c.last_result || null }); }
     if (b.action === 'hubspot_sync') { try { return json(await hubspotSync(false)); } catch (e) { return json({ error: String((e as Error).message) }, 500); } }
     if (b.action === 'hubspot_push_one') { try { const cfg = await hsCfg(); const { data: l } = await admin.from('sales_leads').select('*').eq('id', String(b.lead_id)).single(); const l2 = await hsPushLead(l, cfg); await hsPushActivity(l2, cfg, null); return json({ ok: true, hs_contact_id: l2.hs_contact_id, hs_deal_id: l2.hs_deal_id, hs_company_id: l2.hs_company_id }); } catch (e) { return json({ error: String((e as Error).message) }, 500); } }

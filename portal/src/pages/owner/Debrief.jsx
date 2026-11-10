@@ -1,10 +1,12 @@
-// Post-call debrief (Derek, 2026-11-02): nine answers after every dial. Each one maps to a knob on the next list cut.
-// Stored on sales_calls (every answer) and sales_leads (the durable ones), pushed to HubSpot as call + contact properties
-// by the owner function. The rep sees only the questions that apply to what happened on the dial.
+// Post-call debrief (Derek, 2026-11-02; rev 4 2026-11-10): the answers after every dial, each one a knob on the next list cut.
+// Stored on sales_calls (every answer) and sales_leads (the durable ones). The rep sees only the questions that apply.
+// Rev 4 (Derek, 11-10 — "build everything from within the portal"): the last question "Send the email?" is a real composer.
+// The email goes out from the rep's own address (their Gmail when it's connected, otherwise Resend as their @shipbay3pl.com
+// with reply-to them). No HubSpot, no Power sequence. A CCE lead's first email is the rep's own, after the call.
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib';
 import { ownerFn, pct } from './util';
-import { listName } from './Sales';
+import { listName, useReplyKit, fillTpl } from './Sales';
 
 export const DIAL = [['no_answer', 'No answer'], ['voicemail', 'Voicemail'], ['bad_number', 'Bad number'], ['gatekeeper', 'Gatekeeper'], ['decision_maker', 'Reached decision-maker']];
 export const PICKED = [['owner_founder', 'Owner / founder'], ['ops', 'Ops'], ['cs', 'Customer service'], ['retail_floor', 'Retail floor']];
@@ -13,53 +15,71 @@ export const SETUP = [['self_shipstation', 'Self-ship · ShipStation'], ['self_s
 export const PAIN = [['space', 'Space'], ['time', 'Time'], ['q4', 'Q4'], ['cost', 'Cost'], ['moving', 'Moving'], ['none', 'None']];
 export const RESULT = [['booked', 'Booked'], ['callback', 'Callback'], ['send_info', 'Send info'], ['soft_no', 'Soft no'], ['hard_no', 'Hard no (DNC)']];
 export const EMAIL = [['nothing', 'Nothing yet'], ['replied', 'Replied'], ['bounced', 'Bounced']];   // legacy values still in sales_calls.email_result; the UI no longer asks
-/** Quick path (nobody picked up): the one decision is whether the email goes out. 'send' = Power sends it. */
-export const SENDER = 'derekh@shipbay3pl.com';   // the only inbox HubSpot sequences send from
+/** Quick path (nobody picked up): the one decision is whether the rep's email goes out now. */
 export const YESNO = [['yes', 'Yes'], ['no', 'No']];
-export const WHICH = [['power', 'Enroll in Power'], ['info', 'Send info']];
 const NO_PICKUP = ['no_answer', 'voicemail'];
 /** Outcomes after which the email question is pointless: they booked, said never, or aren't a fit. */
 const NO_EMAIL_AFTER = ['booked', 'hard_no'];
-const POWER_BLOCKED = ['replied', 'call_booked', 'won', 'dnc', 'lost', 'signed'];
 const THIRD_PARTY = ['agency', 'fulfill', 'fulfilment'];
 
-/** Why a lead can't go to Power right now, or null if it can. */
+/** Why the rep can't email this lead right now, or null if they can. */
 export function powerBlock(lead) {
   if (!lead) return 'no lead';
-  if (lead.power_enrolled_at) return lead.sequence === 'info' ? 'info' : 'enrolled';
-  if (lead.sequence === 'power' || lead.sequence === 'info') return 'queued';
-  if (lead.sequence === 'blitz') return 'blitz';
+  if (lead.sequence === 'blitz' || lead.power_enrolled_at) return 'in a sequence';
   if (THIRD_PARTY.includes(lead.source || '')) return 'third-party';
-  if (POWER_BLOCKED.includes(lead.stage || 'new')) return lead.stage;
+  if (['dnc', 'lost', 'signed', 'won'].includes(lead.stage || 'new')) return lead.stage;
   if (!lead.email) return 'no email';
   return null;
 }
 
-/** Queue a lead for the Power sequence. The DB cron enrolls it in HubSpot within the minute. */
-export async function enrollPower(lead, me, note) {
-  const block = powerBlock(lead); if (block) return { error: block };
-  const now = new Date().toISOString();
-  const patch = { sequence: 'power', enroll_at: now, last_touch_at: now, last_outcome: 'power_enrolled', assigned_to: lead.assigned_to || me.id };
-  if (!lead.first_email_at) patch.first_email_at = now;
-  if ((lead.stage || 'new') === 'new') patch.stage = 'contacted';
-  const { error } = await supabase.from('sales_leads').update(patch).eq('id', lead.id);
-  if (error) return { error: error.message };
-  await supabase.from('sales_touches').insert({ lead_id: lead.id, kind: 'power_enrolled', note: note || null, by_user: me.id }).catch(() => {});
-  return { ok: true };
+/** Send one email from the rep (their Gmail if connected, else Resend as them). The server logs the send on the lead. */
+export async function sendRepEmail({ to, subject, body, lead }) {
+  const r = await ownerFn({ action: 'rep_send', to, subject, body, lead_id: lead?.id || null });
+  return r?.error ? { error: r.error } : r;
 }
 
-/** The one button: enroll, or the state if it already happened. */
+/** Pre-filled draft from the rep's own template (Sales → Settings → My auto email). */
+export const draftFor = (kit, lead, me) => ({ to: lead?.email || '', subject: fillTpl(kit.tpl.reply_subject, lead, me, kit.booking) || 'Following up', body: fillTpl(kit.tpl.reply_body, lead, me, kit.booking) + (kit.tpl.signature ? `\n${fillTpl(kit.tpl.signature, lead, me, kit.booking)}` : '') });
+
+/** The composer: to / subject / body, sends as the rep. */
+export function RepCompose({ draft, setDraft, me, lead, sending }) {
+  const toOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(draft.to || '');
+  return (
+    <div className="dbr-compose">
+      <label className="dbr-to"><b>To</b><input type="email" value={draft.to} onChange={(e) => setDraft({ ...draft, to: e.target.value.trim() })} spellCheck={false} disabled={sending} /><b>from</b><span>{me?.email}</span></label>
+      {draft.to && lead?.email && draft.to.toLowerCase() !== lead.email.toLowerCase() && <span className="sm">{toOk ? `Saves ${draft.to} as their email, then sends.` : 'That doesn\u2019t look like an email address.'}</span>}
+      <label className="dbr-to"><b>Subject</b><input value={draft.subject} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} disabled={sending} /></label>
+      <textarea rows={9} value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} disabled={sending} />
+      <span className="sm">Sent as you; replies land in your inbox. Edit the default under Sales → Settings → My auto email.</span>
+    </div>
+  );
+}
+
+/** The one button on the Calls card and the lead panel: email the lead now, as yourself. (Exported as PowerButton so older screens keep working.) */
 export function PowerButton({ lead, me, note, onDone, say }) {
-  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false); const [busy, setBusy] = useState(false); const kit = useReplyKit(me);
+  const [draft, setDraft] = useState(null);
   const block = powerBlock(lead);
-  const when = (d) => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  if (block === 'enrolled') return <span className="pill connected" title={`Power since ${new Date(lead.power_enrolled_at).toLocaleString()}`}>In Power · {when(lead.power_enrolled_at)}</span>;
-  if (block === 'queued') return <span className={lead.hs_error ? 'pill error' : 'pill pending'} title={lead.hs_error ? `HubSpot said: ${lead.hs_error}` : 'Queued — HubSpot enrollment runs within the minute'}>{lead.hs_error ? 'Power · retrying' : 'Power · queued'}</span>;
-  if (block === 'info') return <span className="pill connected" title={`Info email sent ${new Date(lead.power_enrolled_at).toLocaleString()}; Power follows a day later if no reply`}>Info sent · Power next</span>;
-  if (block === 'blitz') return <span className="pill navy">In Blitz</span>;
   if (block === 'third-party') return null;
-  if (block) return <button className="btn-sm" disabled title={block === 'no email' ? 'No email on file' : `Not while the lead is ${block.replace('_', ' ')}`}>Enroll in Power</button>;
-  return <button className="btn-sm" disabled={busy} onClick={async () => { setBusy(true); const r = await enrollPower(lead, me, note); setBusy(false); if (r.error) say?.({ error: r.error }); else { say?.(null, `${lead.company || lead.email} → Power. First email goes out within the minute.`); onDone?.(); } }}>Enroll in Power</button>;
+  if (block === 'in a sequence') return <span className="pill navy">In a sequence</span>;
+  if (block) return <button className="btn-sm" disabled title={block === 'no email' ? 'No email on file' : `Not while the lead is ${block.replace('_', ' ')}`}>Email</button>;
+  const start = () => { setDraft(draftFor(kit, lead, me)); setOpen(true); };
+  const send = async () => {
+    setBusy(true); const r = await sendRepEmail({ ...draft, lead }); setBusy(false);
+    if (r.error) return say?.({ error: r.error });
+    if (draft.to.toLowerCase() !== (lead.email || '').toLowerCase()) await supabase.from('sales_leads').update({ email: draft.to.toLowerCase() }).eq('id', lead.id);
+    say?.(null, `Sent to ${draft.to} from ${r.from || me?.email}.`); setOpen(false); onDone?.();
+  };
+  return (
+    <>
+      <button className="btn-sm" onClick={start}>{lead.first_email_at ? 'Email again' : 'Email'}</button>
+      {open && draft && <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false); }}><div className="modal dbr">
+        <div className="dbr-head"><div><h3>{lead.company || lead.domain || lead.email}</h3><span className="sm">Your email, from you</span></div></div>
+        <section><RepCompose draft={draft} setDraft={setDraft} me={me} lead={lead} sending={busy} /></section>
+        <div className="row"><button className="btn-sm" type="button" onClick={() => setOpen(false)}>Cancel</button><div className="spacer" /><button className="btn-sm primary" type="button" disabled={busy || !draft.to || !draft.subject} onClick={send}>{busy ? 'Sending…' : 'Send'}</button></div>
+      </div></div>}
+    </>
+  );
 }
 
 const label = (list, k) => (list.find(([x]) => x === k) || [])[1] || k || '—';
@@ -103,20 +123,17 @@ export async function saveDebrief({ lead, me, started, seconds, note, a, emailed
   if (a.result === 'soft_no') patch.next_action_at = new Date(Date.now() + 45 * 86400000).toISOString();
   if (note) patch.notes = [patch.notes || lead.notes, `${now.toLocaleDateString()} ${label(DIAL, a.dial_result)}${a.result ? ` → ${label(RESULT, a.result)}` : ''}: ${note}`].filter(Boolean).join('\n');
   if ((lead.attempts || 0) + 1 >= 4 && !['booked', 'connected', 'gatekeeper'].includes(outcome)) patch.in_calls = false;   // 4 tries with no human → park it
-  // The email: "Enroll in Power" queues the Power sequence; "Send info" queues the info sequence (the rundown + booking link, then Power a day later if no reply).
-  // The DB trigger on sales_calls does the same on email_result in (power, info); this is belt and braces so the UI reflects it instantly.
-  if (['power', 'info'].includes(a.email_result) && !['agency', 'fulfill', 'fulfilment'].includes(lead.source || '') && !lead.sequence && !lead.power_enrolled_at && !POWER_BLOCKED.includes(lead.stage || 'new') && !(outcome === 'booked' || outcome === 'dnc' || outcome === 'not_fit')) {
-    patch.sequence = a.email_result; patch.enroll_at = newEmail ? new Date(now.getTime() + 90000).toISOString() : now.toISOString();
-    if (!lead.first_email_at) patch.first_email_at = now.toISOString();
+  // The email (rev 4): the rep's own, sent now from their address. email_result records what happened: sent / failed / none.
+  let sendErr = null;
+  if (a.send === 'yes' && a.draft?.to && !(outcome === 'booked' || outcome === 'dnc' || outcome === 'not_fit')) {
+    const r = await sendRepEmail({ to: a.draft.to, subject: a.draft.subject, body: a.draft.body, lead });
+    if (r.error) { sendErr = r.error; row.email_result = 'failed'; } else { row.email_result = 'sent'; if (!lead.first_email_at) patch.first_email_at = now.toISOString(); }
   }
   if (emailedNow && !lead.first_email_at) patch.first_email_at = now.toISOString();
   await supabase.from('sales_leads').update(patch).eq('id', lead.id);
-  // the call row goes in after the lead patch, so the DB trigger sees the sequence already set (and the delayed enroll_at when the email changed)
   await supabase.from('sales_calls').insert(row);
   if (outcome === 'dnc' && lead.email) ownerFn({ action: 'smartlead_stop_lead', email: lead.email });
-  // HubSpot gets the call + the contact answers right away (the 5-minute sync would catch it anyway)
-  ownerFn({ action: 'hubspot_push_one', lead_id: lead.id }).catch(() => {});
-  return outcome;
+  return sendErr ? { outcome, error: `Call saved, but the email didn't go: ${sendErr}` } : outcome;
 }
 
 function Pick({ options, value, onChange, cols = 3 }) {
@@ -124,16 +141,18 @@ function Pick({ options, value, onChange, cols = 3 }) {
 }
 
 /** The modal. Quick path for no-answer / voicemail / bad number; full path when a human picked up. */
-export function Debrief({ lead, seconds, note, setNote, emailedNow, onSave, onCancel }) {
-  const [a, setA] = useState({ dial_result: '', picked_up: '', fit: '', not_fit_reason: '', not_fit_detail: '', orders_month: '', current_setup: '', pain: '', result: '', callback_at: '', send: '', to_email: lead.email || '', email_result: '' });
+export function Debrief({ lead, me, seconds, note, setNote, emailedNow, onSave, onCancel, saving = false }) {
+  const kit = useReplyKit(me);
+  const [a, setA] = useState({ dial_result: '', picked_up: '', fit: '', not_fit_reason: '', not_fit_detail: '', orders_month: '', current_setup: '', pain: '', result: '', callback_at: '', send: '', to_email: lead.email || '', email_result: '', draft: null });
+  const setDraft = (d) => setA((x) => ({ ...x, draft: d, to_email: d.to }));
   const set = (k) => (v) => setA((x) => ({ ...x, [k]: v }));
   const human = a.dial_result === 'gatekeeper' || a.dial_result === 'decision_maker';
   const quick = ['no_answer', 'voicemail', 'bad_number'].includes(a.dial_result);
-  const inSeq = !!(lead.sequence || lead.power_enrolled_at);
-  // The last question, always: send the email? Not after a booking, a hard no, a not-fit, or a bad number — and not if they're already in a sequence.
+  const inSeq = !!(lead.sequence === 'blitz' || lead.power_enrolled_at);
+  // The last question, always: send your email now? Not after a booking, a hard no, a not-fit, or a bad number — and not if they're in the Blitz.
   const askSend = !!lead.email && !inSeq && (NO_PICKUP.includes(a.dial_result) || (human && !!a.result && !NO_EMAIL_AFTER.includes(a.result) && a.fit !== 'not_fit'));
   const toOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a.to_email || '');
-  const sendDone = !askSend || (a.send === 'no') || (a.send === 'yes' && !!a.email_result && toOk);
+  const sendDone = !askSend || (a.send === 'no') || (a.send === 'yes' && !!a.draft && toOk && !!a.draft.subject);
   const canSave = !!a.dial_result && sendDone && (quick || (a.dial_result === 'gatekeeper' ? !!a.result : !!a.picked_up && !!a.fit && (a.fit !== 'not_fit' || !!a.not_fit_reason) && !!a.result));
   useEffect(() => { const k = (e) => { if (e.key === 'Escape') onCancel(); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onCancel]);
   return (
@@ -156,17 +175,12 @@ export function Debrief({ lead, seconds, note, setNote, emailedNow, onSave, onCa
         </>}
         {human && <section><div className="dbr-q">7 · Outcome</div><Pick options={RESULT} value={a.result} onChange={set('result')} cols={5} />
           {a.result === 'callback' && <div className="dbr-sub"><input type="datetime-local" value={a.callback_at} onChange={(e) => set('callback_at')(e.target.value)} /></div>}</section>}
-        {askSend && <section><div className="dbr-q">{human ? '8' : '2'} · Send the email?</div><Pick options={YESNO} value={a.send} onChange={(v) => setA((x) => ({ ...x, send: v, email_result: v === 'yes' ? x.email_result : '' }))} cols={2} />
-          {a.send === 'yes' && <div className="dbr-sub">
-            <Pick options={WHICH} value={a.email_result} onChange={set('email_result')} cols={2} />
-            <label className="dbr-to"><b>To</b><input type="email" value={a.to_email} onChange={(e) => set('to_email')(e.target.value.trim())} spellCheck={false} /><b>from</b><span>{SENDER}</span></label>
-            {a.to_email && a.to_email.toLowerCase() !== (lead.email || '').toLowerCase() && <span className="sm">{/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a.to_email) ? `Saves ${a.to_email} as their email here and in HubSpot, then sends.` : 'That doesn\u2019t look like an email address.'}</span>}
-            <span className="sm">{a.email_result === 'info' ? 'Send info: one email with the rundown and a booking link. No reply in a day → Power takes over.' : a.email_result === 'power' ? 'Power: first email within the minute, four follow-ups over two weeks. A reply stops it.' : 'Power opens cold; Send info is for someone who asked what we do.'}</span>
-          </div>}
+        {askSend && <section><div className="dbr-q">{human ? '8' : '2'} · Send your email now?</div><Pick options={YESNO} value={a.send} onChange={(v) => setA((x) => ({ ...x, send: v, draft: v === 'yes' ? (x.draft || draftFor(kit, lead, me)) : null }))} cols={2} />
+          {a.send === 'yes' && a.draft && <div className="dbr-sub"><RepCompose draft={a.draft} setDraft={setDraft} me={me} lead={lead} sending={saving} /></div>}
         </section>}
-        {!askSend && !!lead.email && inSeq && (quick || human) && <section><span className="sm">Already in {lead.sequence === 'info' ? 'the info sequence' : lead.sequence === 'blitz' ? 'the Blitz' : 'Power'} — this just logs the dial.</span></section>}
+        {!askSend && !!lead.email && inSeq && (quick || human) && <section><span className="sm">Already in a sequence — this just logs the dial.</span></section>}
         <section><textarea rows={2} placeholder="One line: who you spoke to, what they said, when to call back…" value={note} onChange={(e) => setNote(e.target.value)} /></section>
-        <div className="row"><button className="btn-sm" type="button" onClick={onCancel}>Back to the call</button><div className="spacer" /><button className="btn-sm primary" type="button" disabled={!canSave} onClick={() => onSave(a)}>Close call</button></div>
+        <div className="row"><button className="btn-sm" type="button" onClick={onCancel}>Back to the call</button><div className="spacer" /><button className="btn-sm primary" type="button" disabled={!canSave || saving} onClick={() => onSave(a)}>{saving ? (a.send === 'yes' ? 'Sending…' : 'Saving…') : a.send === 'yes' ? 'Send & close call' : 'Close call'}</button></div>
       </div>
     </div>
   );

@@ -10,6 +10,7 @@ import { compute, phases } from '../../quote';
 import Quotes from '../Quotes';
 import Onboarding from '../Onboarding';
 import { Debrief, DebriefBoard, PowerButton, saveDebrief } from './Debrief';
+import ImportLeads from './ImportLeads';
 
 /** the quotes that belong to an account (by the account row, or its client org) — best first */
 const QRANK = { accepted: 0, sent: 1, draft: 2, declined: 3, superseded: 4 };
@@ -29,7 +30,7 @@ const lists = (leads) => [...new Set(leads.map((l) => l.filter_id).filter(Boolea
 const gmailUrl = (email, subject, body) => `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email || '')}&su=${encodeURIComponent(subject || '')}${body ? `&body=${encodeURIComponent(body)}` : ''}`;
 /** the team's Calendly booking link (fin_settings.booking_link) */
 export function useBookingLink() { const [u, setU] = useState(''); useEffect(() => { supabase.from('fin_settings').select('value').eq('key', 'booking_link').maybeSingle().then(({ data }) => setU(data?.value?.url || '')); }, []); return u; }
-export const DEFAULT_TPL = { reply_subject: 'Quick one, {first}', reply_body: 'Hi {first},\n\n\n\nEasiest is to grab 15 minutes here: {booking}\n\n{me}', signature: '' };
+export const DEFAULT_TPL = { reply_subject: '{company} — tried you by phone', reply_body: 'Hi {first},\n\nTried you by phone just now and missed you. I\u2019m with ShipBay, a 3PL in Hillsborough, NJ: no order minimums, $0 setup, postage runs on your own carrier account, and orders in by 2pm ET ship the same day.\n\nIf fulfillment is the thing you\u2019d fix first, 15 minutes here: {booking}\n\nOr reply with rough monthly orders and I\u2019ll send what your month costs.\n\n{me}', signature: '' };
 export const TPL_VARS = [['{first}', "prospect's first name"], ['{company}', 'their brand'], ['{booking}', 'your booking link'], ['{me}', 'your first name']];
 /** fill a template with a lead's details */
 export const fillTpl = (t, lead, me, booking) => (t || '').replace(/\{first\}/g, firstName(lead) || 'there').replace(/\{company\}/g, lead?.company || lead?.domain || 'your brand').replace(/\{booking\}/g, booking || '').replace(/\{me\}/g, (me?.full_name || '').split(' ')[0] || '');
@@ -366,7 +367,7 @@ export function Master({ me, rep, leads, sources, reload, say, openLead }) {
         <div className="sm" style={{ padding: '8px 2px' }}>Showing {Math.min(400, sorted.length)} of {sorted.length} · replies and booked calls float to the top.</div>
       </div>
       {adding && <LeadForm sources={sources} onClose={() => setAdding(false)} reload={reload} say={say} openExisting={openLead} claimAs={rep ? me.id : null} />}
-      {importing && <ImportCsv sources={sources} onClose={() => setImporting(false)} reload={reload} say={say} />}
+      {importing && <ImportLeads modal status={status} onClose={() => setImporting(false)} reload={reload} say={say} />}
     </>
   );
 }
@@ -933,10 +934,14 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
   const endSession = async () => { const secs = Math.round((Date.now() - new Date(session.started_at)) / 1000); await supabase.from('sales_call_sessions').update({ ended_at: new Date().toISOString(), seconds: secs }).eq('id', session.id); setSession(null); sessionStorage.removeItem('shipbay-call-session'); if (callStart) setCallStart(null); loadCalls(); };
   const startCall = () => { if (!session) startSession(); setCallStart(Date.now()); };
   // every dial ends in the debrief (Derek, 2026-11-02): nine answers → sales_calls + lead + HubSpot; the Blitz starts a day after the first email
+  const [closing, setClosing] = useState(false);
   const closeCall = async (answers) => {
     if (!lead) return;
     const started = callStart || Date.now(); const secs = Math.round((Date.now() - started) / 1000);
-    await saveDebrief({ lead, me, started, seconds: secs, note, a: answers, emailedNow: emailed === lead.id });
+    setClosing(true);
+    const r = await saveDebrief({ lead, me, started, seconds: secs, note, a: answers, emailedNow: emailed === lead.id });
+    setClosing(false);
+    if (r?.error) say({ error: r.error }); else if (answers.send === 'yes') say(null, `Call logged and your email went to ${answers.draft?.to}.`);
     setDebrief(false); setCallStart(null); setNote(''); setCur(null); setEmailed(null); reload(); loadCalls();
   };
   const skip = () => { if (lead) setSkipped([...skipped, lead.id]); setCur(null); setCallStart(null); };
@@ -977,7 +982,7 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
               </div>
               <textarea className="callnote" rows={2} placeholder="One line: who you spoke to, what they said, when to call back…" value={note} onChange={(e) => setNote(e.target.value)} />
               <div className="outcomes end"><button className="oc solid" onClick={() => setDebrief(true)}>{callStart ? 'End call' : 'Log this dial'}</button></div>
-              {debrief && <Debrief lead={lead} seconds={Math.round((Date.now() - (callStart || Date.now())) / 1000)} note={note} setNote={setNote} emailedNow={emailed === lead.id} onSave={closeCall} onCancel={() => setDebrief(false)} />}
+              {debrief && <Debrief lead={lead} me={me} saving={closing} seconds={Math.round((Date.now() - (callStart || Date.now())) / 1000)} note={note} setNote={setNote} emailedNow={emailed === lead.id} onSave={closeCall} onCancel={() => setDebrief(false)} />}
               <div className="row"><button className="btn-xs" onClick={skip}>Skip for now</button><div className="spacer" /><span className="sm">Next up: {queue.filter((q) => q.id !== lead.id).slice(0, 3).map((q) => q.company).join(' · ') || '—'}</span></div>
             </>
           )}

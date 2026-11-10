@@ -1524,3 +1524,18 @@ label.dbr-to span { color: var(--muted); }
 .roleeditor .field textarea:focus, .roleeditor .field select:focus { outline: none; border-color: var(--orange); box-shadow: 0 0 0 4px var(--orange-tint); }
 .roleeditor .field label .sm { font-weight: 500; color: var(--muted-2); }
 @media (max-width: 760px) { .careers .appgrid, .roleeditor .grid3, .modal.wide .grid2 { grid-template-columns: 1fr; } }
+
+/* Import leads (Admin) — v3 */
+.importpage .glance.imp, .importmodal .glance.imp { gap: 36px; flex-wrap: wrap; }
+.glance.imp > div > b { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.pill.on { background: rgba(255,107,21,.14); color: var(--orange-soft, #FF6B15); }
+.note.warn { color: #B03A33; }
+.importmodal { max-width: 1100px; }
+.importpage .card + .card { margin-top: 14px; }
+/* Debrief rev 4 — the rep's composer */
+.dbr-compose { display: flex; flex-direction: column; gap: 10px; }
+.dbr-compose textarea { width: 100%; padding: 12px 14px; border: 1.5px solid var(--line-2, var(--line)); border-radius: var(--r, 10px); font: 14.5px var(--font-body); line-height: 1.5; background: #fff; resize: vertical; }
+.dbr-compose .dbr-to input { flex: 1; }
+.pill.navy { background: rgba(15,27,42,.08); color: var(--ink); }
+.importpage > .row, .importmodal > .row { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.importpage .bar, .importmodal .bar { margin-top: 14px; }
