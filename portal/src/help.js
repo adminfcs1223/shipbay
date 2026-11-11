@@ -85,13 +85,16 @@ export const HELP = {
       'Start call, talk, and press Book a call the moment they say yes. The closer’s Calendly opens with the prospect already filled in: pick the time with them and confirm. Calendly sends the invite and the meeting link, and you are added as a guest, so the call is on your calendar and the closer’s. You are both on it.',
       'End call opens the debrief. Every answer, the lead’s next step and the booking are saved together on the server. If your connection drops, the call waits in this browser and goes up when you are back; it is never logged twice.',
       'Logged the wrong lead? Your last calls → Void. It drops out of every count and the lead gets the try back. Nothing is deleted.',
-      'Book: book a call without dialing (someone called back, or replied by email). Not on your list? Add them as a client right there, then book. Coming up shows the calls you booked, with Join, Reschedule and Cancel.',
+      'Your leads: Derek gives each setter leads in random blocks of 100. They are yours alone, nobody else dials them. When you book the call, the lead moves to your closer and you keep the credit. The card shows Setter → Closer for the lead on screen.',
+      'Calendar: every call you booked, and the calls you take. Open one for the join link, Reschedule or Cancel. Book a call (top right) books without dialing, for someone who called back or replied by email; not on your list? Add them as a client right there. The Calendar button on Calls brings you here.',
+      'Scoreboard: every setter ranked by calls booked, with dials, reach rate, show rate and leads left to dial. Today, 7 days or 30 days.',
+      'Emails: every email carries the Calendly link. If your own template has no {booking} in it, the link is added as the last line.',
       'A setter books for the closer Derek assigned them. Each closer pastes their own Calendly event link under Settings → My Calendly link; until they do, bookings go on the team Calendly and whoever hosts that page takes the call.',
     ],
   },
   salesdesk: {
     title: 'CRM',
     what: 'Your pipeline, the calls on your calendar, and what your setters are doing.',
-    steps: ['Calendar: every call on your Calendly (booked by a setter, by you, or by the prospect from a link) and Google Calendar. After a call, open it and pick how it went; that is what the show rate counts.', 'Setters: every setter who books for you. Dials, how many reached a person, calls booked, what is coming up and how many showed. Click a name for their next appointments and last calls.', 'Your leads: change the stage, log a call outcome, keep notes and a follow-up date.', 'Settings → My Calendly link: the Calendly event setters book you on. Your hours live in Calendly.'],
+    steps: ['Calendar: every call on your Calendly (booked by a setter, by you, or by the prospect from a link) and Google Calendar. After a call, open it and pick how it went; that is what the show rate counts.', 'Setters: the chain is lead → setter → closer. Leads shows each setter, the closer they set for, and where their leads are: not dialed yet, being worked, with the closer, won. Derek gives leads out here, at random, 100 at a time, and can take back the ones not dialed yet. Below it: each setter’s dials, calls booked, what is coming up and how many showed; click a name for their next appointments and last calls.', 'Your leads: change the stage, log a call outcome, keep notes and a follow-up date.', 'Settings → My Calendly link: the Calendly event setters book you on. Your hours live in Calendly.'],
   },
 };

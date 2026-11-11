@@ -2,6 +2,7 @@
 // Everything that changes data goes through a database function, so a call is one transaction on the server:
 //   log_call      the dial and every effect on the lead (safe to retry: client_id)
 //   setter_board  what a closer sees about their setters
+//   setter_scoreboard / assign_leads / release_leads   the setters' own scoreboard and the owner handing out leads
 // Appointments are booked in Calendly, embedded here; the "appt" edge function reads each booking back from Calendly and
 // records it on the lead, with the setter as a guest on the invite so the call is on both calendars.
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -87,7 +88,7 @@ function Booked({ r, lead, onDone }) {
   );
 }
 
-/** The closer's Calendly page, with the lead filled in and the setter added as a guest. Used in the Book tab and in the
+/** The closer's Calendly page, with the lead filled in and the setter added as a guest. Used in the Calendar's Book a call and in the
  *  "Book a call" dialog during a dial. */
 export function BookForm({ me, lead, people, onBooked, onCancel }) {
   const { closerId, setCloserId, closer, locked } = useCloser(me, people);
@@ -161,51 +162,148 @@ export function BookModal({ me, lead, people, onBooked, onClose }) {
   );
 }
 
-/* =================== the Book tab =================== */
-export function Book({ me, leads, people, say, reload, renderAdd }) {
-  const [q, setQ] = useState(''); const [lead, setLead] = useState(null); const [mtgs, setMtgs] = useState(null); const [busy, setBusy] = useState(null); const [adding, setAdding] = useState(false);
-  const load = async () => { const { data } = await supabase.from('sales_meetings').select('*').neq('status', 'canceled').gte('starts_at', new Date(Date.now() - 3600000).toISOString()).order('starts_at').limit(200); setMtgs(data || []); };
-  useEffect(() => { load(); }, []);
+/* =================== Book a call without dialing (opens from the Calendar tab) =================== */
+export function BookDialog({ me, leads, people, say, reload, renderAdd, onClose }) {
+  const [q, setQ] = useState(''); const [lead, setLead] = useState(null); const [adding, setAdding] = useState(false);
+  useEffect(() => { const k = (e) => e.key === 'Escape' && !adding && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose, adding]);
   const hits = useMemo(() => { const t = q.trim().toLowerCase(); if (t.length < 2) return []; return (leads || []).filter((l) => l.stage !== 'dnc' && [l.company, l.domain, l.contact_name, l.email, l.phone].filter(Boolean).some((v) => v.toLowerCase().includes(t))).slice(0, 8); }, [q, leads]);
-  const who = (id) => first((people || []).find((p) => p.id === id)) || '—';
-  const mine = (mtgs || []).filter((m) => m.booked_by === me.id || m.assigned_to === me.id);
-  const cancel = async (m) => {
-    const why = window.prompt('Cancel this call? Calendly tells the prospect and the closer. Reason (optional):', ''); if (why === null) return;
-    setBusy(m.id); const r = await cancelMeeting(m.id, why); setBusy(null);
-    say(r.error ? r : null, 'Canceled. Calendly told both sides.'); load(); reload?.();
-  };
   // a client who was not on any list: add them, then book
   const openExisting = (id) => { const l = (leads || []).find((x) => x.id === id); if (l) setLead(l); else say({ error: 'That company is already in the system and belongs to someone else. Ask them, or Derek, to book it.' }); };
   return (
-    <div className="bookgrid">
-      <div className="card">
-        <div className="cardhead"><h3>Book a call</h3><div className="spacer" />{!lead && renderAdd && <button className="btn-sm" onClick={() => setAdding(true)}>Add a client</button>}</div>
+    <div className="overlay top" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal dbr calmodal">
+        <div className="dbr-head"><div><h3>{lead ? (lead.company || lead.domain || lead.email) : 'Book a call'}</h3>{lead && <span className="sm">{[lead.contact_name, lead.phone, lead.email].filter(Boolean).join(' · ')}</span>}</div>
+          <div className="spacer" />{lead ? <button className="btn-xs" onClick={() => setLead(null)}>Change</button> : renderAdd && <button className="btn-sm" onClick={() => setAdding(true)}>Add a client</button>}</div>
         {!lead ? (
           <div className="bookfind">
             <input className="search" autoFocus placeholder="Who is it for? Company, name, email or phone…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && hits[0]) { setLead(hits[0]); setQ(''); } }} />
             {hits.length > 0 && <ul className="uplist">{hits.map((l) => <li key={l.id} onClick={() => { setLead(l); setQ(''); }}><b>{l.company || l.domain || l.email}</b><span>{[l.contact_name, l.email, l.phone].filter(Boolean).join(' · ')}</span></li>)}</ul>}
             {q.trim().length >= 2 && hits.length === 0 && <div className="empty">Not on your list.{renderAdd && <> <button className="btn-sm primary" onClick={() => setAdding(true)}>Add them as a client</button></>}</div>}
+            <div className="row"><div className="spacer" /><button className="btn-sm" onClick={onClose}>Close</button></div>
           </div>
-        ) : (
-          <>
-            <div className="bookwho"><div><b>{lead.company || lead.domain || lead.email}</b><span className="sm">{[lead.contact_name, lead.phone, lead.email].filter(Boolean).join(' · ')}</span></div><button className="btn-xs" onClick={() => setLead(null)}>Change</button></div>
-            <BookForm me={me} lead={lead} people={people} onBooked={() => { load(); reload?.(); }} onCancel={() => setLead(null)} />
-          </>
-        )}
-      </div>
-      <div className="card">
-        <div className="cardhead"><h3>Coming up</h3><span className="sm">{mine.length}</span></div>
-        {mtgs === null ? <div className="empty">Loading…</div> : mine.length === 0 ? <div className="empty">Nothing booked.</div> : (
-          <ul className="bookings">{mine.map((m) => (
-            <li key={m.id}>
-              <div><b>{fmtWhen(m.starts_at)}</b><span>{m.invitee_name || m.name}</span>
-                <span className="sm">{m.assigned_to === me.id ? (m.booked_by && m.booked_by !== me.id ? `booked by ${who(m.booked_by)}` : 'yours') : `with ${who(m.assigned_to)}`}{/^https?:/.test(m.location || '') && <> · <a href={m.location} target="_blank" rel="noreferrer">Join ↗</a></>}</span></div>
-              <div className="acts">{m.reschedule_url && <a className="btn-xs" href={m.reschedule_url} target="_blank" rel="noreferrer">Reschedule</a>}<button className="btn-xs bad" disabled={busy === m.id} onClick={() => cancel(m)}>Cancel</button></div>
-            </li>
-          ))}</ul>
-        )}
+        ) : <BookForm me={me} lead={lead} people={people} onBooked={() => reload?.()} onCancel={onClose} />}
       </div>
       {adding && renderAdd?.({ onClose: () => setAdding(false), onCreated: (l) => { setAdding(false); setQ(''); setLead(l); }, openExisting })}
+    </div>
+  );
+}
+
+/* =================== lead → setter → closer =================== */
+let teamCache = null;
+/** everyone at ShipBay with their role and who they set for (one read per page load) */
+export function useTeam() {
+  const [team, setTeam] = useState([]);
+  useEffect(() => { (teamCache || (teamCache = supabase.from('profiles').select('id, full_name, email, role, closer_id, is_sales, is_owner').like('role', 'shipbay%').then(({ data }) => data || []))).then(setTeam); }, []);
+  return team;
+}
+/** who owns each leg of a lead: the setter it was given to, the closer that setter books for (or already has it) */
+export function chainFor(lead, team) {
+  const by = (id) => team.find((p) => p.id === id) || null;
+  const setter = by(lead?.setter_id); const holder = by(lead?.assigned_to);
+  const closer = holder && holder.role !== 'shipbay_setter' ? holder : setter ? by(setter.closer_id) : null;
+  return { setter, closer, handed: !!(setter && holder && holder.id !== setter.id) };
+}
+/** The one line that says where a lead is in the chain. */
+export function Chain({ lead }) {
+  const team = useTeam(); if (!lead || !team.length) return null;
+  const { setter, closer, handed } = chainFor(lead, team);
+  if (!setter && !closer) return <div className="chain"><span className="leg off"><small>Setter</small><b>not given out</b></span><i>→</i><span className="leg off"><small>Closer</small><b>nobody yet</b></span></div>;
+  return (
+    <div className="chain">
+      <span className={`leg ${setter ? (handed ? 'done' : 'on') : 'off'}`}><small>Setter</small><b>{setter ? first(setter) : 'none'}</b></span><i>→</i>
+      <span className={`leg ${closer ? (handed || !setter ? 'on' : '') : 'off'}`}><small>Closer</small><b>{closer ? first(closer) : 'none assigned'}</b></span>
+      <span className="sm">{!setter ? 'worked by the closer directly' : handed ? 'call booked · with the closer' : closer ? 'being set · goes to the closer when a call is booked' : 'this setter has no closer yet'}</span>
+    </div>
+  );
+}
+
+/* =================== the setters' scoreboard =================== */
+const RANGES = [[1, 'Today'], [7, '7 days'], [30, '30 days']];
+const netBooked = (p) => p.meetings.booked;
+export function Scoreboard({ me }) {
+  const [days, setDays] = useState(7); const [d, setD] = useState(null); const [err, setErr] = useState(null);
+  useEffect(() => { let live = true; setD(null); supabase.rpc('setter_scoreboard', { p_days: days }).then(({ data, error }) => { if (!live) return; if (error) setErr(error.message); else setD(data); }); return () => { live = false; }; }, [days]);
+  if (err) return <div className="card"><div className="msg err">{err}</div></div>;
+  if (!d) return <div className="card"><div className="empty">Loading…</div></div>;
+  const rows = [...(d.setters || [])].sort((a, b) => netBooked(b) - netBooked(a) || b.calls.dials - a.calls.dials || a.name.localeCompare(b.name));
+  const mine = rows.find((p) => p.id === me.id); const place = mine ? rows.indexOf(mine) + 1 : null;
+  const shows = (p) => p.meetings.held + p.meetings.no_show;
+  return (
+    <>
+      <div className="opsbar"><span className="seg tight">{RANGES.map(([k, l]) => <button key={k} className={days === k ? 'on' : ''} onClick={() => setDays(k)}>{l}</button>)}</span></div>
+      {mine && <div className="card"><div className="glance setters">
+        <div><small>Your place</small><b>{place}<span className="of"> of {rows.length}</span></b></div>
+        <div><small>Calls booked</small><b>{num(netBooked(mine))}</b></div>
+        <div><small>Dials</small><b>{num(mine.calls.dials)}</b></div>
+        <div><small>Reached a person</small><b>{mine.calls.dials ? pct(mine.calls.connects / mine.calls.dials) : '—'}</b></div>
+        <div><small>Showed up</small><b>{shows(mine) ? pct(mine.meetings.held / shows(mine)) : '—'}</b></div>
+        <div><small>Leads left to dial</small><b>{num(mine.leads.untouched)}</b></div>
+      </div></div>}
+      <div className="card">
+        {rows.length === 0 ? <div className="empty">No appointment setters yet.</div> : (
+          <div className="tablewrap"><table className="ordertable fin scoreboard">
+            <thead><tr><th className="n">#</th><th>Setter</th><th className="n">Booked</th><th className="n">Dials</th><th className="n">Reached</th><th className="n">Per 100 dials</th><th className="n">On the calendar</th><th className="n">Showed</th><th className="n">On the phone</th><th className="n">Leads left</th></tr></thead>
+            <tbody>{rows.map((p, i) => (
+              <tr key={p.id} className={p.id === me.id ? 'hl' : ''}>
+                <td className="n rank">{i + 1}</td>
+                <td><b>{p.name}</b>{p.id === me.id && <span className="statuspill ok" style={{ marginLeft: 6 }}>you</span>}<div className="sm">{p.closer ? `sets for ${p.closer.split(' ')[0]}` : 'no closer yet'}</div></td>
+                <td className="n"><b className="big">{num(netBooked(p))}</b>{p.meetings.booked_today ? <div className="sm">{p.meetings.booked_today} today</div> : null}</td>
+                <td className="n">{num(p.calls.dials)}{p.calls.today ? <div className="sm">{p.calls.today} today</div> : null}</td>
+                <td className="n">{p.calls.dials ? pct(p.calls.connects / p.calls.dials) : '—'}</td>
+                <td className="n">{p.calls.dials ? ((netBooked(p) / p.calls.dials) * 100).toFixed(1) : '—'}</td>
+                <td className="n">{num(p.meetings.upcoming)}</td>
+                <td className="n">{shows(p) ? pct(p.meetings.held / shows(p)) : '—'}</td>
+                <td className="n">{p.session_seconds ? hhmm(p.session_seconds) : '—'}</td>
+                <td className="n">{num(p.leads.untouched)}<div className="sm">of {num(p.leads.given)}</div></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </div>
+    </>
+  );
+}
+
+/* =================== hand leads to setters (owner) =================== */
+export function LeadAssign({ me, say, reload, listName }) {
+  const [d, setD] = useState(null); const [pick, setPick] = useState({}); const [busy, setBusy] = useState(null);
+  const load = async () => { const { data, error } = await supabase.rpc('setter_scoreboard', { p_days: 30 }); if (error) say({ error: error.message }); else setD(data); };
+  useEffect(() => { load(); }, []);
+  if (!d) return <div className="card"><div className="empty">Loading…</div></div>;
+  const owner = !!me.is_owner; const pool = d.pool; const rows = d.setters || [];
+  const get = (id) => ({ n: 100, list: '', ...(pick[id] || {}) });
+  const give = async (p) => {
+    const { n, list } = get(p.id);
+    setBusy(p.id); const { data, error } = await supabase.rpc('assign_leads', { p_setter: p.id, p_count: n, p_list: list || null }); setBusy(null);
+    if (error) return say({ error: error.message });
+    say(null, data.assigned === data.asked ? `${data.assigned} leads, picked at random, are now ${p.name.split(' ')[0]}’s. ${num(data.pool)} left in the pool.` : `Only ${data.assigned} were left${list ? ' on that list' : ''}, so ${p.name.split(' ')[0]} got ${data.assigned}. ${num(data.pool)} left in the pool.`);
+    load(); reload?.();
+  };
+  const takeBack = async (p) => {
+    if (!window.confirm(`Take back the ${p.leads.untouched} leads ${p.name.split(' ')[0]} has not dialed yet? They return to the pool. Leads already called stay with ${p.name.split(' ')[0]}.`)) return;
+    setBusy(p.id); const { data, error } = await supabase.rpc('release_leads', { p_setter: p.id, p_count: null }); setBusy(null);
+    say(error ? { error: error.message } : null, `${data?.released ?? 0} leads are back in the pool.`); load(); reload?.();
+  };
+  return (
+    <div className="card">
+      <div className="cardhead"><h3>Leads</h3>{owner && pool && <span className="sm">{num(pool.total)} in the pool, not given to anyone</span>}</div>
+      {rows.length === 0 ? <div className="empty">No appointment setters yet. Add one under Admin settings → Users with the role Appointment setter.</div> : (
+        <div className="tablewrap"><table className="ordertable fin assigntable">
+          <thead><tr><th>Setter → closer</th><th className="n">Given</th><th className="n">Not dialed yet</th><th className="n">Being worked</th><th className="n">With the closer</th><th className="n">Won</th><th className="n">Dead</th>{owner && <th>Give more</th>}</tr></thead>
+          <tbody>{rows.map((p) => { const g = get(p.id); const max = pool ? (g.list ? (pool.lists.find((x) => x.list === g.list)?.n || 0) : pool.total) : 0; return (
+            <tr key={p.id}>
+              <td><b>{p.name}</b> <span className="arrow">→</span> {p.closer ? <b>{p.closer}</b> : <span className="statuspill bad">no closer</span>}</td>
+              <td className="n">{num(p.leads.given)}</td><td className="n"><b>{num(p.leads.untouched)}</b></td><td className="n">{num(p.leads.working)}</td><td className="n">{num(p.leads.with_closer)}</td><td className="n">{num(p.leads.won)}</td><td className="n">{num(p.leads.dead)}</td>
+              {owner && <td><div className="giverow">
+                <select value={g.n} onChange={(e) => setPick({ ...pick, [p.id]: { ...g, n: Number(e.target.value) } })}>{[100, 200, 300, 400, 500].map((n) => <option key={n} value={n}>{n}</option>)}</select>
+                <select value={g.list} onChange={(e) => setPick({ ...pick, [p.id]: { ...g, list: e.target.value } })}><option value="">any list</option>{(pool?.lists || []).filter((x) => x.list).map((x) => <option key={x.list} value={x.list}>{listName ? listName(x.list) : x.list} ({x.n})</option>)}</select>
+                <button className="btn-sm primary" disabled={busy === p.id || !max} onClick={() => give(p)}>{busy === p.id ? '…' : 'Give at random'}</button>
+                {p.leads.untouched > 0 && <button className="btn-xs" disabled={busy === p.id} onClick={() => takeBack(p)}>Take back undialed</button>}
+              </div></td>}
+            </tr>
+          ); })}</tbody>
+        </table></div>
+      )}
     </div>
   );
 }
@@ -275,13 +373,12 @@ export function RecentCalls({ me, calls, leads, onChange, say }) {
 }
 
 /* =================== Setters: what a closer sees about their setters =================== */
-const RANGES = [[1, 'Today'], [7, '7 days'], [30, '30 days']];
 export function Setters({ me, people }) {
   const [days, setDays] = useState(7); const [d, setD] = useState(null); const [err, setErr] = useState(null); const [open, setOpen] = useState(null);
   useEffect(() => { let live = true; setD(null); supabase.rpc('setter_board', { p_days: days }).then(({ data, error }) => { if (!live) return; if (error) setErr(error.message); else setD(data); }); return () => { live = false; }; }, [days]);
   if (err) return <div className="card"><div className="msg err">{err}</div></div>;
   if (!d) return <div className="card"><div className="empty">Loading…</div></div>;
-  const P = d.people || []; const setters = P.filter((p) => p.is_setter);
+  const setters = (d.people || []).filter((p) => p.is_setter); const P = setters;
   const who = (id) => first((people || []).find((p) => p.id === id)) || '';
   const sum = (f) => setters.reduce((a, p) => a + (f(p) || 0), 0);
   const rate = (a, b) => (b ? a / b : null);
@@ -299,7 +396,7 @@ export function Setters({ me, people }) {
       </div></div>
       <div className="card">
         {setters.length === 0 && <p className="hint">No setters are assigned to you yet. Derek sets that under Admin → Team.</p>}
-        {P.length === 0 ? <div className="empty">Nothing to show.</div> : (
+        {P.length === 0 ? null : (
           <div className="tablewrap"><table className="ordertable fin setterstable">
             <thead><tr><th>Who</th><th className="n">Today</th><th className="n">Dials</th><th className="n">Reached</th><th className="n">Booked</th><th className="n">Per 100 dials</th><th className="n">Coming up</th><th className="n">Showed</th><th className="n">On the phone</th><th className="n">Last call</th></tr></thead>
             <tbody>{P.map((p) => { const booked = p.meetings.booked - p.meetings.canceled; const shows = p.meetings.held + p.meetings.no_show; return [

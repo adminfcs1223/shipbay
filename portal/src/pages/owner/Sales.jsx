@@ -3,14 +3,14 @@
 // slide-in panel where everything can be done: reply, log a call, change stage, notes, hand-off, do-not-contact.
 // `rep` mode scopes everything to the signed-in salesperson (RLS enforces it; the UI just hides owner controls).
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { supabase } from '../../lib';
+import { supabase, fn } from '../../lib';
 import { useTeamData, teamStats, TeamTable, useGoals, goalsFor, GoalBars, bonusFor, bonusProgress, BonusBar, BONUS_METRICS } from './Team';
 import { ownerFn, fetchAll, money, pct, num, ago, mmss, hhmm, STAGES, stageLabel, stageClass, parseCsv, guessColumns } from './util';
 import { compute, phases } from '../../quote';
 import Quotes from '../Quotes';
 import Onboarding from '../Onboarding';
 import { Debrief, DebriefBoard, PowerButton, saveDebrief } from './Debrief';
-import { Book, BookModal, Script, Setters, CalendlyLink, RecentCalls, logCall, flushOutbox, outbox, dropFromOutbox, fmtWhen, cancelMeeting } from './Appt';
+import { BookDialog, BookModal, Script, Setters, Scoreboard, LeadAssign, Chain, CalendlyLink, RecentCalls, logCall, flushOutbox, outbox, dropFromOutbox, fmtWhen, cancelMeeting } from './Appt';
 import ImportLeads from './ImportLeads';
 
 /** the quotes that belong to an account (by the account row, or its client org) — best first */
@@ -21,9 +21,10 @@ export const quoteMonthly = (q) => { try { const ph = phases(q); const p = ph.fi
 /** expected services $/month for an account: its quote if it has one, else the hand-typed deal value */
 export const expectedMonthly = (lead, quotes) => { const q = quotesFor(lead, quotes).find((x) => !x.internal_only && x.status !== 'declined' && x.status !== 'superseded'); const v = q ? quoteMonthly(q) : null; return v != null ? { value: v, from: q } : { value: lead?.deal_value ? Number(lead.deal_value) : null, from: null }; };
 
-const SUB = [['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['book', 'Book'], ['calendar', 'Calendar'], ['setters', 'Setters'], ['quotes', 'Quotes'], ['onboarding', 'Onboarding'], ['bonus', 'Bonus'], ['settings', 'Settings']];
-/** Appt. Setting (Derek, 2026-11-10): dialing + replies, where a new rep starts. CRM: everything else. Admin → Sales shows all of it. */
-export const APPT_TABS = ['calls', 'book', 'email', 'settings'];
+const SUB = [['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['calendar', 'Calendar'], ['scoreboard', 'Scoreboard'], ['setters', 'Setters'], ['quotes', 'Quotes'], ['onboarding', 'Onboarding'], ['bonus', 'Bonus'], ['settings', 'Settings']];
+/** Appt. Setting (Derek, 2026-11-10): dialing + replies, where a new rep starts. CRM: everything else. Admin → Sales shows all of it.
+ *  Evening rev: Calendar replaces Book (booking opens from the Calendar), and the setters get their own Scoreboard. */
+export const APPT_TABS = ['calls', 'calendar', 'scoreboard', 'email', 'settings'];
 export const CRM_TABS = ['overview', 'pipeline', 'master', 'calendar', 'setters', 'quotes', 'onboarding', 'bonus', 'settings'];
 export const LIST_NAMES = { A1: 'Self-ship brands · NJ metro', A2: 'Already on a 3PL · NJ metro', A3: 'Self-ship brands · Northeast', A4: 'Shopify Plus upgrades', B1: 'Founder-run · NJ metro', C1: 'Amazon sellers · Northeast', C2: 'Q4 overflow', X0: 'Control group' };
 export const listName = (code) => (code && LIST_NAMES[code] ? `${code} · ${LIST_NAMES[code]}` : code || '—');
@@ -32,19 +33,31 @@ export const srcLabelPlain = (k) => ({ cold_call: 'Cold call list', cold_email: 
 const lists = (leads) => [...new Set(leads.map((l) => l.filter_id).filter(Boolean))].sort();
 /** Gmail compose link */
 const gmailUrl = (email, subject, body) => `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email || '')}&su=${encodeURIComponent(subject || '')}${body ? `&body=${encodeURIComponent(body)}` : ''}`;
-/** the team's Calendly booking link (fin_settings.booking_link) */
-export function useBookingLink() { const [u, setU] = useState(''); useEffect(() => { supabase.from('fin_settings').select('value').eq('key', 'booking_link').maybeSingle().then(({ data }) => setU(data?.value?.url || '')); }, []); return u; }
-export const DEFAULT_TPL = { reply_subject: '{company} — tried you by phone', reply_body: 'Hi {first},\n\nTried you by phone just now and missed you. I\u2019m with ShipBay, a 3PL in Hillsborough, NJ: no order minimums, $0 setup, postage runs on your own carrier account, and orders in by 2pm ET ship the same day.\n\nIf fulfillment is the thing you\u2019d fix first, 15 minutes here: {booking}\n\nOr reply with rough monthly orders and I\u2019ll send what your month costs.\n\n{me}', signature: '' };
+/** The Calendly link that goes in my emails: my own event link, else my closer's (a setter books for a closer), else the team link. */
+export function useBookingLink(me) {
+  const [u, setU] = useState('');
+  useEffect(() => {
+    let live = true;
+    const team = () => supabase.from('fin_settings').select('value').eq('key', 'booking_link').maybeSingle().then(({ data }) => { if (live) setU(data?.value?.url || ''); });
+    if (me?.id) fn('appt', { action: 'calendly_link' }).then((r) => { if (!live) return; if (r?.url) setU(r.url); else team(); }).catch(team); else team();
+    return () => { live = false; };
+  }, [me?.id]);
+  return u;
+}
+// Every outbound email is about one thing: getting the call on the calendar (Derek, 2026-11-10 evening). The link leads, the pitch follows.
+export const DEFAULT_TPL = { reply_subject: '{company} — 15 minutes this week?', reply_body: 'Hi {first},\n\nTried you by phone just now and missed you. I’m with ShipBay, a 3PL in Hillsborough, NJ. The quickest way to see if we fit is a 15-minute call. Pick whatever time works:\n\n{booking}\n\nOn the call we price your actual month. No order minimums, $0 setup, postage on your own carrier account, and orders in by 2pm ET ship the same day.\n\n{me}', signature: '' };
+/** No email leaves without the booking link: a template that lost its {booking} gets the link as its last line. */
+export const withBooking = (body, booking) => (!booking || (body || '').includes(booking) ? body || '' : `${(body || '').trimEnd()}\n\nPick a time for a 15-minute call: ${booking}`);
 export const TPL_VARS = [['{first}', "prospect's first name"], ['{company}', 'their brand'], ['{booking}', 'your booking link'], ['{me}', 'your first name']];
 /** fill a template with a lead's details */
 export const fillTpl = (t, lead, me, booking, closer) => (t || '').replace(/\{closer\}/g, closer || (me?.full_name || '').split(' ')[0] || '').replace(/\{first\}/g, firstName(lead) || 'there').replace(/\{company\}/g, lead?.company || lead?.domain || 'your brand').replace(/\{booking\}/g, booking || '').replace(/\{me\}/g, (me?.full_name || '').split(' ')[0] || '');
 /** everything needed to open a pre-filled Gmail reply: the rep's own template (Sales → Settings) + the booking link */
 export function useReplyKit(me) {
-  const booking = useBookingLink(); const [tpl, setTpl] = useState(null);
+  const booking = useBookingLink(me); const [tpl, setTpl] = useState(null);
   useEffect(() => { if (!me?.id) return; supabase.from('sales_rep_settings').select('*').eq('user_id', me.id).maybeSingle().then(({ data }) => setTpl(data || {})); }, [me?.id]);
   const t = { ...DEFAULT_TPL, ...Object.fromEntries(Object.entries(tpl || {}).filter(([, v]) => v)) };
   const link = (email, replyToSubject, lead) => {
-    const body = fillTpl(t.reply_body, lead, me, booking) + (t.signature ? `\n${fillTpl(t.signature, lead, me, booking)}` : '');
+    const body = withBooking(fillTpl(t.reply_body, lead, me, booking), booking) + (t.signature ? `\n${fillTpl(t.signature, lead, me, booking)}` : '');
     const su = replyToSubject ? (/^re:/i.test(replyToSubject) ? replyToSubject : `Re: ${replyToSubject}`) : (fillTpl(t.reply_subject, lead, me, booking) || 'Following up');
     return gmailUrl(email, su, body);
   };
@@ -145,9 +158,9 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav, tab
       {sub === 'master' && <Master {...ctx} leads={mine} />}
       {sub === 'email' && <Conversations {...ctx} leads={mine} allLeads={leads} sends={mySends} mail={mail} mailAccts={mailAccts} status={status} refreshStatus={refreshStatus} focus={focus} clearFocus={() => setFocus(null)} />}
       {sub === 'calls' && <Calls {...ctx} leads={leads} />}
-      {sub === 'book' && <Book {...ctx} leads={leads} renderAdd={(p) => <LeadForm sources={sources} reload={load} say={say} claimAs={me.id} title="Add a client" {...p} />} />}
-      {sub === 'setters' && <Setters me={me} people={people} />}
-      {sub === 'calendar' && <Calendar {...ctx} leads={leads} status={status} refreshStatus={refreshStatus} mineOnly={rep} focusDate={focus} />}
+      {sub === 'scoreboard' && <Scoreboard me={me} />}
+      {sub === 'setters' && <><LeadAssign me={me} say={say} reload={load} listName={listName} /><Setters me={me} people={people} /></>}
+      {sub === 'calendar' && <Calendar {...ctx} leads={leads} closers={people} status={status} refreshStatus={refreshStatus} mineOnly={rep} focusDate={focus} renderAdd={(p) => <LeadForm sources={sources} reload={load} say={say} claimAs={me.id} title="Add a client" {...p} />} />}
       {sub === 'bonus' && <Bonus {...ctx} leads={leads} />}
       {panelLead && <LeadPanel {...ctx} lead={panelLead} sends={sends.filter((s) => s.lead_id === panelLead.id)} onClose={() => setPanel(null)} />}
     </>
@@ -457,6 +470,7 @@ export function LeadPanel({ me, rep, lead, sends, sources, onClose, reload, say,
         {logging && <div className="plog"><textarea rows={2} placeholder="What happened on the call…" value={note} onChange={(e) => setNote(e.target.value)} /><div className="outcomes">{PANEL_OUT.map(([k, l, cls]) => <button key={k} className={`oc ${cls}`} onClick={() => quickLog(k)}>{l}</button>)}</div></div>}
         <div className="tabs ptabs"><button className={tab === 'activity' ? 'on' : ''} onClick={() => setTab('activity')}>Activity{replies.length ? <i>{replies.length}</i> : null}</button><button className={tab === 'details' ? 'on' : ''} onClick={() => setTab('details')}>Details</button></div>
         <div className="pbody">
+          <Chain lead={lead} />
           <div className="acct">
             <div className="acctrow">
               <div><small>Client account</small>{org ? <b>{org.name} <span className={`statuspill ${org.status === 'active' ? 'ok' : 'navy'}`}>{org.status}</span></b> : <b className="sm">not a client yet</b>}</div>
@@ -915,7 +929,7 @@ export function Score({ title, rows }) {
 const PICKUP = new Set(['gatekeeper', 'connected', 'booked', 'not_fit']); const CONNECT = new Set(['connected', 'booked', 'not_fit']);
 const grade = (bookedPer100, dials) => (dials < 30 ? '—' : bookedPer100 >= 3 ? 'A' : bookedPer100 >= 1.5 ? 'B' : bookedPer100 >= 0.5 ? 'C' : 'D');
 
-export function Calls({ me, rep, leads, people, reload, say, openLead }) {
+export function Calls({ me, rep, leads, people, reload, say, openLead, go }) {
   const [list, setList] = useState(''); const [who, setWho] = useState(''); const kit = useReplyKit(me); const booking = kit.booking; const [calls, setCalls] = useState([]); const [sessions, setSessions] = useState([]);
   const [session, setSession] = useState(() => { try { return JSON.parse(sessionStorage.getItem('shipbay-call-session') || 'null'); } catch { return null; } });
   const [cur, setCur] = useState(null); const [callStart, setCallStart] = useState(null); const [note, setNote] = useState(''); const [tick, setTick] = useState(0); const [skipped, setSkipped] = useState([]); const [debrief, setDebrief] = useState(false); const [emailed, setEmailed] = useState(null);
@@ -974,10 +988,11 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
   return (
     <>
       <div className="opsbar wrap">
-        <select value={list} onChange={(e) => { setList(e.target.value); setCur(null); }}><option value="">All lists ({queue.length} ready{rep ? ' · untouched + yours' : ''})</option>{lists(leads).map((f) => <option key={f} value={f}>{listName(f)}</option>)}</select>
+        <select value={list} onChange={(e) => { setList(e.target.value); setCur(null); }}><option value="">All lists ({queue.length} ready{me.role === 'shipbay_setter' ? ' · yours' : rep ? ' · untouched + yours' : ''})</option>{lists(leads).map((f) => <option key={f} value={f}>{listName(f)}</option>)}</select>
         {!rep && <select value={who} onChange={(e) => { setWho(e.target.value); setCur(null); }}><option value="">Everyone’s</option>{(people || []).map((p) => <option key={p.id} value={p.id}>{(p.full_name || p.email).split(' ')[0]}’s</option>)}<option value="none">Unassigned only</option></select>}
         {booking && <span className="sm">Book them: <a href={booking} target="_blank" rel="noreferrer">{booking.replace(/^https?:\/\//, '')}</a></span>}
         <div className="spacer" />
+        {go && <button className="btn-sm" onClick={() => go('calendar')}>Calendar</button>}
         <button className={`btn-sm ${scriptOpen ? 'on' : ''}`} onClick={toggleScript}>Script</button>
         {session ? <><span className="mono">Session {hhmm(sessSecs)} {mmss(sessSecs % 60)}</span><button className="btn-sm" onClick={endSession}>End session</button></> : <button className="btn-sm primary" onClick={startSession}>Start session</button>}
       </div>
@@ -986,7 +1001,7 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
         <button className="btn-xs" onClick={retryWaiting}>Send now</button></div>}
       <div className={`callgrid ${scriptOpen ? 'withscript' : ''}`}>
         <div className="card dialer">
-          {!lead ? <div className="empty">Queue is empty for this list. Import more leads or clear the filter.</div> : (
+          {!lead ? <div className="empty">{me.role === 'shipbay_setter' ? (leads.some((l) => l.assigned_to === me.id) ? 'Nothing is due right now. Leads you already called come back on their callback day.' : 'No leads have been given to you yet. Derek hands them out in blocks of 100.') : 'Queue is empty for this list. Import more leads or clear the filter.'}</div> : (
             <>
               <div className="who"><small>{lead.filter_id ? listName(lead.filter_id) : srcLabelPlain(lead.source)} · try #{(lead.attempts || 0) + 1}{!rep && lead.assigned_to && lead.assigned_to !== me.id ? ` · ${repName(lead.assigned_to)}’s lead` : ''}{lead.stage === 'replied' && <span className="statuspill warn" style={{ marginLeft: 8 }}>replied to email</span>}</small>
                 <h2 className="click" onClick={() => openLead(lead)} title="Open contact">{lead.company || lead.domain}</h2>
@@ -994,6 +1009,7 @@ export function Calls({ me, rep, leads, people, reload, say, openLead }) {
                 <div className="sm">{[lead.contact_name, lead.city, lead.state].filter(Boolean).join(' · ')}{lead.est_sales_usd ? ` · ~${money(lead.est_sales_usd)}/mo online` : ''}{lead.products ? ` · ${lead.products} products` : ''}{lead.plan ? ` · ${lead.plan}` : ''}</div>
                 {lead.domain && <a className="sm" href={`https://${lead.domain}`} target="_blank" rel="noreferrer">{lead.domain} ↗</a>}
                 {lead.notes && <pre className="notes">{lead.notes}</pre>}
+                <Chain lead={lead} />
               </div>
               <div className="timer">{callStart ? <><b>{mmss(callSecs)}</b><span>on the call</span></> : <button className="btn primary big" onClick={startCall}>Start call</button>}
                 <span className="emailacts">
@@ -1071,7 +1087,7 @@ export function Bonus({ me, rep, leads, people, go }) {
 
 /* =================== Settings: my reply template + my Gmail =================== */
 export function RepSettings({ me, rep, people, say, status }) {
-  const booking = useBookingLink();
+  const booking = useBookingLink(me);
   const [t, setT] = useState(null); const [saving, setSaving] = useState(false); const [accts, setAccts] = useState([]); const [busy, setBusy] = useState(false);
   const load = async () => {
     const [{ data: row }, { data: ga }] = await Promise.all([supabase.from('sales_rep_settings').select('*').eq('user_id', me.id).maybeSingle(), supabase.from('v_gmail_accounts').select('*')]);
@@ -1102,8 +1118,9 @@ export function RepSettings({ me, rep, people, say, status }) {
           <div className="tplpreview">
             <small>Preview · to Jordan Lee at Vinyl Moons</small>
             <div className="pv-subject">{fillTpl(eff.reply_subject, sample, me, booking)}</div>
-            <pre>{fillTpl(eff.reply_body, sample, me, booking)}{eff.signature ? `\n${fillTpl(eff.signature, sample, me, booking)}` : ''}</pre>
+            <pre>{withBooking(fillTpl(eff.reply_body, sample, me, booking), booking)}{eff.signature ? `\n${fillTpl(eff.signature, sample, me, booking)}` : ''}</pre>
             {!booking && <div className="sm warn">No booking link set yet{rep ? ' — ask Derek (Owner → Settings).' : ' — add it under Owner → Settings.'}</div>}
+            {booking && !/\{booking\}/.test(eff.reply_body) && <div className="sm">Your body has no <code>{'{booking}'}</code>, so the Calendly link is added as the last line. Every email carries it.</div>}
           </div>
         </div>
       </div>
@@ -1127,8 +1144,8 @@ export function RepSettings({ me, rep, people, say, status }) {
 }
 
 /* =================== Calendar: a real month grid — Calendly bookings + Google Calendar =================== */
-export function Calendar({ me, leads, status, reload, say, refreshStatus, mineOnly, openLead }) {
-  const [mtgs, setMtgs] = useState(null); const [people, setPeople] = useState([]); const [busy, setBusy] = useState(null); const [sel, setSel] = useState(null);
+export function Calendar({ me, leads, status, reload, say, refreshStatus, mineOnly, openLead, closers, renderAdd }) {
+  const [mtgs, setMtgs] = useState(null); const [people, setPeople] = useState([]); const [busy, setBusy] = useState(null); const [sel, setSel] = useState(null); const [booking, setBooking] = useState(false);
   const [month, setMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const load = async () => { const [m, p] = await Promise.all([fetchAll('sales_meetings', '*', (q) => q.order('starts_at')), supabase.from('profiles').select('id, full_name, email').like('role', 'shipbay%').eq('active', true)]); setMtgs(m); setPeople(p.data || []); };
   useEffect(() => { load(); }, []);
@@ -1136,7 +1153,9 @@ export function Calendar({ me, leads, status, reload, say, refreshStatus, mineOn
   const upd = async (m, patch) => { await supabase.from('sales_meetings').update(patch).eq('id', m.id); load(); };
   const who = (id) => { const p = people.find((x) => x.id === id); return p ? (p.full_name || p.email).split(' ')[0] : '—'; };
   if (mtgs === null) return <div className="card"><div className="empty">Loading…</div></div>;
-  const visible = mtgs.filter((m) => !mineOnly || m.assigned_to === me?.id);
+  // mine = the calls I take and the calls I booked for my closer (a setter is on those too)
+  const visible = mtgs.filter((m) => !mineOnly || m.assigned_to === me?.id || m.booked_by === me?.id);
+  const canMark = (m) => !!me?.is_owner || m.assigned_to === me?.id;
   // grid: Sunday-first weeks covering the month
   const first = new Date(month.getFullYear(), month.getMonth(), 1); const start = new Date(first); start.setDate(1 - first.getDay());
   const cells = []; for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); cells.push(d); }
@@ -1152,6 +1171,7 @@ export function Calendar({ me, leads, status, reload, say, refreshStatus, mineOn
         <div className="period"><button className="btn-sm" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>‹</button><b className="monthtitle">{month.toLocaleString('en-US', { month: 'long', year: 'numeric' })}</b><button className="btn-sm" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>›</button><button className="btn-xs" onClick={() => { const d = new Date(); setMonth(new Date(d.getFullYear(), d.getMonth(), 1)); }}>Today</button></div>
         <span className="sm"><i className="sw cal" /> Calendly &nbsp; <i className="sw gcal" /> Google Calendar</span>
         <div className="spacer" />
+        <button className="btn-sm primary" onClick={() => setBooking(true)}>Book a call</button>
         {!mineOnly && <>
           {status?.calendly_set ? <button className="btn-sm" disabled={!!busy} onClick={() => sync('calendly')}>{busy === 'calendly' ? '…' : 'Sync Calendly'}</button> : <span className="sm">Calendly token → Settings</span>}
           {status?.gcal_set ? <button className="btn-sm" disabled={!!busy} onClick={() => sync('google')}>{busy === 'google' ? '…' : 'Sync Google Calendar'}</button> : <span className="sm">· Google Calendar address → Settings</span>}
@@ -1173,7 +1193,7 @@ export function Calendar({ me, leads, status, reload, say, refreshStatus, mineOn
         <div className="calside">
           <div className="card">
             <div className="cardhead"><h3>Coming up</h3></div>
-            {upcoming.length === 0 ? <div className="empty">Nothing booked.</div> : <ul className="uplist">{upcoming.map((m) => <li key={m.id} onClick={() => setSel(m)}><b>{new Date(m.starts_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · {fmtT(m.starts_at)}</b><span>{m.invitee_name || m.name}</span><span className="sm">{m.name}{!mineOnly ? ` · ${who(m.assigned_to)}` : ''}</span></li>)}</ul>}
+            {upcoming.length === 0 ? <div className="empty">Nothing booked.</div> : <ul className="uplist">{upcoming.map((m) => <li key={m.id} onClick={() => setSel(m)}><b>{new Date(m.starts_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · {fmtT(m.starts_at)}</b><span>{m.invitee_name || m.name}</span><span className="sm">{m.assigned_to === me?.id ? (m.booked_by && m.booked_by !== me.id ? `booked by ${who(m.booked_by)}` : m.name) : `with ${who(m.assigned_to)}`}</span></li>)}</ul>}
           </div>
         </div>
       </div>
@@ -1187,11 +1207,12 @@ export function Calendar({ me, leads, status, reload, say, refreshStatus, mineOn
             {m.description && <div><small>Notes</small><pre className="notes">{m.description.slice(0, 600)}</pre></div>}
             {m.booked_by && <div><small>Booked by</small><b>{who(m.booked_by)}</b>{m.booked_by !== m.assigned_to && <span className="muted"> · on the call too</span>}</div>}
             <div><small>Taken by</small>{mineOnly ? <b>{who(m.assigned_to)}</b> : <select className="statusselect" value={m.assigned_to || ''} onChange={(e) => { upd(m, { assigned_to: e.target.value || null }); setSel({ ...m, assigned_to: e.target.value || null }); }}><option value="">— nobody —</option>{people.map((p) => <option key={p.id} value={p.id}>{(p.full_name || p.email).split(' ')[0]}</option>)}</select>}</div>
-            {m.status === 'canceled' ? <div><small>Status</small><span className="statuspill bad">Canceled</span></div> : isPast && <div><small>How did it go?</small><select className="statusselect" value={m.outcome || ''} onChange={(e) => { upd(m, { outcome: e.target.value || null, status: 'done' }); setSel({ ...m, outcome: e.target.value }); }}><option value="">—</option><option value="quoted">Quoted</option><option value="follow_up">Follow up</option><option value="signed">Signed</option><option value="not_fit">Not a fit</option><option value="no_show">No-show</option></select></div>}
+            {m.status === 'canceled' ? <div><small>Status</small><span className="statuspill bad">Canceled</span></div> : isPast && !canMark(m) ? (m.outcome ? <div><small>How it went</small><b>{m.outcome.replace('_', ' ')}</b></div> : null) : isPast && <div><small>How did it go?</small><select className="statusselect" value={m.outcome || ''} onChange={(e) => { upd(m, { outcome: e.target.value || null, status: 'done' }); setSel({ ...m, outcome: e.target.value }); }}><option value="">—</option><option value="quoted">Quoted</option><option value="follow_up">Follow up</option><option value="signed">Signed</option><option value="not_fit">Not a fit</option><option value="no_show">No-show</option></select></div>}
           </div>
           <div className="row">{m.source !== 'google' && m.status !== 'canceled' && !isPast && <>{m.reschedule_url && <a className="btn-sm" href={m.reschedule_url} target="_blank" rel="noreferrer">Reschedule</a>}<button className="btn-sm danger" onClick={async () => { const why = window.prompt('Cancel this call? Calendly tells the prospect and the host. Reason (optional):', ''); if (why === null) return; const r = await cancelMeeting(m.id, why); say(r.error ? r : null, 'Canceled.'); setSel(null); load(); reload?.(); }}>Cancel the call</button></>}<div className="spacer" /><button className="btn-sm" onClick={() => setSel(null)}>Close</button></div>
         </div></div>
       ); })()}
+      {booking && <BookDialog me={me} leads={leads} people={closers} say={say} reload={() => { load(); reload?.(); }} renderAdd={renderAdd} onClose={() => { setBooking(false); load(); }} />}
     </>
   );
 }

@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib';
 import { ownerFn, pct } from './util';
-import { listName, useReplyKit, fillTpl } from './Sales';
+import { listName, useReplyKit, fillTpl, withBooking } from './Sales';
 import { logCall, fmtWhen } from './Appt';
 
 export const DIAL = [['no_answer', 'No answer'], ['voicemail', 'Voicemail'], ['bad_number', 'Bad number'], ['gatekeeper', 'Gatekeeper'], ['decision_maker', 'Reached decision-maker']];
@@ -40,7 +40,7 @@ export async function sendRepEmail({ to, subject, body, lead }) {
 }
 
 /** Pre-filled draft from the rep's own template (Sales → Settings → My auto email). */
-export const draftFor = (kit, lead, me) => ({ to: lead?.email || '', subject: fillTpl(kit.tpl.reply_subject, lead, me, kit.booking) || 'Following up', body: fillTpl(kit.tpl.reply_body, lead, me, kit.booking) + (kit.tpl.signature ? `\n${fillTpl(kit.tpl.signature, lead, me, kit.booking)}` : '') });
+export const draftFor = (kit, lead, me) => ({ to: lead?.email || '', subject: fillTpl(kit.tpl.reply_subject, lead, me, kit.booking) || 'Following up', body: withBooking(fillTpl(kit.tpl.reply_body, lead, me, kit.booking), kit.booking) + (kit.tpl.signature ? `\n${fillTpl(kit.tpl.signature, lead, me, kit.booking)}` : '') });
 
 /** The composer: to / subject / body, sends as the rep. */
 export function RepCompose({ draft, setDraft, me, lead, sending }) {

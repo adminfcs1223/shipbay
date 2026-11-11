@@ -1,13 +1,40 @@
 // lead-emails — every prospect-facing email, sent from the founder via Resend.
-// Two entry points, both guarded by the shared secret:
-//   { record, template }  — a Postgres trigger sends the instant (T0) email for a new lead
-//   { run_due: true }     — pg_cron calls this every 30 min to send due sequence follow-ups
-// Secrets: WEBHOOK_SECRET, RESEND_API_KEY (verified shipbay3pl.com domain in Resend). Optional: FOUNDER_FROM.
+// Three entry points, all guarded by the shared secret:
+//   { record, template }  — a Postgres trigger sends the instant (T0) email for a new website lead
+//   { run_due: true }     — pg_cron calls this every 30 min to send due website-lead follow-ups
+//   { run_blitz: true, lead_id? } — pg_cron every 10 min (and lead-intake, per lead) sends due Blitz emails from the assigned rep
+// Secrets: WEBHOOK_SECRET (env, or platform_secrets), RESEND_API_KEY (verified shipbay3pl.com domain in Resend). Optional: FOUNDER_FROM.
 // Follow-ups are skipped automatically once a lead is marked won or lost in the CRM.
+// Derek, 2026-11-10: every email is about booking the call, and every template carries the Calendly link
+// (the sender's own event link, else the team link under Admin settings, else DEFAULT_BOOK).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
-const WEBHOOK_SECRET = Deno.env.get("WEBHOOK_SECRET")!;
-const BOOK_URL = "https://www.shipbay3pl.com/book";
+const ENV_SECRET = Deno.env.get("WEBHOOK_SECRET") ?? "";
+/** the shared secret: env first, else platform_secrets.WEBHOOK_SECRET (what pg_cron and lead-intake send) */
+async function secretOk(got: string | null): Promise<boolean> {
+  if (!got) return false;
+  if (ENV_SECRET && got === ENV_SECRET) return true;
+  const sb = Deno.env.get("SUPABASE_URL"), srk = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!sb || !srk) return false;
+  const r = await fetch(`${sb}/rest/v1/platform_secrets?key=eq.WEBHOOK_SECRET&select=value`, { headers: { apikey: srk, Authorization: `Bearer ${srk}` } });
+  const v = r.ok ? (await r.json())?.[0]?.value : null;
+  return !!v && got === v;
+}
+const DEFAULT_BOOK = "https://calendly.com/derekh-shipbay3pl/30min";
+const okUrl = (u: unknown): u is string => typeof u === "string" && /^https:\/\/[^\s"<>]+$/.test(u);
+/** the Calendly link an email carries: the sender's own event link, else the team link, else the default */
+async function bookingUrl(sb: string | undefined, rest: Record<string, string>, repId?: string): Promise<string> {
+  if (!sb) return DEFAULT_BOOK;
+  try {
+    if (repId) {
+      const a = await (await fetch(`${sb}/rest/v1/sales_availability?user_id=eq.${repId}&select=calendly_url`, { headers: rest })).json();
+      if (okUrl(a?.[0]?.calendly_url)) return a[0].calendly_url;
+    }
+    const t = await (await fetch(`${sb}/rest/v1/fin_settings?key=eq.booking_link&select=value`, { headers: rest })).json();
+    if (okUrl(t?.[0]?.value?.url)) return t[0].value.url;
+  } catch (_) { /* fall through to the default */ }
+  return DEFAULT_BOOK;
+}
 const SIG = `
   <p style="margin:26px 0 0;color:#101C2B"><b>Derek Harrison</b><br>
   <span style="color:#5A6473">Founder, shipbay</span><br>
@@ -57,61 +84,169 @@ const ABOUT = `<p>Quick bit about us: shipbay is a DTC 3PL that runs its own war
   and it's month-to-month — you're never locked in.</p>`;
 
 // deno-lint-ignore no-explicit-any
-function render(template: string, lead: any): { subject: string; html: string } | null {
+function render(template: string, lead: any, book: string): { subject: string; html: string } | null {
   const first = String(lead.name ?? "").trim().split(/\s+/)[0] || "there";
   const slot = String(lead.slot ?? "");
-  const slotLine = slot && slot !== "ASAP"
-    ? `<p><b>Your call is confirmed for ${slot} (Eastern).</b> If that stops working, just reply and we'll move it.</p>`
-    : `<p><b>You asked us to call as soon as possible</b> — a specialist (usually me) will ring you during business hours today or tomorrow morning.</p>`;
+  const hasSlot = !!slot && slot !== "ASAP";
+  const slotLine = hasSlot
+    ? `<p><b>Your call is confirmed for ${slot} (Eastern).</b> Want it on your calendar with a meeting link, or need a different time? Pick it here:</p>`
+    : `<p><b>You asked us to call as soon as possible</b> — a specialist (usually me) will ring you during business hours today or tomorrow morning. Rather pick the exact time yourself? It takes ten seconds:</p>`;
   switch (template) {
     case "call_t0": return { subject: "Your shipbay call is booked", html: wrap(
-      `<p>Hi ${first},</p><p>Thanks for the interest in shipbay — I saw your booking come in myself.</p>${slotLine}${ABOUT}
+      `<p>Hi ${first},</p><p>Thanks for the interest in shipbay — I saw your booking come in myself.</p>${slotLine}${BTN(book, hasSlot ? "Put it on my calendar →" : "Pick my time →")}${ABOUT}
        <p>To make the call count, have rough monthly order volume, SKU count, and what you pay today (if anything) handy — you'll leave with your exact number.</p>`) };
     case "call_d2": return { subject: "Before our call — the numbers", html: wrap(
-      `<p>Hi ${first},</p><p>In case you're comparing options in the meantime, here's our full rate card — every line item, nothing gated:</p>${rateCardTable()}
-       <p>Need to move your call time? Just reply.</p>`) };
+      `<p>Hi ${first},</p><p>In case you're comparing options in the meantime, here's our full rate card — every line item, nothing gated. Fifteen minutes on a call turns it into your number:</p>
+       ${BTN(book, "Pick a time →")}${rateCardTable()}
+       <p>Need to move your call time? Use the same link.</p>`) };
     case "call_d6": return { subject: "The math most brands ask about", html: wrap(
       `<p>Hi ${first},</p><p>The question I get most: "what does a month actually cost?" Three real examples on our rates, ex-postage:</p>
        <p>• 350 orders/mo ≈ <b>$924</b> · • 1,500 orders/mo ≈ <b>$3,660</b> · • 5,000 orders/mo ≈ <b>$11,650</b></p>
        <p>On reported rates at the major national 3PLs, those same months run roughly $1,050–$1,280, $4,350–$5,330, and $14,700–$18,100.</p>
-       <p>Happy to price your exact catalog — takes one short call.</p>${BTN(BOOK_URL, "Grab a time →")}`) };
+       <p>Happy to price your exact catalog — takes one short call.</p>${BTN(book, "Grab a time →")}`) };
     case "rate_t0": return { subject: "Your shipbay rate card", html: wrap(
-      `<p>Hi ${first},</p><p>Thanks for the interest in shipbay — here's the full rate card you asked for. I'm the founder; if any line needs explaining, reply and you'll get me, not a queue.</p>
-       ${rateCardTable()}${BTN(BOOK_URL, "Get your exact quote →")}`) };
+      `<p>Hi ${first},</p><p>Thanks for the interest in shipbay — here's the full rate card you asked for. I'm the founder. The card is our list; fifteen minutes with me turns it into your exact number:</p>
+       ${BTN(book, "Book 15 minutes →")}${rateCardTable()}${BTN(book, "Get your exact quote →")}`) };
     case "rate_d2": return { subject: "Want your exact number?", html: wrap(
       `<p>Hi ${first},</p><p>The rate card gives you our list — but your real cost depends on items per order and how you store. Give me 15 minutes and we'll price your catalog line by line, same day.</p>
-       ${BTN(BOOK_URL, "Book 15 minutes →")}${ABOUT}`) };
+       ${BTN(book, "Book 15 minutes →")}${ABOUT}`) };
     case "rate_d5": return { subject: "How a month at shipbay compares", html: wrap(
       `<p>Hi ${first},</p><p>Real months on our rates, ex-postage: 350 orders ≈ <b>$924</b> · 1,500 ≈ <b>$3,660</b> · 5,000 ≈ <b>$11,650</b> — against roughly $1,050–$1,280 / $4,350–$5,330 / $14,700–$18,100 at the majors on reported rates.</p>
-       <p>If the math looks right, the next step is a short call.</p>${BTN(BOOK_URL, "Book a call →")}`) };
+       <p>If the math looks right, the next step is a short call.</p>${BTN(book, "Book a call →")}`) };
     case "app_t0": return { subject: "We got your shipbay application", html: wrap(
       `<p>Hi ${first},</p><p>Thanks for applying for a shipbay account — your answers are in front of our team right now (I read every application myself).</p>
-       <p><b>What happens next:</b> we price your catalog against your volumes and come back with your exact quote and an onboarding plan — typically the same business day. If anything needs clarifying, we'll call.</p>${ABOUT}`) };
+       <p><b>What happens next:</b> we price your catalog against your volumes and come back with your exact quote and an onboarding plan — typically the same business day. The fastest way through it is 15 minutes together:</p>
+       ${BTN(book, "Pick a time →")}${ABOUT}`) };
     case "app_d1": return { subject: "Your pricing is being built — grab a time", html: wrap(
       `<p>Hi ${first},</p><p>We've started pricing your catalog. Fastest way to finish is 15 minutes together — we'll walk your quote line by line and map your move-in.</p>
-       ${BTN(BOOK_URL, "Pick a time →")}`) };
+       ${BTN(book, "Pick a time →")}`) };
     case "app_d4": return { subject: "Still want that quote?", html: wrap(
       `<p>Hi ${first},</p><p>Your application is still open with us. If now's not the moment, no pressure — the quote stays good and there's no fee or lock-in whenever you're ready. If you want it wrapped this week:</p>
-       ${BTN(BOOK_URL, "Finish my quote →")}`) };
+       ${BTN(book, "Finish my quote →")}`) };
     default: return null;
   }
 }
 
-async function sendEmail(apiKey: string, to: string, subject: string, html: string): Promise<boolean> {
-  const from = Deno.env.get("FOUNDER_FROM") ?? "Derek Harrison — shipbay <derekh@shipbay3pl.com>";
+async function sendEmail(apiKey: string, to: string, subject: string, html: string, opts: { from?: string; replyTo?: string; text?: string } = {}): Promise<{ ok: boolean; id?: string }> {
+  const from = opts.from ?? Deno.env.get("FOUNDER_FROM") ?? "Derek Harrison — shipbay <derekh@shipbay3pl.com>";
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from, to: [to], reply_to: "sales@shipbay3pl.com", subject, html,
+    body: JSON.stringify({ from, to: [to], reply_to: opts.replyTo ?? "sales@shipbay3pl.com", subject, html, ...(opts.text ? { text: opts.text } : {}),
       headers: { "X-Priority": "1", "Importance": "high" } }),
   });
-  if (!res.ok) console.error("Resend error:", res.status, await res.text());
-  return res.ok;
+  if (!res.ok) { console.error("Resend error:", res.status, await res.text()); return { ok: false }; }
+  const j = await res.json().catch(() => ({})); return { ok: true, id: j?.id };
+}
+
+// ===================== Blitz (purchased leads · 14-day) — plain-text style, sent from the assigned rep =====================
+// deno-lint-ignore no-explicit-any
+type Lead = Record<string, any>;
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function blitzVars(lead: Lead) {
+  const first = String(lead.contact_name ?? "").trim().split(/\s+/)[0] || "there";
+  const company = String(lead.company ?? "").trim();
+  const orders = String(lead.orders_est ?? "").trim();
+  const skus = ((String(lead.notes ?? "").match(/SKUs:\s*([^|\n]+)/i) ?? [])[1] ?? "").trim();
+  return { first, company, orders, skus };
+}
+/** the five Blitz emails as plain paragraphs; {v} = merge values. Blank company / volume just drop the clause.
+ *  Each one ends on the Calendly link (book); the reply options stay as the second way in. */
+function blitzBody(t: string, lead: Lead, book: string): { subject: string; paras: string[] } | null {
+  const { first, company, orders, skus } = blitzVars(lead);
+  const brand = company || "your brand";
+  const who = company ? `someone at ${company}` : "you";
+  const vol = [orders ? `around ${orders} orders a month` : "", skus ? `${skus} SKUs` : ""].filter(Boolean).join(", ");
+  switch (t) {
+    case "blitz_e1": return { subject: `${company ? company + " x " : ""}ShipBay3PL`, paras: [
+      `Hi ${first},`,
+      `Back in July ${who} requested 3PL quotes${vol ? ` — ${vol}` : ""}. A few months on, you've either signed with one of the places that called you, or you're still shipping it yourself. Either way, quick one.`,
+      `We're a fulfillment warehouse in Hillsborough, NJ, and we're bringing on a small group of founding accounts on terms we won't offer again once those seats are gone:`,
+      `$1.75 per order picked, packed and shipped (+$0.35 per extra unit), locked for 12 months\nStorage free for your first 90 days, then only the square footage you actually use\nNo minimum for 90 days, $0 setup, month-to-month\nPostage at exact carrier cost, zero markup — or ship on your own carrier account if your rates beat ours\nOrders in by 2pm ET ship same day, Mon–Sat. 1–2 day ground to the entire Northeast.`,
+      `What we get out of it: a reference account and honest feedback while we scale. What you get: the rate, and my cell.`,
+      `Fifteen minutes is all it takes to put your real numbers against that rate. Pick a time here:\n${book}`,
+      `Or just reply with a number:\n1 — Still open. Quote my real numbers.\n2 — Signed elsewhere. (Tell me who — and if it's gone sideways, we move you with zero downtime.)\n3 — Handling it in-house.`] };
+    case "blitz_e2": return { subject: "the 4 quotes you probably got in July", paras: [
+      `${first},`,
+      `If you requested quotes in July, you likely got four or five — each after a discovery call, each with a different structure: a "flat $11 ship" here, a $2.50 pick plus materials there, a storage rate that quietly goes up in November.`,
+      `Three lines to check on every one of them, in writing:\n1. Is postage at carrier cost, or a flat rate with the margin inside it? (Ours: at cost, or your own account.)\n2. Does storage move during peak? (Ours: no surcharge, and you pay only for the space you use.)\n3. What's the minimum, and when does it start? (Ours: none for 90 days.)`,
+      `If any of those come back vague, that's the answer.`,
+      `For ${brand} I can turn the founding rate into a formal quote on your real postage in one business day. Book 15 minutes and we'll do it together:\n${book}`,
+      `Or reply "quote" and I'll send the two-line instructions for a 30-day order export.`] };
+    case "blitz_e3": return { subject: "try it with one SKU", paras: [
+      `Hi ${first},`,
+      `The reason most brands don't switch 3PLs isn't the price — it's the fear of moving everything and being wrong.`,
+      `So don't move everything. Send us one SKU — your fastest mover — for 90 days. No setup fee, no minimum, month-to-month after. You'll see the receiving count in your dashboard within 24 hours, orders in by 2pm ET ship the same day, and you'll have a real invoice to compare against what you pay now.`,
+      `If it's better, we move the rest with zero downtime — your current setup keeps running until ours is proven. If it isn't, you've lost nothing.`,
+      `Want me to set that up for ${brand}? Pick a time and we'll map it in 15 minutes:\n${book}`] };
+    case "blitz_e4": return { subject: "the peak question", paras: [
+      `${first},`,
+      `Practical note: if ${brand} wants to be shipping from a new warehouse before the holiday rush, inventory needs to be moving in about two weeks before your peak. We count it in within 24 hours and the integration is same-week, but a parallel-run week and your own carrier cutover take time nobody can compress once the orders are flying.`,
+      `If it is this year, book 15 minutes and we'll set your receiving dates on the call:\n${book}`,
+      `If this isn't the year, no problem — reply "Q1" and I'll check back in January.`] };
+    case "blitz_e5": return { subject: "closing this out", paras: [
+      `Hi ${first},`,
+      `I've reached out a few times about the fulfillment request for ${brand} and haven't heard back, which usually means it's handled or not a priority. Either is fine — I'll close the file.`,
+      `If it ever comes back around: there's no setup fee, no minimum for 90 days, and one 15-minute call gets you your number. The link stays open:\n${book}`,
+      `Best,`] };
+    default: return null;
+  }
+}
+function blitzHtml(paras: string[], sig: string): string {
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55;color:#101C2B;max-width:620px">` +
+    paras.map((p) => `<p style="margin:0 0 14px">${esc(p).replace(/(https:\/\/[^\s<]+)/g, '<a href="$1">$1</a>').replace(/\n/g, "<br>")}</p>`).join("") +
+    `<p style="margin:22px 0 0;white-space:pre-line">${esc(sig)}</p></div>`;
+}
+const DEFAULT_SIG: Record<string, string> = {
+  "derekh@shipbay3pl.com": "Derek Harrison\nFounder | ShipBay 3PL\n(610) 478-5432 | derekh@shipbay3pl.com\nshipbay3pl.com · Hillsborough, NJ",
+};
+/** drain due Blitz email steps (or just one lead's, for the instant E1). Called by pg_cron every 10 min and by lead-intake. */
+async function runBlitz(apiKey: string | undefined, sb: string, rest: Record<string, string>, onlyLead?: string): Promise<{ sent: number; skipped: number; due: number }> {
+  const nowIso = new Date().toISOString();
+  const url = `${sb}/rest/v1/sales_sequence_queue?status=eq.queued&kind=eq.email&due_at=lte.${nowIso}${onlyLead ? `&lead_id=eq.${onlyLead}` : ""}&select=id,step,template,lead_id,sales_leads(id,email,contact_name,company,orders_est,notes,stage,assigned_to)&order=due_at.asc&limit=40`;
+  const q = await fetch(url, { headers: rest });
+  if (!q.ok) { console.error("blitz queue read failed:", q.status, await q.text()); return { sent: 0, skipped: 0, due: 0 }; }
+  const due = await q.json();
+  let sent = 0, skipped = 0;
+  const reps: Record<string, { email: string; full_name: string; signature: string; book: string }> = {};
+  let teamBook = "";
+  for (const row of due) {
+    const lead: Lead = row.sales_leads ?? {};
+    const patch = async (p: Record<string, unknown>) => fetch(`${sb}/rest/v1/sales_sequence_queue?id=eq.${row.id}`, { method: "PATCH", headers: rest, body: JSON.stringify(p) });
+    if (!lead.email || !["new", "contacted"].includes(String(lead.stage))) { await patch({ status: "skipped", error: `lead stage ${lead.stage ?? "?"}` }); skipped++; continue; }
+    if (!apiKey) { console.error("RESEND_API_KEY not set — Blitz emails held."); break; }
+    // sender = the assigned rep (falls back to Derek); signature from their rep settings; booking link = theirs, else the team's
+    const rid = String(lead.assigned_to ?? "");
+    if (rid && !reps[rid]) {
+      const p = await (await fetch(`${sb}/rest/v1/profiles?id=eq.${rid}&select=email,full_name`, { headers: rest })).json().catch(() => []);
+      const s = await (await fetch(`${sb}/rest/v1/sales_rep_settings?user_id=eq.${rid}&select=signature`, { headers: rest })).json().catch(() => []);
+      reps[rid] = { email: p?.[0]?.email ?? "", full_name: p?.[0]?.full_name ?? "", signature: s?.[0]?.signature ?? "", book: await bookingUrl(sb, rest, rid) };
+    }
+    if (!rid && !teamBook) teamBook = await bookingUrl(sb, rest);
+    const rep = reps[rid] ?? { email: "", full_name: "", signature: "", book: teamBook };
+    const msg = blitzBody(String(row.template), lead, rep.book || DEFAULT_BOOK);
+    if (!msg) { await patch({ status: "skipped", error: "unknown template" }); skipped++; continue; }
+    const fromEmail = rep.email && rep.email.endsWith("@shipbay3pl.com") ? rep.email : "derekh@shipbay3pl.com";
+    const fromName = rep.full_name || "Derek Harrison";
+    const sig = rep.signature || DEFAULT_SIG[fromEmail] || `${fromName}\nShipBay 3PL\n${fromEmail}\nshipbay3pl.com · Hillsborough, NJ`;
+    const html = blitzHtml(msg.paras, sig);
+    const text = msg.paras.join("\n\n") + "\n\n" + sig;
+    const r = await sendEmail(apiKey, String(lead.email), msg.subject, html, { from: `${fromName} <${fromEmail}>`, replyTo: fromEmail, text });
+    if (!r.ok) { await patch({ error: "resend failed, will retry" }); continue; }
+    sent++;
+    await patch({ status: "sent", sent_at: nowIso, external_id: r.id ?? null, error: null });
+    await fetch(`${sb}/rest/v1/sales_email_sends`, { method: "POST", headers: { ...rest, Prefer: "return=minimal" }, body: JSON.stringify({
+      external_id: r.id ? `resend:${r.id}` : `blitz:${row.id}`, lead_id: lead.id, lead_email: lead.email, lead_name: lead.contact_name ?? null, campaign: "blitz", mailbox: fromEmail,
+      step: row.step, subject: msg.subject, sent_at: nowIso, body: text.slice(0, 4000) }) });
+    await fetch(`${sb}/rest/v1/sales_leads?id=eq.${lead.id}`, { method: "PATCH", headers: rest, body: JSON.stringify({ last_touch_at: nowIso, last_outcome: "email_sent", stage: lead.stage === "new" ? "contacted" : lead.stage }) });
+  }
+  console.log(`blitz run${onlyLead ? ` (lead ${onlyLead})` : ""}: ${sent} sent, ${skipped} skipped, ${due.length} due`);
+  return { sent, skipped, due: due.length };
 }
 
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
-  if (!WEBHOOK_SECRET || req.headers.get("x-webhook-secret") !== WEBHOOK_SECRET) {
+  if (!(await secretOk(req.headers.get("x-webhook-secret")))) {
     return new Response("forbidden", { status: 403 });
   }
   // deno-lint-ignore no-explicit-any
@@ -123,6 +258,15 @@ Deno.serve(async (req: Request) => {
   const srk = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const rest = { "apikey": srk ?? "", "Authorization": `Bearer ${srk}`, "Content-Type": "application/json" };
 
+  // ---- preview: render a template without sending (what the portal and a check from SQL use) ----
+  if (body.preview) {
+    const book = await bookingUrl(srk ? sb : undefined, rest);
+    const t = String(body.preview);
+    const sample = { name: "Jordan Lee", contact_name: "Jordan Lee", company: "Vinyl Moons", orders_est: "400", slot: body.slot ?? "" };
+    const w = render(t, sample, book); const bz = w ? null : blitzBody(t, sample, book);
+    return new Response(JSON.stringify(w ? { subject: w.subject, has_link: w.html.includes(book), book } : bz ? { subject: bz.subject, has_link: bz.paras.join("\n").includes(book), book, text: bz.paras.join("\n\n") } : { error: "unknown template" }), { status: 200 });
+  }
+
   // ---- mode 1: instant email for a new lead ----
   if (body.record && body.template) {
     const lead = body.record;
@@ -132,11 +276,18 @@ Deno.serve(async (req: Request) => {
       console.error(`RESEND_API_KEY not set — ${body.template} NOT sent to ${email}. Send manually from the CRM.`);
       return new Response(JSON.stringify({ ok: false, reason: "missing RESEND_API_KEY" }), { status: 200 });
     }
-    const msg = render(String(body.template), lead);
+    const msg = render(String(body.template), lead, await bookingUrl(srk ? sb : undefined, rest));
     if (!msg) return new Response(JSON.stringify({ skipped: "unknown template" }), { status: 200 });
-    const ok = await sendEmail(apiKey, email, msg.subject, msg.html);
+    const { ok } = await sendEmail(apiKey, email, msg.subject, msg.html);
     console.log(`${body.template} → ${email}: ${ok ? "sent" : "FAILED"}`);
     return new Response(JSON.stringify({ ok }), { status: 200 });
+  }
+
+  // ---- mode 3: Blitz runner (pg_cron every 10 min; lead-intake calls it with lead_id for the instant E1) ----
+  if (body.run_blitz) {
+    if (!sb || !srk) return new Response(JSON.stringify({ ok: false, reason: "missing service credentials" }), { status: 200 });
+    const out = await runBlitz(apiKey, sb, rest, body.lead_id ? String(body.lead_id) : undefined);
+    return new Response(JSON.stringify({ ok: true, ...out }), { status: 200 });
   }
 
   // ---- mode 2: cron runner for due follow-ups ----
@@ -146,6 +297,7 @@ Deno.serve(async (req: Request) => {
     if (!q.ok) { console.error("queue read failed:", q.status, await q.text()); return new Response("queue read failed", { status: 200 }); }
     const due = await q.json();
     let sent = 0, skipped = 0;
+    const book = due.length ? await bookingUrl(sb, rest) : DEFAULT_BOOK;
     for (const row of due) {
       const lead = row.leads ?? {};
       const stage = String(lead.stage ?? "");
@@ -153,10 +305,10 @@ Deno.serve(async (req: Request) => {
       if (["won", "lost"].includes(stage) || !lead.email) { status = "skipped"; skipped++; }
       else if (!apiKey) { console.error("RESEND_API_KEY not set — follow-ups held in queue."); break; }
       else {
-        const msg = render(String(row.template), lead);
+        const msg = render(String(row.template), lead, book);
         if (!msg) { status = "skipped"; skipped++; }
         else {
-          const ok = await sendEmail(apiKey, String(lead.email), msg.subject, msg.html);
+          const { ok } = await sendEmail(apiKey, String(lead.email), msg.subject, msg.html);
           if (!ok) continue; // leave unsent, retry next run
           sent++;
         }

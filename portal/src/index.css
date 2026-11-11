@@ -1624,3 +1624,22 @@ tr.voided td:last-child { text-decoration: none; }
    dialog (position: fixed) centre itself in the full height of the page instead of the screen. On a long page the
    dialog opened below the fold. Let the transform go when the animation ends. */
 .page-enter { animation-fill-mode: backwards; }
+
+/* lead → setter → closer, the setters' scoreboard, handing out leads (2026-11-10) */
+.chain { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 2px; }
+.chain .leg { display: inline-flex; flex-direction: column; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; min-width: 92px; }
+.chain .leg small { font-size: 11px; color: var(--muted); }
+.chain .leg b { font-size: 14px; }
+.chain .leg.on { border-color: var(--orange); }
+.chain .leg.done b { color: var(--muted); }
+.chain .leg.off b { color: var(--muted-2); font-weight: 500; }
+.chain > i { font-style: normal; color: var(--muted-2); }
+.pbody > .chain { margin: 0 0 14px; }
+.scoreboard td.rank { font-size: 22px; font-weight: 700; color: var(--muted-2); width: 44px; }
+.scoreboard tr:first-child td.rank { color: var(--orange); }
+.scoreboard b.big { font-size: 22px; }
+.glance b .of { font-size: 14px; font-weight: 500; color: var(--muted); }
+.assigntable .arrow { color: var(--muted-2); margin: 0 4px; }
+.giverow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 250px; }
+.assigntable td:first-child { white-space: nowrap; }
+.giverow select { width: auto; max-width: 132px; flex: none; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; font: inherit; font-size: 13px; }
