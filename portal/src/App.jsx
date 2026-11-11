@@ -17,6 +17,7 @@ import AdminSettings from './pages/AdminSettings';
 import Owner from './pages/owner/Owner';
 import SalesDesk from './pages/SalesDesk';
 import ApptSetting from './pages/ApptSetting';
+import VersionWatch from './VersionWatch';
 import { PageHelp } from './shared';
 
 const STAFF = ['shipbay_admin', 'shipbay_staff'];
@@ -274,6 +275,7 @@ function Shell({ me }) {
 
   return (
     <div className="app">
+      <VersionWatch />
       <aside className="sidenav">
         <a className="logo" href="/"><img src="/brand/01-horizontal.svg" alt="shipbay." /></a>
         {nav.map((n, i) => n.group

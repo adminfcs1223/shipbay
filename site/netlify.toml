@@ -12,10 +12,18 @@
     Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
 
 # Clean URLs
+# The pre-portal site CRM is gone (Derek, 2026-11-10): one sign-in, the portal's.
 [[redirects]]
   from = "/crm"
-  to = "/crm.html"
-  status = 200
+  to = "https://auth.shipbay3pl.com"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/crm.html"
+  to = "https://auth.shipbay3pl.com"
+  status = 301
+  force = true
 
 [[redirects]]
   from = "/book"

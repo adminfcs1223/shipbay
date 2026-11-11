@@ -1643,3 +1643,21 @@ tr.voided td:last-child { text-decoration: none; }
 .giverow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 250px; }
 .assigntable td:first-child { white-space: nowrap; }
 .giverow select { width: auto; max-width: 132px; flex: none; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; font: inherit; font-size: 13px; }
+
+/* follow-ups + the setter's Dashboard (2026-11-10) */
+.daytiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; }
+.daytiles button { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 2px; padding: 4px 18px; border-left: 1px solid var(--line); }
+.daytiles button:first-child { border-left: 0; padding-left: 0; }
+.daytiles b { font-size: 40px; font-weight: 800; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.daytiles button.hot b { color: var(--orange); }
+.daytiles span { font-size: 14px; font-weight: 600; }
+.daytiles small { font-size: 12.5px; color: var(--muted); }
+@media (max-width: 760px) { .daytiles { grid-template-columns: 1fr 1fr; row-gap: 16px; } .daytiles button:nth-child(3) { border-left: 0; padding-left: 0; } }
+.futable tr.late td:first-child { box-shadow: inset 3px 0 0 var(--orange); }
+.futable b.click { cursor: pointer; }
+.fuacts { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
+.bonuswait { display: flex; gap: 12px; align-items: baseline; }
+
+/* a newer build is live (VersionWatch) */
+.versionbar { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 400; display: flex; gap: 14px; align-items: center; background: var(--ink, #0F1B2A); color: #fff; padding: 10px 12px 10px 18px; border-radius: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.28); font-size: 14px; font-weight: 600; }
+.versionbar button { all: unset; cursor: pointer; background: var(--orange); color: #fff; padding: 7px 14px; border-radius: 8px; font-weight: 700; }

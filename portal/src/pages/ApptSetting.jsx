@@ -10,7 +10,7 @@ export default function ApptSetting({ me, go }) {
       <div className="pagehead">
         <div><h1>Appt. Setting<span className="dot">.</span></h1></div>
       </div>
-      <Sales me={me} status={null} refreshStatus={() => {}} rep nav={go} tabs={APPT_TABS} initial="calls" />
+      <Sales me={me} status={null} refreshStatus={() => {}} rep nav={go} tabs={APPT_TABS} initial={me?.role === 'shipbay_setter' ? 'today' : 'calls'} />
     </div>
   );
 }

@@ -12,6 +12,7 @@ import Onboarding from '../Onboarding';
 import { Debrief, DebriefBoard, PowerButton, saveDebrief } from './Debrief';
 import { BookDialog, BookModal, Script, Setters, Scoreboard, LeadAssign, Chain, CalendlyLink, RecentCalls, logCall, flushOutbox, outbox, dropFromOutbox, fmtWhen, cancelMeeting } from './Appt';
 import ImportLeads from './ImportLeads';
+import { MyDay, FollowUpList, useFollowUps } from './FollowUps';
 
 /** the quotes that belong to an account (by the account row, or its client org) — best first */
 const QRANK = { accepted: 0, sent: 1, draft: 2, declined: 3, superseded: 4 };
@@ -21,10 +22,10 @@ export const quoteMonthly = (q) => { try { const ph = phases(q); const p = ph.fi
 /** expected services $/month for an account: its quote if it has one, else the hand-typed deal value */
 export const expectedMonthly = (lead, quotes) => { const q = quotesFor(lead, quotes).find((x) => !x.internal_only && x.status !== 'declined' && x.status !== 'superseded'); const v = q ? quoteMonthly(q) : null; return v != null ? { value: v, from: q } : { value: lead?.deal_value ? Number(lead.deal_value) : null, from: null }; };
 
-const SUB = [['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['calendar', 'Calendar'], ['scoreboard', 'Scoreboard'], ['setters', 'Setters'], ['quotes', 'Quotes'], ['onboarding', 'Onboarding'], ['bonus', 'Bonus'], ['settings', 'Settings']];
+const SUB = [['today', 'Dashboard'], ['overview', 'Dashboard'], ['pipeline', 'Pipeline'], ['master', 'Contacts'], ['email', 'Conversations'], ['calls', 'Calls'], ['calendar', 'Calendar'], ['scoreboard', 'Scoreboard'], ['setters', 'Setters'], ['quotes', 'Quotes'], ['onboarding', 'Onboarding'], ['bonus', 'Bonus'], ['settings', 'Settings']];
 /** Appt. Setting (Derek, 2026-11-10): dialing + replies, where a new rep starts. CRM: everything else. Admin → Sales shows all of it.
  *  Evening rev: Calendar replaces Book (booking opens from the Calendar), and the setters get their own Scoreboard. */
-export const APPT_TABS = ['calls', 'calendar', 'scoreboard', 'email', 'settings'];
+export const APPT_TABS = ['today', 'calls', 'calendar', 'scoreboard', 'email', 'settings'];
 export const CRM_TABS = ['overview', 'pipeline', 'master', 'calendar', 'setters', 'quotes', 'onboarding', 'bonus', 'settings'];
 export const LIST_NAMES = { A1: 'Self-ship brands · NJ metro', A2: 'Already on a 3PL · NJ metro', A3: 'Self-ship brands · Northeast', A4: 'Shopify Plus upgrades', B1: 'Founder-run · NJ metro', C1: 'Amazon sellers · Northeast', C2: 'Q4 overflow', X0: 'Control group' };
 export const listName = (code) => (code && LIST_NAMES[code] ? `${code} · ${LIST_NAMES[code]}` : code || '—');
@@ -104,7 +105,7 @@ export function useCrm({ me, rep }) {
 }
 
 export default function Sales({ me, status, refreshStatus, rep = false, nav, tabs = null, initial = 'overview' }) {
-  const TABS = tabs ? tabs.map((k) => SUB.find(([x]) => x === k)).filter(Boolean) : SUB;
+  const TABS = tabs ? tabs.map((k) => SUB.find(([x]) => x === k)).filter(Boolean) : SUB.filter(([k]) => k !== 'today');   // 'today' = the setter's Dashboard (Appt. Setting); Admin → Sales keeps the CRM one
   const [sub, setSub] = useState(() => (window.location.hash.startsWith('#sales=gmail') ? 'settings' : initial));
   const [leads, setLeads] = useState(null); const [sources, setSources] = useState([]); const [sends, setSends] = useState([]);
   const [msg, setMsg] = useState(() => {       // Gmail connect round-trip lands with #sales=gmail|ok|msg
@@ -158,6 +159,7 @@ export default function Sales({ me, status, refreshStatus, rep = false, nav, tab
       {sub === 'master' && <Master {...ctx} leads={mine} />}
       {sub === 'email' && <Conversations {...ctx} leads={mine} allLeads={leads} sends={mySends} mail={mail} mailAccts={mailAccts} status={status} refreshStatus={refreshStatus} focus={focus} clearFocus={() => setFocus(null)} />}
       {sub === 'calls' && <Calls {...ctx} leads={leads} />}
+      {sub === 'today' && <MyDay {...ctx} leads={leads} />}
       {sub === 'scoreboard' && <Scoreboard me={me} />}
       {sub === 'setters' && <><LeadAssign me={me} say={say} reload={load} listName={listName} /><Setters me={me} people={people} /></>}
       {sub === 'calendar' && <Calendar {...ctx} leads={leads} closers={people} status={status} refreshStatus={refreshStatus} mineOnly={rep} focusDate={focus} renderAdd={(p) => <LeadForm sources={sources} reload={load} say={say} claimAs={me.id} title="Add a client" {...p} />} />}
@@ -549,6 +551,7 @@ export function Conversations(props) {
 
 function BlastInbox({ me, rep, leads, sends, mailAccts, status, people, reload, refreshStatus, say, openLead, focus, clearFocus, picker, toEmail }) {
   const [busy, setBusy] = useState(false); const [show, setShow] = useState('all'); const [who, setWho] = useState(''); const refs = useRef({}); const kit = useReplyKit(me);
+  const [fu, loadFu] = useFollowUps(); const today = new Date().toLocaleDateString('en-CA'); const fuDue = (fu?.open || []).filter((f) => (rep ? f.owner_id === me.id : !who || f.owner_id === who) && f.due_on <= today).length;
   const sync = async () => { setBusy(true); const r = await ownerFn({ action: 'smartlead_sync' }); setBusy(false); say(r, r.error ? null : 'Smartlead synced.'); reload(); refreshStatus?.(); };
   const replies = useMemo(() => sends.filter((s) => s.replied && !s.bounced && !s.mailbox).sort((a, b) => (b.reply_at || b.sent_at).localeCompare(a.reply_at || a.sent_at)), [sends]);
   const unread = replies.filter((s) => !s.read_at && leads.find((x) => x.id === s.lead_id)?.stage !== 'dnc').length;
@@ -578,13 +581,14 @@ function BlastInbox({ me, rep, leads, sends, mailAccts, status, people, reload, 
     <>
       <div className="opsbar wrap">
         {picker}
-        <span className="seg tight"><button className={show === 'all' ? 'on' : ''} onClick={() => setShow('all')}>All</button><button className={show === 'unread' ? 'on' : ''} onClick={() => setShow('unread')}>Unread ({unread})</button><button className={show === 'open' ? 'on' : ''} onClick={() => setShow('open')}>Needs answer</button><button className={show === 'stopped' ? 'on' : ''} onClick={() => setShow('stopped')}>Stopped</button></span>
+        <span className="seg tight"><button className={show === 'all' ? 'on' : ''} onClick={() => setShow('all')}>All</button><button className={show === 'unread' ? 'on' : ''} onClick={() => setShow('unread')}>Unread ({unread})</button><button className={show === 'open' ? 'on' : ''} onClick={() => setShow('open')}>Needs answer</button><button className={show === 'stopped' ? 'on' : ''} onClick={() => setShow('stopped')}>Stopped</button><button className={show === 'followups' ? 'on' : ''} onClick={() => setShow('followups')}>Follow-ups ({fuDue})</button></span>
         {!rep && <select value={who} onChange={(e) => setWho(e.target.value)}><option value="">Everyone</option>{people.map((p) => <option key={p.id} value={p.id}>{(p.full_name || p.email).split(' ')[0]}</option>)}</select>}
         <span className="sm">{rep ? 'Replies handed to you. Answer from Gmail, then mark it answered.' : `Synced ${ago(status?.smartlead_last_sync?.at)}`}</span>
         <div className="spacer" />
         {!rep && <button className="btn-sm" disabled={busy || !status?.smartlead_key_set} onClick={sync}>{busy ? 'Syncing…' : 'Sync'}</button>}
       </div>
-      <div className="replies">
+      {show === 'followups' && <FollowUpList me={me} leads={leads} rows={fu && !rep && who ? { ...fu, open: fu.open.filter((f) => f.owner_id === who) } : fu} reload={() => { loadFu(); reload(); }} say={say} openLead={openLead} people={people} mineOnly={!!rep} />}
+      <div className="replies" style={show === 'followups' ? { display: 'none' } : undefined}>
         {list.length === 0 && <div className="card"><div className="empty">{show === 'unread' ? 'Nothing unread.' : 'No replies here.'}</div></div>}
         {list.map((s) => { const l = leads.find((x) => x.id === s.lead_id); const unreadRow = !s.read_at; return (
           <div key={s.id} ref={(el) => { refs.current[s.id] = el; }} className={`card reply ${s.reply_type ? s.reply_type.toLowerCase().replace(/[^a-z]/g, '') : 'untagged'} ${unreadRow ? 'unread' : ''} ${focus === s.id ? 'focus' : ''}`} onClick={() => unreadRow && markRead(s)}>
@@ -937,6 +941,8 @@ export function Calls({ me, rep, leads, people, reload, say, openLead, go }) {
   const [pin, setPin] = useState(null); const [booked, setBooked] = useState(null); const [bookOpen, setBookOpen] = useState(false); const [callId, setCallId] = useState(() => crypto.randomUUID());
   const [scriptOpen, setScriptOpen] = useState(() => { try { return localStorage.getItem('shipbay-script-open') === '1'; } catch { return false; } });
   const [waiting, setWaiting] = useState(() => outbox());
+  // a call in progress must not be interrupted by the new-version reload (VersionWatch)
+  useEffect(() => { window.__shipbayBusy = !!(callStart || debrief || bookOpen); return () => { window.__shipbayBusy = false; }; }, [callStart, debrief, bookOpen]);
   const toggleScript = () => { const v = !scriptOpen; setScriptOpen(v); try { localStorage.setItem('shipbay-script-open', v ? '1' : '0'); } catch { /* ignore */ } };
   const retryWaiting = async () => { const r = await flushOutbox(); setWaiting(outbox()); if (r.sent) { say(null, `${r.sent} saved call${r.sent === 1 ? '' : 's'} went up.`); reload(); loadCalls(); } };
   useEffect(() => { if (outbox().length) retryWaiting(); const on = () => retryWaiting(); window.addEventListener('online', on); return () => window.removeEventListener('online', on); }, []);

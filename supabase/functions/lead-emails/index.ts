@@ -5,6 +5,7 @@
 //   { run_blitz: true, lead_id? } — pg_cron every 10 min (and lead-intake, per lead) sends due Blitz emails from the assigned rep
 // Secrets: WEBHOOK_SECRET (env, or platform_secrets), RESEND_API_KEY (verified shipbay3pl.com domain in Resend). Optional: FOUNDER_FROM.
 // Follow-ups are skipped automatically once a lead is marked won or lost in the CRM.
+// Derek, 2026-11-10: all pricing in these emails is Rate Card v2 (the founding-terms Blitz offer and the old rate table are gone).
 // Derek, 2026-11-10: every email is about booking the call, and every template carries the Calendly link
 // (the sender's own event link, else the team link under Admin settings, else DEFAULT_BOOK).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -53,35 +54,40 @@ function rateCardTable(): string {
     `<tr><td style="padding:8px 10px;border-top:1px solid #E8E6E1">${svc}</td><td style="padding:8px 10px;border-top:1px solid #E8E6E1;white-space:nowrap"><b>${rate}</b></td><td style="padding:8px 10px;border-top:1px solid #E8E6E1;color:#5A6473;font-size:13px">${note}</td></tr>`;
   const grp = (t: string) =>
     `<tr><td colspan="3" style="padding:7px 10px;background:#FFF0E4;color:#D14E00;font-size:11px;letter-spacing:.12em"><b>${t}</b></td></tr>`;
+  // Rate Card v2 (approved 2026-11-01, claude/pricing-rate-card-v2.md). Change it there first, then here, the portal and the site together.
   return `<table style="width:100%;border-collapse:collapse;font-size:14px">
-    ${grp("PICK &amp; PACK — VOLUME PRICING, PACKAGING INCLUDED")}
-    ${row("5,000+ orders/mo", "$1.65 / order", "+ $0.40 per additional unit")}
-    ${row("1,000 – 5,000 orders/mo", "$1.80 / order", "+ $0.40 per additional unit")}
-    ${row("Under 1,000 orders/mo", "$1.95 / order", "+ $0.40 per additional unit · no order minimums")}
+    ${grp("PICK &amp; PACK — BY MONTHLY VOLUME")}
+    ${row("Up to 1,000 orders/mo", "$1.95 / order", "+ $0.45 per additional unit")}
+    ${row("1,001 – 5,000 orders/mo", "$1.80 / order", "+ $0.45 per additional unit")}
+    ${row("5,001+ orders/mo", "$1.65 / order", "+ $0.45 per additional unit · 12-month term")}
+    ${row("Box pack-out", "$2.50", "Box, fill, tape and labor · your own packaging: $0")}
     ${grp("RECEIVING")}
-    ${row("Pallet received", "$20 / pallet", "Counted and verified against your ASN")}
-    ${row("Loose cartons", "$3 / carton", "")}
-    ${row("Container unload", "$350 (20′) · $500 (40′)", "Palletized; floor-loaded +$150")}
-    ${grp("STORAGE — NO PEAK-SEASON SURCHARGE")}
-    ${row("Pallet", "$30 / month", "")}
-    ${row("Shelf", "$10 / month", "")}
-    ${row("Bin", "$2.50 / month", "")}
+    ${row("Pallet, one SKU", "$10 / pallet", "+ $5 per additional SKU")}
+    ${row("Mixed or unsorted pallet", "$60", "Up to 10 SKUs")}
+    ${row("Parcel carton", "$2.50 / carton", "$10 minimum per shipment")}
+    ${row("Container unload", "$350 (20′) · $500 (40′)", "Floor-loaded +$150")}
+    ${grp("STORAGE — ONLY WHAT YOU USE, NO PEAK-SEASON SURCHARGE")}
+    ${row("Standard pallet", "$18 / month", "40×48, up to 48″ · up to 60″ $20 · up to 72″ $24")}
+    ${row("Half pallet", "$12 / month", "")}
+    ${row("Shelf", "$4 / month", "")}
+    ${row("Bin", "$1 / month", "")}
+    ${row("Oversize", "$0.40 / cu ft", "$30 minimum")}
     ${grp("B2B, PREP &amp; PROJECTS")}
-    ${row("B2B / wholesale order", "from $5.50 + $0.40/unit", "Pallet build $18")}
-    ${row("FBA / marketplace prep", "from $0.60 / unit", "Labels, polybags")}
-    ${row("Return processed", "$3.00 + $0.50/addl item", "Inspection and restock included")}
+    ${row("B2B / wholesale order", "$5.50 + $0.40/unit", "Pallet build $18")}
+    ${row("FBA / marketplace prep", "$0.60 / unit", "+ $2.50 per carton")}
+    ${row("Return processed", "$3.00 + $0.50/unit", "")}
     ${row("Kitting / special projects", "$40 / hour", "Quoted before we start")}
     ${grp("ACCOUNT")}
     ${row("Setup / onboarding", "$0", "Shopify, WooCommerce, Amazon &amp; TikTok Shop included")}
-    ${row("Monthly minimum", "$250", "Waived your first 60 days")}
-    ${row("Shipping / postage", "Carrier rates, at cost", "Line-item on every invoice · no markup")}
-    ${row("Contract", "Month-to-month", "No lock-in, no offboarding fee")}
+    ${row("Monthly minimum", "None", "Storage has a $10 per account floor")}
+    ${row("Shipping / postage", "Your own carrier account", "Your rates · never on our invoice")}
+    ${row("Contract", "Month-to-month", "30 days' notice")}
   </table>`;
 }
 
 const ABOUT = `<p>Quick bit about us: shipbay is a DTC 3PL that runs its own warehouse in Hillsborough, NJ.
-  Orders in by 2pm ET ship the same day, pricing is published and volume-tiered, there's no setup fee,
-  and it's month-to-month — you're never locked in.</p>`;
+  Orders in by 2pm ET ship the same day, pricing is published and volume-tiered, there's no setup fee and no monthly minimum,
+  and it's month-to-month.</p>`;
 
 // deno-lint-ignore no-explicit-any
 function render(template: string, lead: any, book: string): { subject: string; html: string } | null {
@@ -100,18 +106,18 @@ function render(template: string, lead: any, book: string): { subject: string; h
        ${BTN(book, "Pick a time →")}${rateCardTable()}
        <p>Need to move your call time? Use the same link.</p>`) };
     case "call_d6": return { subject: "The math most brands ask about", html: wrap(
-      `<p>Hi ${first},</p><p>The question I get most: "what does a month actually cost?" Three real examples on our rates, ex-postage:</p>
-       <p>• 350 orders/mo ≈ <b>$924</b> · • 1,500 orders/mo ≈ <b>$3,660</b> · • 5,000 orders/mo ≈ <b>$11,650</b></p>
-       <p>On reported rates at the major national 3PLs, those same months run roughly $1,050–$1,280, $4,350–$5,330, and $14,700–$18,100.</p>
-       <p>Happy to price your exact catalog — takes one short call.</p>${BTN(book, "Grab a time →")}`) };
+      `<p>Hi ${first},</p><p>The question I get most: "what does a month actually cost?" It comes down to three numbers: orders a month, units per order, and how much you keep on the shelf.</p>
+       <p>Pick &amp; pack runs <b>$1.65 to $1.95</b> an order by volume, storage is billed on the pallets, shelves and bins you actually use, and there is no monthly minimum.</p>
+       <p>Give me those three numbers on one short call and you leave with your month, line by line.</p>${BTN(book, "Grab a time →")}`) };
     case "rate_t0": return { subject: "Your shipbay rate card", html: wrap(
       `<p>Hi ${first},</p><p>Thanks for the interest in shipbay — here's the full rate card you asked for. I'm the founder. The card is our list; fifteen minutes with me turns it into your exact number:</p>
        ${BTN(book, "Book 15 minutes →")}${rateCardTable()}${BTN(book, "Get your exact quote →")}`) };
     case "rate_d2": return { subject: "Want your exact number?", html: wrap(
       `<p>Hi ${first},</p><p>The rate card gives you our list — but your real cost depends on items per order and how you store. Give me 15 minutes and we'll price your catalog line by line, same day.</p>
        ${BTN(book, "Book 15 minutes →")}${ABOUT}`) };
-    case "rate_d5": return { subject: "How a month at shipbay compares", html: wrap(
-      `<p>Hi ${first},</p><p>Real months on our rates, ex-postage: 350 orders ≈ <b>$924</b> · 1,500 ≈ <b>$3,660</b> · 5,000 ≈ <b>$11,650</b> — against roughly $1,050–$1,280 / $4,350–$5,330 / $14,700–$18,100 at the majors on reported rates.</p>
+    case "rate_d5": return { subject: "What a month at shipbay is made of", html: wrap(
+      `<p>Hi ${first},</p><p>A month with us is three lines: pick &amp; pack (<b>$1.65 to $1.95</b> an order by volume, +$0.45 per extra unit), storage on what you actually keep here (from $1 a bin to $18 a standard pallet), and receiving when stock arrives ($10 for a single-SKU pallet).</p>
+       <p>No monthly minimum, no setup fee, and postage stays on your own carrier account.</p>
        <p>If the math looks right, the next step is a short call.</p>${BTN(book, "Book a call →")}`) };
     case "app_t0": return { subject: "We got your shipbay application", html: wrap(
       `<p>Hi ${first},</p><p>Thanks for applying for a shipbay account — your answers are in front of our team right now (I read every application myself).</p>
@@ -121,7 +127,7 @@ function render(template: string, lead: any, book: string): { subject: string; h
       `<p>Hi ${first},</p><p>We've started pricing your catalog. Fastest way to finish is 15 minutes together — we'll walk your quote line by line and map your move-in.</p>
        ${BTN(book, "Pick a time →")}`) };
     case "app_d4": return { subject: "Still want that quote?", html: wrap(
-      `<p>Hi ${first},</p><p>Your application is still open with us. If now's not the moment, no pressure — the quote stays good and there's no fee or lock-in whenever you're ready. If you want it wrapped this week:</p>
+      `<p>Hi ${first},</p><p>Your application is still open with us. If now's not the moment, no pressure — there's no setup fee and no monthly minimum whenever you're ready. If you want it wrapped this week:</p>
        ${BTN(book, "Finish my quote →")}`) };
     default: return null;
   }
@@ -150,33 +156,38 @@ function blitzVars(lead: Lead) {
   const skus = ((String(lead.notes ?? "").match(/SKUs:\s*([^|\n]+)/i) ?? [])[1] ?? "").trim();
   return { first, company, orders, skus };
 }
+/** Rate Card v2 pick & pack rate for a stated monthly volume ("400", "1,000-5,000"); null when no number is given */
+function v2Rate(orders: string): string | null {
+  const m = orders.replace(/,/g, "").match(/\d+/); if (!m) return null;
+  const n = Number(m[0]); return n <= 1000 ? "$1.95" : n <= 5000 ? "$1.80" : "$1.65";
+}
 /** the five Blitz emails as plain paragraphs; {v} = merge values. Blank company / volume just drop the clause.
  *  Each one ends on the Calendly link (book); the reply options stay as the second way in. */
 function blitzBody(t: string, lead: Lead, book: string): { subject: string; paras: string[] } | null {
   const { first, company, orders, skus } = blitzVars(lead);
   const brand = company || "your brand";
   const who = company ? `someone at ${company}` : "you";
+  const rate = v2Rate(orders);
   const vol = [orders ? `around ${orders} orders a month` : "", skus ? `${skus} SKUs` : ""].filter(Boolean).join(", ");
   switch (t) {
     case "blitz_e1": return { subject: `${company ? company + " x " : ""}ShipBay3PL`, paras: [
       `Hi ${first},`,
       `Back in July ${who} requested 3PL quotes${vol ? ` — ${vol}` : ""}. A few months on, you've either signed with one of the places that called you, or you're still shipping it yourself. Either way, quick one.`,
-      `We're a fulfillment warehouse in Hillsborough, NJ, and we're bringing on a small group of founding accounts on terms we won't offer again once those seats are gone:`,
-      `$1.75 per order picked, packed and shipped (+$0.35 per extra unit), locked for 12 months\nStorage free for your first 90 days, then only the square footage you actually use\nNo minimum for 90 days, $0 setup, month-to-month\nPostage at exact carrier cost, zero markup — or ship on your own carrier account if your rates beat ours\nOrders in by 2pm ET ship same day, Mon–Sat. 1–2 day ground to the entire Northeast.`,
-      `What we get out of it: a reference account and honest feedback while we scale. What you get: the rate, and my cell.`,
+      `We're a fulfillment warehouse in Hillsborough, NJ. You don't need a discovery call to see the price, it's published:`,
+      `${rate ? `${rate} per order picked and packed at your volume` : "$1.65 to $1.95 per order picked and packed, by monthly volume"} (+$0.45 per extra unit)${rate === "$1.65" ? ", on a 12-month term" : ""}\nStorage on the pallets, shelves and bins you actually use: from $1 a bin to $18 a standard pallet a month\nNo monthly minimum, $0 setup, month-to-month\nPostage on your own carrier account: your rates, never on our invoice\nOrders in by 2pm ET ship same day, Mon–Sat.`,
       `Fifteen minutes is all it takes to put your real numbers against that rate. Pick a time here:\n${book}`,
       `Or just reply with a number:\n1 — Still open. Quote my real numbers.\n2 — Signed elsewhere. (Tell me who — and if it's gone sideways, we move you with zero downtime.)\n3 — Handling it in-house.`] };
     case "blitz_e2": return { subject: "the 4 quotes you probably got in July", paras: [
       `${first},`,
       `If you requested quotes in July, you likely got four or five — each after a discovery call, each with a different structure: a "flat $11 ship" here, a $2.50 pick plus materials there, a storage rate that quietly goes up in November.`,
-      `Three lines to check on every one of them, in writing:\n1. Is postage at carrier cost, or a flat rate with the margin inside it? (Ours: at cost, or your own account.)\n2. Does storage move during peak? (Ours: no surcharge, and you pay only for the space you use.)\n3. What's the minimum, and when does it start? (Ours: none for 90 days.)`,
+      `Three lines to check on every one of them, in writing:\n1. Is postage at carrier cost, or a flat rate with the margin inside it? (Ours: it runs on your own carrier account. We never invoice postage.)\n2. Does storage move during peak? (Ours: no surcharge, and you pay only for the space you use.)\n3. What's the minimum, and when does it start? (Ours: none.)`,
       `If any of those come back vague, that's the answer.`,
-      `For ${brand} I can turn the founding rate into a formal quote on your real postage in one business day. Book 15 minutes and we'll do it together:\n${book}`,
+      `For ${brand} I can turn our published rates into a formal quote on your real orders in one business day. Book 15 minutes and we'll do it together:\n${book}`,
       `Or reply "quote" and I'll send the two-line instructions for a 30-day order export.`] };
     case "blitz_e3": return { subject: "try it with one SKU", paras: [
       `Hi ${first},`,
       `The reason most brands don't switch 3PLs isn't the price — it's the fear of moving everything and being wrong.`,
-      `So don't move everything. Send us one SKU — your fastest mover — for 90 days. No setup fee, no minimum, month-to-month after. You'll see the receiving count in your dashboard within 24 hours, orders in by 2pm ET ship the same day, and you'll have a real invoice to compare against what you pay now.`,
+      `So don't move everything. Send us one SKU — your fastest mover — first. No setup fee, no minimum, month-to-month. You'll see the receiving count in your dashboard within 24 hours, orders in by 2pm ET ship the same day, and you'll have a real invoice to compare against what you pay now.`,
       `If it's better, we move the rest with zero downtime — your current setup keeps running until ours is proven. If it isn't, you've lost nothing.`,
       `Want me to set that up for ${brand}? Pick a time and we'll map it in 15 minutes:\n${book}`] };
     case "blitz_e4": return { subject: "the peak question", paras: [
@@ -187,7 +198,7 @@ function blitzBody(t: string, lead: Lead, book: string): { subject: string; para
     case "blitz_e5": return { subject: "closing this out", paras: [
       `Hi ${first},`,
       `I've reached out a few times about the fulfillment request for ${brand} and haven't heard back, which usually means it's handled or not a priority. Either is fine — I'll close the file.`,
-      `If it ever comes back around: there's no setup fee, no minimum for 90 days, and one 15-minute call gets you your number. The link stays open:\n${book}`,
+      `If it ever comes back around: there's no setup fee, no monthly minimum, and one 15-minute call gets you your number. The link stays open:\n${book}`,
       `Best,`] };
     default: return null;
   }
