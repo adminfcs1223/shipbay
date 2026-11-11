@@ -33,7 +33,7 @@ begin
 
   -- the host of the Calendly event takes the call; fall back to the closer asked for, then the setter's closer
   select id into v_closer from profiles
-   where lower(email) = lower(nullif(p->>'host_email', '')) and active is not false and (is_sales or is_owner) and role in ('shipbay_admin', 'shipbay_staff') limit 1;
+   where lower(email) = lower(nullif(p->>'host_email', '')) and active is not false and (is_sales or is_owner) and role in ('shipbay_admin', 'shipbay_staff', 'shipbay_sales') limit 1;
   v_closer := coalesce(v_closer, nullif(p->>'closer_id', '')::uuid, case when v_me.role = 'shipbay_setter' then v_me.closer_id else p_uid end);
   if v_closer is null or not public.is_closer(v_closer) then raise exception 'Nobody on the sales team owns that Calendly event.'; end if;
   select * into v_closer_row from profiles where id = v_closer;

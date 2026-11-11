@@ -9,7 +9,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, apikey, x-client-info' };
 const LOGIN_URL = 'https://auth.shipbay3pl.com';
-const ROLES = ['shipbay_admin', 'shipbay_staff', 'shipbay_setter', 'client_admin', 'client_user'];
+const ROLES = ['shipbay_admin', 'shipbay_staff', 'shipbay_sales', 'shipbay_setter', 'client_admin', 'client_user'];
 const json = (b: unknown, status = 200) => Response.json(b, { status, headers: cors });
 const esc = (s: string) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 
@@ -62,11 +62,11 @@ Deno.serve(async (req) => {
     const password = genPassword();
     const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { full_name, role, org_id } });
     if (error) return json({ error: error.message }, 400);
-    await admin.from('profiles').upsert({ id: data.user.id, email, full_name, role, org_id, phone: b.phone || null, active: true }, { onConflict: 'id' });
+    await admin.from('profiles').upsert({ id: data.user.id, email, full_name, role, org_id, phone: b.phone || null, active: true, ...(role === 'shipbay_sales' ? { is_sales: true } : {}) }, { onConflict: 'id' });
     let brand: string | null = null;
     if (org_id) { const { data: o } = await admin.from('orgs').select('name').eq('id', org_id).single(); brand = o?.name ?? null; }
     let mail: any = { skipped: true };
-    if (b.send_email) mail = await sendWelcome(email, password, (full_name || '').split(/\s+/)[0] || 'there', role.startsWith('shipbay'), brand, role === 'shipbay_setter');
+    if (b.send_email) mail = await sendWelcome(email, password, (full_name || '').split(/\s+/)[0] || 'there', role.startsWith('shipbay'), brand, role === 'shipbay_setter' || role === 'shipbay_sales');
     return json({ ok: true, user_id: data.user.id, email, password, mail });
   }
 
@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
     const { error } = await admin.auth.admin.updateUserById(p.id, { password });
     if (error) return json({ error: error.message }, 400);
     let mail: any = { skipped: true };
-    if (b.send_email) { let brand: string | null = null; if (p.org_id) { const { data: o } = await admin.from('orgs').select('name').eq('id', p.org_id).single(); brand = o?.name ?? null; } mail = await sendWelcome(p.email, password, (p.full_name || '').split(/\s+/)[0] || 'there', String(p.role).startsWith('shipbay'), brand, p.role === 'shipbay_setter'); }
+    if (b.send_email) { let brand: string | null = null; if (p.org_id) { const { data: o } = await admin.from('orgs').select('name').eq('id', p.org_id).single(); brand = o?.name ?? null; } mail = await sendWelcome(p.email, password, (p.full_name || '').split(/\s+/)[0] || 'there', String(p.role).startsWith('shipbay'), brand, p.role === 'shipbay_setter' || p.role === 'shipbay_sales'); }
     return json({ ok: true, email: p.email, password, mail });
   }
 
@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
     const patch: any = {};
     if (b.full_name !== undefined) patch.full_name = String(b.full_name).trim() || null;
     if (b.phone !== undefined) patch.phone = b.phone || null;
-    if (b.role && ROLES.includes(b.role)) { patch.role = b.role; patch.org_id = b.role.startsWith('client') ? (b.org_id || null) : null; if (b.role !== 'shipbay_setter') patch.closer_id = null; else patch.is_sales = false; }
+    if (b.role && ROLES.includes(b.role)) { patch.role = b.role; patch.org_id = b.role.startsWith('client') ? (b.org_id || null) : null; if (b.role !== 'shipbay_setter') patch.closer_id = null; else patch.is_sales = false; if (b.role === 'shipbay_sales') patch.is_sales = true; }
     else if (b.org_id !== undefined) patch.org_id = b.org_id || null;
     const { error } = await admin.from('profiles').update(patch).eq('id', b.user_id);
     if (error) return json({ error: error.message }, 400);
