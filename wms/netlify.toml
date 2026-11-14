@@ -1,0 +1,23 @@
+# Netlify project "shipbay-wms" (wms.shipbay3pl.com): set Base directory = wms
+[build]
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # Public browser values (the same ones the site ships); row-level security protects the data.
+  VITE_SUPABASE_URL = "https://poxlczzkpztmoiixyrth.supabase.co"
+  VITE_SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBveGxjenprcHp0bW9paXh5cnRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc2MTAyNDYsImV4cCI6MjEwMzE4NjI0Nn0.Jo9epu0FhaSHhLs9ChL1-zNYoGKSxroM47PuAY5pD00"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "SAMEORIGIN"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Robots-Tag = "noindex, nofollow"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

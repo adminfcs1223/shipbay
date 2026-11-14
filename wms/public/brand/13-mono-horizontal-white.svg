@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 64" role="img" aria-label="ShipBay">
+<g transform="translate(36 30)">
+<g fill="none" stroke="#F4F5F3" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+<path d="M0 -28 L36 -10 L36 18 L0 36 L-36 18 L-36 -10 Z"/>
+<path d="M-36 -10 L0 8 L36 -10"/>
+<path d="M0 8 V36"/>
+</g>
+<path d="M31.6 -3.4 L4.4 10.2 L4.4 33.8 L31.6 20.2 Z" fill="#F4F5F3"/>
+</g>
+<text x="92" y="45.5" text-anchor="start" font-family="Archivo,'Helvetica Neue',Arial,sans-serif" font-size="43" font-weight="800" letter-spacing="-1.4" fill="#F4F5F3">shipbay</text>
+</svg>
