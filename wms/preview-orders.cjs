@@ -52,17 +52,17 @@ const locsOf = (sid) => stock.filter((s) => s.sku_id === sid && s.on_hand > 0).s
     await page.locator('.rail nav button', { hasText: 'Orders' }).click(); await page.waitForTimeout(400); await shot('02-brands');
     await page.locator('.brandlist .demo button').click(); await page.waitForTimeout(1500); await shot('03-picklist');
     const sideways = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    const rows = await page.locator('.picks:not(.done) > li').count();
-    const tee = page.locator('.picks > li', { hasText: 'Logo Tee, Black' });
-    console.log(name, 'sideways px', sideways, '| rows', rows, '| flagged first:', await page.locator('.picks > li').nth(0).locator('.ploc b').innerText(), '/', await page.locator('.picks > li').nth(1).locator('.ploc b').innerText(), '| tee qty', await tee.locator('.pqty b').innerText(), 'at', await tee.locator('.ploc b').innerText(), '| target h', await tee.locator('.pickbtn').evaluate((e) => e.getBoundingClientRect().height));
-    await tee.locator('.orders').click(); await page.waitForTimeout(150); await tee.screenshot({ path: path.join(OUT, `${name}-04-row-expanded.png`) });
-    await tee.locator('.pickbtn').click(); await page.waitForTimeout(500);
-    console.log(name, 'after pick: tee in A-01', stock.find((s) => s.sku_id === 'k0' && s.code === 'A-01').on_hand, '(was 40) | rows', await page.locator('.picks:not(.done) > li').count());
-    for (const n of ['Dad Cap', 'Crew Socks', 'Ceramic Mug']) { await page.locator('.picks:not(.done) > li', { hasText: n }).locator('.pickbtn').click(); await page.waitForTimeout(400); }
-    await page.locator('.picks:not(.done) > li', { hasText: 'Steel Bottle' }).locator('.pickbtn').click(); await page.waitForTimeout(400);
+    const rows = await page.locator('.prows:not(.done) > li').count();
+    const tee = page.locator('.prows > li', { hasText: 'Logo Tee, Black' });
+    console.log(name, 'sideways px', sideways, '| rows', rows, '| flagged first:', await page.locator('.prows > li').nth(0).locator('.pl b').innerText(), '/', await page.locator('.prows > li').nth(1).locator('.pl b').innerText(), '| tee qty', await tee.locator('.pq b').innerText(), 'at', await tee.locator('.pl b').innerText(), '| target h', await tee.locator('.pcheck').evaluate((e) => e.getBoundingClientRect().height));
+    await tee.locator('.pwhat').click(); await page.waitForTimeout(150); await tee.screenshot({ path: path.join(OUT, `${name}-04-row-expanded.png`) });
+    await tee.locator('.pcheck').click(); await page.waitForTimeout(500);
+    console.log(name, 'after pick: tee in A-01', stock.find((s) => s.sku_id === 'k0' && s.code === 'A-01').on_hand, '(was 40) | rows', await page.locator('.prows:not(.done) > li').count());
+    for (const n of ['Dad Cap', 'Crew Socks', 'Ceramic Mug']) { await page.locator('.prows:not(.done) > li', { hasText: n }).locator('.pcheck').click(); await page.waitForTimeout(400); }
+    await page.locator('.prows:not(.done) > li', { hasText: 'Steel Bottle' }).locator('.pcheck').click(); await page.waitForTimeout(400);
     await page.locator('.sect.toggle').click(); await page.waitForTimeout(200); await shot('05-picked-and-ready');
     console.log(name, 'ready:', await page.locator('.ready li').allInnerTexts(), '| note:', await page.locator('.strip.bad').innerText().catch(() => ''));
-    await page.locator('.picks.done > li', { hasText: 'Logo Tee, Black' }).locator('.undo').click(); await page.waitForTimeout(500);
+    await page.locator('.prows.done > li', { hasText: 'Logo Tee, Black' }).locator('.undo').click(); await page.waitForTimeout(500);
     console.log(name, 'after undo: tee in A-01', stock.find((s) => s.sku_id === 'k0' && s.code === 'A-01').on_hand, '| ready:', await page.locator('.ready li').allInnerTexts());
     await page.locator('.daybar button', { hasText: 'Tomorrow' }).click(); await page.waitForTimeout(400); await shot('06-tomorrow', false);
     await page.locator('.rail nav button', { hasText: 'Today' }).click(); await page.waitForTimeout(600); await shot('07-today');

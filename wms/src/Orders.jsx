@@ -146,44 +146,43 @@ function Picklist({ me, brand, back }) {
       )}
 
       <h2 className="sect">To pick <span>{todo.length ? `${viewing} · ${num(unitsLeft)} unit${unitsLeft === 1 ? '' : 's'}` : viewing}</span></h2>
+      {data && todo.length > 0 && <div className="phead"><span /><span>Item</span><span>Qty</span><span>Location</span><span>Done</span></div>}
       {!data ? <div className="empty">Loading…</div> : todo.length === 0 ? <div className="empty panel">{done.length ? 'Everything in this view is picked.' : 'Nothing to pick in this view.'}</div> : (
-        <ul className="picks">{todo.map((g) => (
+        <ul className="prows">{todo.map((g) => (
           <li key={g.key} className={g.flag ? 'flagged' : ''}>
-            <div className="pickmain">
-              <button className="pimg" onClick={() => g.image_url && setZoom(g)} aria-label={g.image_url ? `Enlarge ${g.name}` : undefined} disabled={!g.image_url}>
+            <div className="prow">
+              <button className="pthumb" onClick={() => g.image_url && setZoom(g)} aria-label={g.image_url ? `Enlarge ${g.name}` : undefined} disabled={!g.image_url}>
                 {g.image_url ? <img src={g.image_url} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : null}
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8" /></svg>
               </button>
-              <div className="pname"><b>{g.name}</b><span className="code">{g.sku}</span></div>
-            </div>
-            <div className="pnums">
-              <div className="pqty"><small>Pick</small><b>{num(g.qty)}</b></div>
-              <div className="ploc"><small>{g.flag ? 'Problem' : 'Location'}</small>
-                {g.flag ? <b className="flag">{g.flag}</b> : <b>{g.locs[0].code}</b>}
-                {g.flag === 'Short' && <span>{num(g.onHand)} on hand at {g.locs.map((x) => x.code).join(', ')}</span>}
-                {g.flag === 'No location' && <span>Don’t search. Report it.</span>}
-                {!g.flag && <span>{num(g.locs[0].on_hand)} here{g.locs.length > 1 ? ` · also ${g.locs.slice(1).map((x) => `${x.code} (${num(x.on_hand)})`).join(', ')}` : ''}</span>}
+              <button className="pwhat" onClick={() => setOpenRow(openRow === g.key ? null : g.key)} aria-expanded={openRow === g.key}>
+                <b>{g.name}</b>
+                <span className="code">{g.sku}</span>
+                {g.notes.map((n) => <em key={n.order_number}>{n.text}</em>)}
+              </button>
+              <div className="pq"><b>{num(g.qty)}</b>{g.lines.length > 1 && <span>{g.lines.length} orders</span>}</div>
+              <div className={`pl ${g.flag ? 'bad' : ''}`}>
+                <b>{g.flag || g.locs[0].code}</b>
+                {g.flag === 'Short' && <span>{num(g.onHand)} on hand</span>}
+                {!g.flag && g.locs.length > 1 && <span>also {g.locs.slice(1).map((x) => x.code).join(', ')}</span>}
               </div>
+              <button className="pcheck" onClick={() => pick(g)} disabled={!!busy || g.flag === 'No location'} aria-label={`Picked ${g.qty} ${g.name}`}>{busy === g.key ? '…' : ''}</button>
             </div>
-            {g.notes.map((n) => <p className="pnote" key={n.order_number}><b>Note</b> {n.text} <span className="code">{n.order_number}</span></p>)}
-            <button className="orders" onClick={() => setOpenRow(openRow === g.key ? null : g.key)} aria-expanded={openRow === g.key}>{g.lines.length} order{g.lines.length === 1 ? '' : 's'} <i>{openRow === g.key ? '▴' : '▾'}</i></button>
             {openRow === g.key && <ul className="breakdown">{g.lines.map((l) => <li key={l.id}><span className="code">{l.order_number}</span><span>{l.ship_by ? (l.ship_by < today ? 'Late · ' : '') + fmtDate(l.ship_by) : 'No date'}</span><b>{num(l.qty)}</b></li>)}</ul>}
-            <button className="pickbtn" onClick={() => pick(g)} disabled={!!busy || g.flag === 'No location'}>
-              <i aria-hidden="true" />{busy === g.key ? 'Saving…' : g.flag === 'No location' ? 'Can’t pick: no location' : `Picked ${num(g.qty)}`}
-            </button>
           </li>
         ))}</ul>
       )}
 
       <button className="sect toggle" onClick={() => setShowPicked((v) => !v)} aria-expanded={showPicked}>Picked <span>{done.length} <i>{showPicked ? '▴' : '▾'}</i></span></button>
       {showPicked && (done.length === 0 ? <div className="empty panel">Nothing picked in this view yet.</div> : (
-        <ul className="picks done">{done.map((g) => (
+        <ul className="prows done">{done.map((g) => (
           <li key={g.key}>
-            <div className="pickmain">
-              <div className="pimg">{g.image_url ? <img src={g.image_url} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : null}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8" /></svg></div>
-              <div className="pname"><b>{g.name}</b><span className="code">{g.sku}</span><span>{num(g.qty)} from {g.from || '—'} · {g.who || 'Someone'} · {new Date(g.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span></div>
+            <div className="prow">
+              <div className="pthumb">{g.image_url ? <img src={g.image_url} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : null}</div>
+              <div className="pwhat"><b>{g.name}</b><span className="code">{g.sku}</span><span>{g.who || 'Someone'} · {new Date(g.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span></div>
+              <div className="pq"><b>{num(g.qty)}</b></div>
+              <div className="pl"><b>{g.from || '—'}</b></div>
+              <button className="undo" onClick={() => undo(g)} disabled={!!busy}>{busy === g.key ? '…' : 'Undo'}</button>
             </div>
-            <button className="undo" onClick={() => undo(g)} disabled={!!busy}>{busy === g.key ? 'Undoing…' : 'Undo'}</button>
           </li>
         ))}</ul>
       ))}
