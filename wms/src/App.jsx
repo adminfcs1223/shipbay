@@ -3,14 +3,18 @@
 // Receiving (product → pallets + cartons → labels), Pallets (carton scan → put-away → received), Locations (the map).
 import { useEffect, useRef, useState } from 'react';
 import { supabase, WMS_ROLES } from './lib';
+import Today from './Today';
+import Orders from './Orders';
 import Receive from './Receive.jsx';
 import Pallets from './Pallets.jsx';
 import Locations from './Locations.jsx';
 import VersionWatch from './VersionWatch.jsx';
 
 const NAV = [
+  ['today', 'Today', 'M4 5h16v15H4zM4 10h16M8 3v4M16 3v4'],
   ['receive', 'Receiving', 'M3 7h13l5 5v7H3zM16 7v5h5M7 19v-5h6v5'],
   ['pallets', 'Pallets', 'M3 6h18v5H3zM5 11v7M19 11v7M12 11v7M3 18h18'],
+  ['orders', 'Orders', 'M6 4h12v17l-3-2-3 2-3-2-3 2zM9 9h6M9 13h6'],
   ['locations', 'Locations', 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z'],
 ];
 
@@ -37,7 +41,8 @@ export default function App() {
 }
 
 function Shell({ me }) {
-  const [page, setPage] = useState(() => (['#pallets', '#locations'].includes(window.location.hash) ? window.location.hash.slice(1) : 'receive'));
+  const [page, setPage] = useState(() => (['#receive', '#pallets', '#orders', '#locations'].includes(window.location.hash) ? window.location.hash.slice(1) : 'today'));
+  const [startBrand, setStartBrand] = useState(null);   // a brand handed from Today to Orders
   const [orgs, setOrgs] = useState(null);
   const [pallets, setPallets] = useState(null);
   const [locations, setLocations] = useState(null);
@@ -55,7 +60,7 @@ function Shell({ me }) {
     setOrgs(o.data || []); setPallets(p.data || []); setLocations(l.data || []);
   };
   useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t); }, []);
-  useEffect(() => { history.replaceState(null, '', page === 'receive' ? '#' : `#${page}`); }, [page]);
+  useEffect(() => { history.replaceState(null, '', page === 'today' ? '#' : `#${page}`); }, [page]);
 
   const brandName = (id) => (orgs || []).find((o) => o.id === id)?.name || 'Unknown brand';
   const merge = (rows) => setPallets((cur) => { const m = new Map((cur || []).map((r) => [r.id, r])); rows.forEach((r) => m.set(r.id, { ...m.get(r.id), ...r })); return [...m.values()].sort((a, b) => (b.received_at > a.received_at ? 1 : b.received_at < a.received_at ? -1 : b.batch_pos - a.batch_pos)); });
@@ -78,9 +83,12 @@ function Shell({ me }) {
       <main className="work">
         <VersionWatch />
         {err && <div className="strip bad"><b>Can’t reach the database.</b><span>{err}</span><button onClick={load}>Try again</button></div>}
+        {page === 'today' && <Today key={navTick} go={(k) => { setFind(''); setPage(k); }} openBrand={(id) => { setStartBrand(id); setPage('orders'); }} />}
+        {page === 'orders' && <Orders key={navTick} me={me} startBrand={startBrand} clearStart={() => setStartBrand(null)} />}
         {page === 'receive' && <Receive me={me} orgs={orgs} pallets={pallets} brandName={brandName} merge={merge} open={open} />}
         {page === 'pallets' && <Pallets key={navTick} me={me} orgs={orgs} pallets={pallets} locations={locations} brandName={brandName} merge={merge} find={find} setFind={setFind} />}
         {page === 'locations' && <Locations me={me} locations={locations} pallets={pallets} brandName={brandName} reload={load} open={open} />}
+        <div className="phonewho"><span>{me.full_name || me.email}{me.employee_no ? ` · Employee ${me.employee_no}` : ''}</span><button onClick={() => supabase.auth.signOut()}>{me.employee_no ? 'Switch employee' : 'Sign out'}</button></div>
       </main>
     </div>
   );

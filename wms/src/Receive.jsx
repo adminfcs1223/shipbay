@@ -53,7 +53,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const total = lines.reduce((s, l) => s + lineCartons(l), 0);
   const printable = total;   // an NCC product (no carton count; cle in the data) has no cartons to label
   const rows = total + lines.filter((l) => l.cle).length;   // the database writes one marker row per NCC product; carton codes are padded to this
-  const problem = !org ? 'Pick a brand' : !lines.every(lineReady) ? (mixed ? 'Pick every product' : 'Pick the product') : mixed && lines.some((l) => !l.cle && !lineCartons(l)) ? 'Every product needs its carton count, or NCC' : total > 500 ? 'Up to 500 cartons on a pallet' : null;
+  const problem = !org ? 'Pick a brand' : !lines.every(lineReady) ? (mixed ? 'Pick every product' : 'Pick the product') : mixed && lines.some((l) => !l.cle && !lineCartons(l)) ? 'Every product needs its carton count, or NCC' : lines.some((l) => !l.cle && lineCartons(l) > 0 && !(Number(l.upc) >= 1)) ? 'Enter the units per carton' : total > 500 ? 'Up to 500 cartons on a pallet' : null;
 
   const sig = JSON.stringify([org, n, lines.map((l) => [l.prod?.id || l.what.trim(), lineCartons(l), l.upc, l.fba, !!l.cle])]);
   const stale = !!hold && hold.sig !== sig;   // the form changed after the labels were printed
@@ -288,7 +288,7 @@ function Line({ l, n, mixed, products, brand, set, onRemove, taken }) {
       {picked && (
         <div className="qtyrow">
           <label>Cartons{mixed ? ' of this product' : ' on the pallet'}<input className="bignum" type="number" min="0" max="500" inputMode="numeric" value={l.cle ? '' : l.cartons} onChange={(e) => set({ cartons: e.target.value })} autoFocus disabled={!!l.cle} placeholder={l.cle ? 'Not counted' : ''} /></label>
-          <label>Units per carton <em>optional</em><input className="bignum" type="number" min="1" inputMode="numeric" value={l.upc} onChange={(e) => set({ upc: e.target.value })} /></label>
+          <label>{l.cle ? <>Units on the pallet <em>optional</em></> : 'Units per carton'}<input className="bignum" type="number" min="1" inputMode="numeric" value={l.upc} onChange={(e) => set({ upc: e.target.value })} /></label>
           <button type="button" className={`fbatoggle ${l.fba ? 'on' : ''}`} onClick={() => set({ fba: !l.fba })} aria-pressed={l.fba}><i>{l.fba ? '✓' : ''}</i>FBA</button>
           <button type="button" className={`fbatoggle ${l.cle ? 'on' : ''}`} onClick={() => set({ cle: !l.cle })} aria-pressed={!!l.cle} title="No carton count: the cartons are not counted, labelled or scanned"><i>{l.cle ? '✓' : ''}</i>NCC</button>
         </div>

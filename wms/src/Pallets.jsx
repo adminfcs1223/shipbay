@@ -241,6 +241,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
               {loc && <FloorMap locations={locations} pallets={pallets} brandName={brandName} target={p.location_id} onOpen={onOpen} />}
             </section>
           )}
+          {p.status !== 'void' && <Units p={p} plines={plines} hasRows={(cartons || []).length > 0} done={(row) => { merge([row]); loadCartons(); }} />}
           {p.status !== 'void' && total > 0 && (
             <section className="panel pad obox">
               <div className="obhead"><h3>Open boxes</h3><span>{units.length ? `${units.length} loose unit${units.length === 1 ? '' : 's'} from this pallet` : 'Units from an open box get their own labels and are picked first'}</span>
@@ -310,5 +311,40 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
         </div>
       )}
     </>
+  );
+}
+
+
+// Stock: the units behind the pallet. Counted cartons carry units per carton (required at receiving now; asked for here
+// on pallets received before that). An NCC product, or a pallet with no cartons, carries the units on the pallet.
+// Saving posts the stock to the pallet's position once it is put away, which is what the pick lists read.
+function Units({ p, plines, hasRows, done }) {
+  const rows = hasRows ? (plines.length ? plines : []) : [{ item_no: p.item_no, item_name: p.item_name || 'This pallet', cle: true, whole: true, units_per_carton: p.units_total }];
+  const [vals, setVals] = useState({}); const [busy, setBusy] = useState(null); const [msg, setMsg] = useState(null);
+  if (!rows.length) return null;
+  const save = async (ln, i) => {
+    const v = Math.round(Number(vals[i])); if (!(v >= 0) || vals[i] === '' || vals[i] == null) return;
+    setBusy(i); setMsg(null);
+    const { error } = await supabase.rpc('wms_set_units', { p_pallet: p.id, p_item: p.mixed ? ln.item_no : null, p_units: v });
+    if (error) { setBusy(null); return setMsg({ kind: 'bad', text: error.message }); }
+    const { data } = await supabase.from('wms_pallets').select('*').eq('id', p.id).single();
+    setBusy(null); setVals((x) => ({ ...x, [i]: undefined })); setMsg({ kind: 'ok', text: p.status === 'stored' ? 'Saved. Stock updated at this position.' : 'Saved. Stock posts when the pallet is put away.' });
+    if (data) done(data);
+  };
+  const missing = rows.filter((ln) => ln.units_per_carton == null).length;
+  return (
+    <section className="panel pad unitsbox">
+      <div className="obhead"><h3>Units</h3><span>{missing ? `${missing} product${missing === 1 ? '' : 's'} with no units yet: not on the pick lists until entered` : 'What the pick lists count from'}</span></div>
+      {msg && <div className={`strip ${msg.kind}`}><span>{msg.text}</span></div>}
+      <ul className="unitrows">{rows.map((ln, i) => {
+        const perCarton = !ln.cle; const cur = ln.units_per_carton;
+        return (
+          <li key={i} className={cur == null ? 'need' : ''}>
+            <div><b>{ln.item_name}</b><span>{ln.item_no ? `${ln.item_no} · ` : ''}{perCarton ? `${ln.cartons} carton${ln.cartons === 1 ? '' : 's'}${cur != null ? ` × ${cur} = ${(ln.cartons * cur).toLocaleString('en-US')} units` : ''}` : cur != null ? `${Number(cur).toLocaleString('en-US')} units on the pallet` : 'No carton count'}{!ln.item_no && !p.sku_id ? ' · not on the brand’s list, so no stock' : ''}</span></div>
+            <label>{perCarton ? 'Units per carton' : 'Units on the pallet'}<input type="number" min="0" inputMode="numeric" value={vals[i] ?? ''} placeholder={cur != null ? String(cur) : ''} onChange={(e) => setVals((x) => ({ ...x, [i]: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') save(ln, i); }} /></label>
+            <button className="btn sm" disabled={busy != null || vals[i] == null || vals[i] === ''} onClick={() => save(ln, i)}>{busy === i ? 'Saving…' : 'Save'}</button>
+          </li>);
+      })}</ul>
+    </section>
   );
 }

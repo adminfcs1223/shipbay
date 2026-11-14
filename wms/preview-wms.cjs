@@ -51,9 +51,9 @@ const pickLoc = (p) => { const l = locations.find((x) => x.kind === 'pallet' && 
 
   await page.goto(`http://localhost:${PORT}/`); await page.waitForTimeout(600);
   await page.evaluate((s) => localStorage.setItem('shipbay-wms-auth', JSON.stringify(s)), sess);
-  await page.goto(`http://localhost:${PORT}/`); await page.waitForTimeout(900);
+  await page.goto(`http://localhost:${PORT}/#receive`); await page.reload(); await page.waitForTimeout(900);
   await page.locator('.brands button', { hasText: 'Souled Worldwide' }).click(); await page.waitForTimeout(400);
-  const pickProduct = async (i, q, cartons, fba) => { const line = page.locator('.line').nth(i); await line.locator('.scanbox input').fill(q); await page.waitForTimeout(200); await line.locator('.scanbox input').press('Enter'); await page.waitForTimeout(150); await line.getByLabel(/^Cartons/).fill(String(cartons)); if (fba) await line.locator('.fbatoggle').first().click(); };
+  const pickProduct = async (i, q, cartons, fba) => { const line = page.locator('.line').nth(i); await line.locator('.scanbox input').fill(q); await page.waitForTimeout(200); await line.locator('.scanbox input').press('Enter'); await page.waitForTimeout(150); await line.getByLabel(/^Cartons/).fill(String(cartons)); await line.getByLabel(/^Units per carton/).fill('12'); if (fba) await line.locator('.fbatoggle').first().click(); };
   // a mixed pallet: three products, one FBA
   await pickProduct(0, 'mini blocks', 6, true);
   await page.locator('.addline').click(); await pickProduct(1, 'sabrett onions 16 oz', 9, false);
