@@ -13,7 +13,7 @@ const num = (n) => Number(n || 0).toLocaleString();
 let lineId = 0;
 const newLine = () => ({ id: ++lineId, prod: null, off: false, what: '', q: '', cartons: '', upc: '', fba: false, cle: false });
 const lineReady = (l) => !!(l.prod || (l.off && l.what.trim()));
-const lineCartons = (l) => (l.cartons === '' ? 0 : Math.max(0, Math.min(500, Math.round(Number(l.cartons) || 0))));
+const lineCartons = (l) => (l.cle || l.cartons === '' ? 0 : Math.max(0, Math.min(500, Math.round(Number(l.cartons) || 0))));
 // labels printed before Receive: the form and the PSKU numbers it took, kept on this station until the pallet is received
 const loadHold = () => { try { const h = JSON.parse(localStorage.getItem('wms-hold') || 'null'); return h && h.key && h.org && Array.isArray(h.lines) && h.lines.length && h.pskus?.length ? h : null; } catch { return null; } };
 
@@ -51,8 +51,9 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const waiting = (pallets || []).filter((p) => p.status === 'open' || p.status === 'counted');
   const n = Math.max(1, Math.min(60, Number(count) || 1));
   const total = lines.reduce((s, l) => s + lineCartons(l), 0);
-  const printable = lines.reduce((s, l) => s + (l.cle ? 0 : lineCartons(l)), 0);   // cartons that get a label: CLE (carton logging exempt) lines do not
-  const problem = !org ? 'Pick a brand' : !lines.every(lineReady) ? (mixed ? 'Pick every product' : 'Pick the product') : mixed && lines.some((l) => !lineCartons(l)) ? 'Every product needs its carton count' : total > 500 ? 'Up to 500 cartons on a pallet' : null;
+  const printable = total;   // an NCC product (no carton count; cle in the data) has no cartons to label
+  const rows = total + lines.filter((l) => l.cle).length;   // the database writes one marker row per NCC product; carton codes are padded to this
+  const problem = !org ? 'Pick a brand' : !lines.every(lineReady) ? (mixed ? 'Pick every product' : 'Pick the product') : mixed && lines.some((l) => !l.cle && !lineCartons(l)) ? 'Every product needs its carton count, or NCC' : total > 500 ? 'Up to 500 cartons on a pallet' : null;
 
   const sig = JSON.stringify([org, n, lines.map((l) => [l.prod?.id || l.what.trim(), lineCartons(l), l.upc, l.fba, !!l.cle])]);
   const stale = !!hold && hold.sig !== sig;   // the form changed after the labels were printed
@@ -61,11 +62,11 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   }, [hold, org, lines, n]);
   // the pallets as they will be received, cartons numbered the way the database numbers them
   const draft = (pskus) => {
-    const w = Math.max(2, String(total).length); const one = lines[0];
+    const w = Math.max(2, String(rows).length); const one = lines[0];
     return pskus.map((psku, i) => {
       const num = psku.replace(/\D/g, '') || '000000'; let seq = 0; const cs = [];
-      lines.forEach((l) => { for (let g = 0; g < lineCartons(l); g++) { seq += 1; cs.push({ seq, code: `C${num}${String(seq).padStart(w, '0')}`, item_no: l.prod?.sku || null, item_name: l.prod?.name || l.what.trim(), units_per_carton: l.upc === '' ? null : Number(l.upc), fba: l.fba, cle: !!l.cle }); } });
-      return { psku, org_id: org, batch_pos: i + 1, batch_size: pskus.length, received_at: new Date().toISOString(), mixed, fba: lines.every((l) => l.fba), cle: total > 0 && lines.every((l) => l.cle), cartons: total || null, units_per_carton: !mixed && one.upc !== '' ? Number(one.upc) : null, item_no: mixed ? null : one.prod?.sku, item_name: mixed ? `Mixed pallet · ${lines.length} products` : one.prod?.name || (one.off ? one.what : ''), received_by_name: me.full_name || me.email, _cartons: cs };
+      lines.forEach((l) => { for (let g = 0; g < (l.cle ? 1 : lineCartons(l)); g++) { seq += 1; cs.push({ seq, code: `C${num}${String(seq).padStart(w, '0')}`, item_no: l.prod?.sku || null, item_name: l.prod?.name || l.what.trim(), units_per_carton: l.upc === '' ? null : Number(l.upc), fba: l.fba, cle: !!l.cle }); } });
+      return { psku, org_id: org, batch_pos: i + 1, batch_size: pskus.length, received_at: new Date().toISOString(), mixed, fba: lines.every((l) => l.fba), cle: lines.every((l) => l.cle), cartons: total || null, units_per_carton: !mixed && one.upc !== '' ? Number(one.upc) : null, item_no: mixed ? null : one.prod?.sku, item_name: mixed ? `Mixed pallet · ${lines.length} products` : one.prod?.name || (one.off ? one.what : ''), received_by_name: me.full_name || me.email, _cartons: cs };
     });
   };
   // Print carton labels before Receive: take the PSKU numbers for this form, then print with the real barcodes.
@@ -169,7 +170,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
               {mixed && <small>{num(ln.cartons)} carton{ln.cartons === 1 ? '' : 's'} · labels 1 to {ln.cartons}<button type="button" className="swap" disabled={holding || !!problem} onClick={() => printFirst(Array.from({ length: ln.cartons }, (_, i) => ln.from + i))}>Print {num(ln.cartons * n)}</button></small>}
             </div>
           ))}
-          {total > 0 && !printable && <div className="hold">CLE: no carton labels. The pallet goes straight to put-away.</div>}
+          {!problem && lines.every((l) => l.cle) && <div className="hold">NCC: no carton count and no carton labels. The pallet goes straight to put-away.</div>}
           {printable > 0 && !problem && (
             <div className="early">
               {stale && <div className="strip bad"><span>The form changed after labels were printed for {heldName}. Print them again, or put the form back.</span></div>}
@@ -191,7 +192,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
             <tbody>{waiting.map((p) => (
               <tr key={p.id} onClick={() => open(p.psku)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && open(p.psku)}>
                 <td className="code">{p.psku}</td><td><b>{brandName(p.org_id)}</b></td>
-                <td className="clip">{p.fba && <span className="tag fba">FBA</span>} {p.cle && <span className="tag fba">CLE</span>} {p.item_name || p.notes || '—'}</td>
+                <td className="clip">{p.fba && <span className="tag fba">FBA</span>} {p.cle && <span className="tag fba">NCC</span>} {p.item_name || p.notes || '—'}</td>
                 <td className="n num">{p.cartons ?? '—'}</td>
                 <td className="num">{sameDay(p.received_at) ? fmtTime(p.received_at) : new Date(p.received_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td><td>{p.received_by_name || '—'}</td>
                 <td><StatusTag s={p.status} /></td>
@@ -286,10 +287,10 @@ function Line({ l, n, mixed, products, brand, set, onRemove, taken }) {
       )}
       {picked && (
         <div className="qtyrow">
-          <label>Cartons{mixed ? ' of this product' : ' on the pallet'}<input className="bignum" type="number" min="0" max="500" inputMode="numeric" value={l.cartons} onChange={(e) => set({ cartons: e.target.value })} autoFocus /></label>
+          <label>Cartons{mixed ? ' of this product' : ' on the pallet'}<input className="bignum" type="number" min="0" max="500" inputMode="numeric" value={l.cle ? '' : l.cartons} onChange={(e) => set({ cartons: e.target.value })} autoFocus disabled={!!l.cle} placeholder={l.cle ? 'Not counted' : ''} /></label>
           <label>Units per carton <em>optional</em><input className="bignum" type="number" min="1" inputMode="numeric" value={l.upc} onChange={(e) => set({ upc: e.target.value })} /></label>
           <button type="button" className={`fbatoggle ${l.fba ? 'on' : ''}`} onClick={() => set({ fba: !l.fba })} aria-pressed={l.fba}><i>{l.fba ? '✓' : ''}</i>FBA</button>
-          <button type="button" className={`fbatoggle ${l.cle ? 'on' : ''}`} onClick={() => set({ cle: !l.cle })} aria-pressed={!!l.cle} title="Carton logging exempt: no carton labels, no carton scan"><i>{l.cle ? '✓' : ''}</i>CLE</button>
+          <button type="button" className={`fbatoggle ${l.cle ? 'on' : ''}`} onClick={() => set({ cle: !l.cle })} aria-pressed={!!l.cle} title="No carton count: the cartons are not counted, labelled or scanned"><i>{l.cle ? '✓' : ''}</i>NCC</button>
         </div>
       )}
     </div>

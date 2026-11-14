@@ -40,7 +40,7 @@ export function linesOf(p) {
 /** One 4x6 pallet label's markup. The on-screen preview scales the same markup (CSS var --u = one inch). */
 export function labelHtml(p, brand) {
   const meta = [
-    p.cartons != null ? ['Cartons', p.cle ? `${p.cartons} · logging exempt` : String(p.cartons)] : null,
+    p.cartons != null ? ['Cartons', String(p.cartons)] : p.cle ? ['Cartons', 'Not counted'] : null,
     p.units_per_carton ? ['Units per carton', String(p.units_per_carton)] : null,
     ['Received', fmtStamp(p.received_at)],
     p.received_by_name ? ['By', p.received_by_name] : null,
@@ -55,10 +55,10 @@ export function labelHtml(p, brand) {
     </header>
     <div class="pskurow">
       <div><small>PSKU#</small><div class="psku">${esc(p.psku)}</div></div>
-      <div class="of">${p.fba || p.cle ? `${p.fba && p.cle ? '<em class="fba sm">FBA</em><em class="fba sm">CLE</em>' : p.fba ? '<em class="fba">FBA</em>' : '<em class="fba">CLE</em>'}` : `<small>Pallet</small><b>${p.batch_pos}<i>of</i>${p.batch_size}</b>`}</div>
+      <div class="of">${p.fba || p.cle ? `${p.fba && p.cle ? '<em class="fba sm">FBA</em><em class="fba sm">NCC</em>' : p.fba ? '<em class="fba">FBA</em>' : '<em class="fba">NCC</em>'}` : `<small>Pallet</small><b>${p.batch_pos}<i>of</i>${p.batch_size}</b>`}</div>
     </div>
     <div class="bc">${barcodeSvg(p.psku)}</div>
-    ${p.mixed ? (() => { const ls = linesOf(p); return `<div class="prod mix"><small>Mixed pallet · ${ls.length || '?'} products</small>${ls.slice(0, 6).map((l) => `<p><b>${l.cartons}</b> ${l.fba ? '<em>FBA</em> ' : ''}${l.cle ? '<em>CLE</em> ' : ''}${esc(l.item_no ? `${l.item_no} ` : '')}${esc(l.item_name)}</p>`).join('')}${ls.length > 6 ? `<p>+ ${ls.length - 6} more</p>` : ''}</div>`; })()
+    ${p.mixed ? (() => { const ls = linesOf(p); return `<div class="prod mix"><small>Mixed pallet · ${ls.length || '?'} products</small>${ls.slice(0, 6).map((l) => `<p><b>${l.cle ? '' : l.cartons}</b> ${l.fba ? '<em>FBA</em> ' : ''}${l.cle ? '<em>NCC</em> ' : ''}${esc(l.item_no ? `${l.item_no} ` : '')}${esc(l.item_name)}</p>`).join('')}${ls.length > 6 ? `<p>+ ${ls.length - 6} more</p>` : ''}</div>`; })()
       : p.item_name ? `<div class="prod"><small>Product${p.item_no ? ` · ${esc(p.item_no)}` : ''}</small><div>${esc(p.item_name)}</div></div>` : ''}
     <div class="meta">${meta.map(([k, v]) => `<div><small>${k}</small><span>${esc(v)}</span></div>`).join('')}</div>
     ${p.notes ? `<div class="notes">${esc(p.notes)}</div>` : ''}
@@ -211,7 +211,7 @@ function printPages(pages, cls, size, title, fixed = true) {
     f.srcdoc = doc;
   });
 }
-/** The first carton of a pallet that gets a label (CLE cartons do not), for test prints and previews. */
+/** The first carton of a pallet that gets a label, for test prints and previews. An NCC product (no carton count; `cle` in the data) has one marker row and no labels. */
 export const firstLabelled = (p) => cartonCodes(p).find((c) => !c.cle) || null;
 /** 4x6: one page per pallet. */
 export const printPalletLabels = (pallets, brandOf) => printPages(pallets.map((p) => labelHtml(p, brandOf(p))), 'plabel', '4in 6in', 'Pallet labels');
