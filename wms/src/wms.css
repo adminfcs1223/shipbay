@@ -202,7 +202,12 @@ label input.bignum { height: 59px; font-size: 26px; font-weight: 800; font-varia
 .labelview.carton { margin: 0 18px; border-radius: 6px; }
 .detail .labelview.carton { align-self: center; margin: 0; }
 .sizepick { height: 48px; padding: 0 10px; border: 2px solid var(--ink); border-radius: 3px; background: #fff; font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; }
-.printrow .sizepick { width: 104px; }
+.printrow .sizepick { width: 148px; height: 42px; }
+.twobtn { display: flex; flex-direction: column; gap: 6px; }
+.twobtn .btn.sm { height: 36px; }
+.picks { display: flex; flex-direction: column; gap: 6px; }
+.proof { flex-direction: column; align-items: center; gap: 6px; }
+.proof small { font-size: 12.5px; font-weight: 600; color: var(--muted); }
 .proof { display: flex; justify-content: center; padding: 4px 0 2px; }
 .proof .labelview.carton { margin: 0; }
 .sizerow { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); padding-top: 4px; }

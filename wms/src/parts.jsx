@@ -1,22 +1,28 @@
 // Pieces both WMS screens share: the on-screen 4x6 label (same markup that prints), the scanner box and the beeps.
 import { useEffect, useRef, useState } from 'react';
-import { labelHtml, cartonLabelHtml, CARTON_SIZES, parseSize, sizeLabel, getCartonSize, setCartonSize } from './label';
+import { labelHtml, cartonLabelHtml, cartonPageHtml, CARTON_SIZES, CARTON_TURNS, parseSize, sizeLabel, getCartonSize, setCartonSize, getCartonTurn, setCartonTurn } from './label';
 
 /** The label at screen size. `inch` = how many CSS pixels one label inch gets. */
 export function LabelPreview({ pallet, brand, inch = 62, ghost }) {
   return <div className={`labelview ${ghost ? 'ghost' : ''}`} style={{ '--u': `${inch}px`, width: inch * 4, height: inch * 6 }} dangerouslySetInnerHTML={{ __html: labelHtml(pallet, brand) }} />;
 }
 
-/** A carton label at screen size, as wide as `width` pixels. */
-export function CartonPreview({ pallet, brand, carton, size, width = 246 }) {
-  const z = parseSize(size); const inch = width / z.w;
-  return <div className="labelview carton" style={{ '--u': `${inch}px`, width, height: inch * z.h }} dangerouslySetInnerHTML={{ __html: cartonLabelHtml(pallet, brand, carton, z.key) }} />;
+/** A carton label at screen size. With `turn` it is drawn as the page that goes to the printer (the roll feeds downward). */
+export function CartonPreview({ pallet, brand, carton, size, turn, width = 246 }) {
+  const z = parseSize(size); const side = turn === 'left' || turn === 'right';
+  const inch = turn == null ? width / z.w : Math.min(width / (side ? z.h : z.w), 150 / (side ? z.w : z.h), 130);
+  const html = turn == null ? cartonLabelHtml(pallet, brand, carton, z.key) : cartonPageHtml(pallet, brand, carton, z.key, turn);
+  return <div className="labelview carton" style={{ '--u': `${inch}px`, width: inch * (side ? z.h : z.w), height: inch * (side ? z.w : z.h) }} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 /** Which carton-label roll this station has. Remembered per station (browser). */
 export function useCartonSize() {
   const [size, set] = useState(getCartonSize);
-  return [size, (v) => { setCartonSize(v); set(parseSize(v).key); }];
+  const [turn, setT] = useState(getCartonTurn);
+  return [size, (v) => { setCartonSize(v); set(parseSize(v).key); }, turn, (v) => { setCartonTurn(v); setT(v); }];
+}
+export function CartonTurnPicker({ turn, onChange }) {
+  return <select className="sizepick" value={turn} onChange={(e) => onChange(e.target.value)} aria-label="Carton label direction">{CARTON_TURNS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>;
 }
 export function CartonSizePicker({ size, onChange }) {
   const known = CARTON_SIZES.some(([k]) => k === size);

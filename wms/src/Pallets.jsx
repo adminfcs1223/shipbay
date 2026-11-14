@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase, fmtStamp, sameDay } from './lib';
 import { printPalletLabels, printCartonLabels } from './label';
-import { LabelPreview, CartonPreview, CartonSizePicker, useCartonSize, ScanBox, StatusTag, FloorMap, beep, normPsku } from './parts.jsx';
+import { LabelPreview, CartonPreview, CartonSizePicker, CartonTurnPicker, useCartonSize, ScanBox, StatusTag, FloorMap, beep, normPsku } from './parts.jsx';
 
 const WHEN = [['open', 'Not finished'], ['today', 'Today'], ['week', '7 days'], ['all', 'All']];
 const cartonOf = (code) => { const m = String(code).trim().toUpperCase().match(/^C(\d{6})(\d{2,3})$/); return m ? { psku: `PSKU-${m[1]}`, seq: Number(m[2]), code: m[0] } : null; };
@@ -98,7 +98,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
   const [voiding, setVoiding] = useState(false);
   const [reason, setReason] = useState('');
   const brand = brandName(p.org_id);
-  const [csize, setCsize] = useCartonSize();
+  const [csize, setCsize, cturn, setCturn] = useCartonSize();
   const loc = (locations || []).find((l) => l.id === p.location_id) || null;
 
   const loadCartons = async () => { const { data } = await supabase.from('wms_cartons').select('*').eq('pallet_id', p.id).order('seq'); setCartons(data || []); };
@@ -191,7 +191,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
               <button className="btn go big" disabled={busy || !total || scanned < total} onClick={complete}>
                 {scanned < total ? `${total - scanned} carton${total - scanned === 1 ? '' : 's'} not scanned in yet` : busy ? 'Saving…' : 'All cartons in · show where it goes'}
               </button>
-              {missing.length > 0 && scanned > 0 && <button className="swap" onClick={() => printCartonLabels([p], () => brand, missing, csize)}>Reprint the {missing.length} label{missing.length === 1 ? '' : 's'} not scanned yet</button>}
+              {missing.length > 0 && scanned > 0 && <button className="swap" onClick={() => printCartonLabels([p], () => brand, missing, csize, cturn)}>Reprint the {missing.length} label{missing.length === 1 ? '' : 's'} not scanned yet</button>}
             </section>
           )}
 
@@ -227,8 +227,10 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
           </dl>
           {p.status !== 'void' && !voiding && <div className="acts">
             <button className="btn" onClick={reprint}>Reprint pallet label</button>
-            {total > 0 && <button className="btn" onClick={() => printCartonLabels([p], () => brand, null, csize)}>Reprint {total} carton labels</button>}
+            {total > 0 && <button className="btn" onClick={() => printCartonLabels([p], () => brand, null, csize, cturn)}>Reprint {total} carton labels</button>}
+            {total > 0 && <button className="btn sm" onClick={() => printCartonLabels([p], () => brand, [1], csize, cturn)}>Test with 1 carton label</button>}
             {total > 0 && <label className="sizerow">Carton label roll<CartonSizePicker size={csize} onChange={setCsize} /></label>}
+            {total > 0 && <label className="sizerow">Label direction<CartonTurnPicker turn={cturn} onChange={setCturn} /></label>}
             <button className="btn" onClick={() => setVoiding(true)}>Void pallet</button>
           </div>}
           {voiding && (

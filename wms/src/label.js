@@ -52,13 +52,25 @@ export function labelHtml(p, brand) {
   </section>`;
 }
 
-/** Carton label sizes (inches, width across the roll × height along the feed). The station remembers which roll it has. */
-export const CARTON_SIZES = [['2.25x1.25', '2¼ × 1¼'], ['3x1', '3 × 1'], ['2x1', '2 × 1'], ['4x2', '4 × 2'], ['4x6', '4 × 6']];
-export const DEFAULT_CARTON_SIZE = '2.25x1.25';
-export const parseSize = (v) => { const m = String(v || '').match(/^(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)$/); const w = m ? Number(m[1]) : 2.25; const h = m ? Number(m[2]) : 1.25; return w >= 1 && w <= 8.5 && h >= 0.75 && h <= 11 ? { w, h, key: `${w}x${h}` } : { w: 2.25, h: 1.25, key: DEFAULT_CARTON_SIZE }; };
+/** Carton label sizes (inches, the label read the right way up: width × height). The station remembers which roll it has. */
+export const CARTON_SIZES = [['2x1', '2 × 1'], ['2.25x1.25', '2¼ × 1¼'], ['3x1', '3 × 1'], ['4x2', '4 × 2'], ['4x6', '4 × 6']];
+export const DEFAULT_CARTON_SIZE = '2x1';
+export const parseSize = (v) => { const m = String(v || '').match(/^(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)$/); const w = m ? Number(m[1]) : 2; const h = m ? Number(m[2]) : 1; return w >= 1 && w <= 8.5 && h >= 0.75 && h <= 11 ? { w, h, key: `${w}x${h}` } : { w: 2, h: 1, key: DEFAULT_CARTON_SIZE }; };
 export const sizeLabel = (v) => { const s = parseSize(v); return CARTON_SIZES.find(([k]) => k === s.key)?.[1] || `${s.w} × ${s.h}`; };
 export function getCartonSize() { try { return parseSize(localStorage.getItem('wms-carton-size') || DEFAULT_CARTON_SIZE).key; } catch { return DEFAULT_CARTON_SIZE; } }
 export function setCartonSize(v) { try { localStorage.setItem('wms-carton-size', parseSize(v).key); } catch { /* storage off */ } }
+/** How the carton label sits on the roll at this station. Left / right send a page turned a quarter (its sides swapped) with the label turned inside it. */
+export const CARTON_TURNS = [['0', 'Straight'], ['left', 'Turned left'], ['right', 'Turned right'], ['180', 'Upside down']];
+export function getCartonTurn() { try { const v = localStorage.getItem('wms-carton-turn'); return CARTON_TURNS.some(([k]) => k === v) ? v : '0'; } catch { return '0'; } }
+export function setCartonTurn(v) { try { localStorage.setItem('wms-carton-turn', v); } catch { /* storage off */ } }
+/** A printed page holding one carton label, turned for this station's printer. The label is laid out at the page's top
+ *  left and turned about that corner, so its untransformed box never crosses the page edge (print layout splits there). */
+export function cartonPageHtml(p, brand, c, size, turn = '0') {
+  const z = parseSize(size); const side = turn === 'left' || turn === 'right';
+  const W = `calc(var(--u) * ${z.w})`; const H = `calc(var(--u) * ${z.h})`;
+  const t = turn === 'left' ? `translateY(${W}) rotate(-90deg)` : turn === 'right' ? `translateX(${H}) rotate(90deg)` : turn === '180' ? `translate(${W}, ${H}) rotate(180deg)` : 'none';
+  return `<div class="cpage" style="width: ${side ? H : W}; height: ${side ? W : H}"><div class="cturn" style="width: ${W}; height: ${H}; transform: ${t}">${cartonLabelHtml(p, brand, c, z.key)}</div></div>`;
+}
 
 /** One carton label: brand and "Carton 5 of 27", the product, the carton's own barcode, then carton / item / pallet numbers. */
 export function cartonLabelHtml(p, brand, c, size) {
@@ -109,6 +121,8 @@ export const LABEL_CSS = `
   .plabel .notes { font-size: calc(var(--u) * .13); font-weight: 500; line-height: 1.25; padding-top: calc(var(--u) * .08); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .clabel { --lw: 2.25; --lh: 1.25; --k: 1; --v: calc(var(--u) * var(--k)); width: calc(var(--u) * var(--lw)); height: calc(var(--u) * var(--lh)); padding: calc(var(--v) * .07) calc(var(--v) * .1) calc(var(--v) * .06); display: flex; flex-direction: column; font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif; color: #000; background: #fff; overflow: hidden; box-sizing: border-box; }
   .clabel * { box-sizing: border-box; margin: 0; padding: 0; }
+  .cpage { position: relative; overflow: hidden; background: #fff; }
+  .cpage .cturn { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
   .clabel .ct { display: flex; justify-content: space-between; align-items: baseline; gap: calc(var(--v) * .08); font-size: calc(var(--v) * .085); font-weight: 700; line-height: 1.1; }
   .clabel .ct span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .clabel .ct b { flex: none; font-size: calc(var(--v) * .17); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -143,8 +157,11 @@ function printPages(pages, cls, size, title) {
 }
 /** 4x6: one page per pallet. */
 export const printPalletLabels = (pallets, brandOf) => printPages(pallets.map((p) => labelHtml(p, brandOf(p))), 'plabel', '4in 6in', 'Pallet labels');
-/** One page per carton at the size of the roll in the printer, for every carton of the pallets given (or only the cartons listed). */
-export const printCartonLabels = (pallets, brandOf, only, size = getCartonSize()) => { const z = parseSize(size); return printPages(pallets.flatMap((p) => cartonCodes(p).filter((c) => !only || only.includes(c.seq)).map((c) => cartonLabelHtml(p, brandOf(p), c, z.key))), 'clabel', `${z.w}in ${z.h}in`, 'Carton labels'); };
+/** One page per carton at the size and turn of the roll in the printer, for every carton of the pallets given (or only the cartons listed). */
+export const printCartonLabels = (pallets, brandOf, only, size = getCartonSize(), turn = getCartonTurn()) => {
+  const z = parseSize(size); const side = turn === 'left' || turn === 'right';
+  return printPages(pallets.flatMap((p) => cartonCodes(p).filter((c) => !only || only.includes(c.seq)).map((c) => cartonPageHtml(p, brandOf(p), c, z.key, turn))), 'cpage', side ? `${z.h}in ${z.w}in` : `${z.w}in ${z.h}in`, 'Carton labels');
+};
 /** 4x6: one page per position. */
 export const printLocationLabels = (locs) => printPages(locs.map(locationLabelHtml), 'plabel', '4in 6in', 'Position labels');
 

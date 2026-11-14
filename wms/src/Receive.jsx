@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, fmtTime, sameDay } from './lib';
 import { printPalletLabels, printCartonLabels, cartonCodes, sizeLabel } from './label';
-import { LabelPreview, CartonPreview, CartonSizePicker, useCartonSize, StatusTag, beep } from './parts.jsx';
+import { LabelPreview, CartonPreview, CartonSizePicker, CartonTurnPicker, useCartonSize, StatusTag, beep } from './parts.jsx';
 
 const num = (n) => Number(n || 0).toLocaleString();
 
@@ -24,7 +24,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const [err, setErr] = useState(null);
   const key = useRef(crypto.randomUUID());
   const searchRef = useRef(null);
-  const [csize, setCsize] = useCartonSize();
+  const [csize, setCsize, cturn, setCturn] = useCartonSize();
 
   useEffect(() => { if (orgs && org && !orgs.some((o) => o.id === org)) setOrg(''); }, [orgs]);
   useEffect(() => {
@@ -67,7 +67,8 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
     const { error } = await supabase.rpc('wms_mark_printed', { p_ids: done.map((r) => r.id) });
     if (!error) merge(done.map((r) => ({ ...r, label_prints: (r.label_prints || 0) + 1, last_printed_at: new Date().toISOString() })));
   };
-  const printCartons = async () => { await printCartonLabels(done, (p) => brandName(p.org_id), null, csize); setPrinted((x) => ({ ...x, cartons: true })); };
+  const testCarton = () => printCartonLabels([done[0]], (p) => brandName(p.org_id), [1], csize, cturn);   // one label, to check size and direction before the full run
+  const printCartons = async () => { await printCartonLabels(done, (p) => brandName(p.org_id), null, csize, cturn); setPrinted((x) => ({ ...x, cartons: true })); };
   const toPallet = () => { const first = done[0]; setDone(null); open(first.psku); };
 
   const cur = orgs?.find((o) => o.id === org);
@@ -186,12 +187,12 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
             </div>
             {doneCartons > 0 && (
               <div className={`printrow ${printed.cartons ? 'done' : ''}`}>
-                <CartonSizePicker size={csize} onChange={(v) => { setCsize(v); setPrinted((x) => ({ ...x, cartons: false })); }} />
-                <div><b>{num(doneCartons)} carton label{doneCartons > 1 ? 's' : ''}</b><span>Paper {sizeLabel(csize)} in · margins none · headers and footers off · scale 100% · {cartonCodes(done[0])[0].code} onward</span></div>
-                <button className={`btn ${printed.cartons ? '' : 'go'}`} onClick={printCartons}>{printed.cartons ? 'Print again' : 'Print'}</button>
+                <div className="picks"><CartonSizePicker size={csize} onChange={(v) => { setCsize(v); setPrinted((x) => ({ ...x, cartons: false })); }} /><CartonTurnPicker turn={cturn} onChange={(v) => { setCturn(v); setPrinted((x) => ({ ...x, cartons: false })); }} /></div>
+                <div><b>{num(doneCartons)} carton label{doneCartons > 1 ? 's' : ''}</b><span>Printer paper {cturn === 'left' || cturn === 'right' ? sizeLabel(csize).split(' × ').reverse().join(' × ') : sizeLabel(csize)} in (width × height) · margins none · headers and footers off · scale 100%</span></div>
+                <div className="twobtn"><button className={`btn ${printed.cartons ? '' : 'go'}`} onClick={printCartons}>{printed.cartons ? 'Print again' : `Print ${num(doneCartons)}`}</button><button className="btn sm" onClick={testCarton}>Test with 1 label</button></div>
               </div>
             )}
-            {doneCartons > 0 && <div className="proof"><CartonPreview pallet={done[0]} brand={brandName(done[0].org_id)} carton={cartonCodes(done[0])[0]} size={csize} width={300} /></div>}
+            {doneCartons > 0 && <div className="proof"><CartonPreview pallet={done[0]} brand={brandName(done[0].org_id)} carton={cartonCodes(done[0])[0]} size={csize} turn={cturn} width={300} /><small>How it leaves the printer</small></div>}
             <button className={`btn big ${printed.pallet && (printed.cartons || !doneCartons) ? 'go' : ''}`} onClick={toPallet}>{doneCartons ? 'Labels are on · scan the cartons' : 'Label is on · put it away'}</button>
           </div>
         </div>
