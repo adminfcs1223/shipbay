@@ -67,7 +67,7 @@ export function labelHtml(p, brand) {
 }
 
 /** Carton label sizes (inches, the label read the right way up: width × height). The station remembers which roll it has. */
-export const CARTON_SIZES = [['2x1', '2 × 1'], ['2.25x1.25', '2¼ × 1¼'], ['3x1', '3 × 1'], ['4x2', '4 × 2'], ['4x6', '4 × 6']];
+export const CARTON_SIZES = [['2x1', '2 × 1'], ['2x2', '2 × 2'], ['2.25x1.25', '2¼ × 1¼'], ['3x1', '3 × 1'], ['4x2', '4 × 2'], ['4x6', '4 × 6']];
 export const DEFAULT_CARTON_SIZE = '2x1';
 export const parseSize = (v) => { const m = String(v || '').match(/^(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)$/); const w = m ? Number(m[1]) : 2; const h = m ? Number(m[2]) : 1; return w >= 1 && w <= 8.5 && h >= 0.75 && h <= 11 ? { w, h, key: `${w}x${h}` } : { w: 2, h: 1, key: DEFAULT_CARTON_SIZE }; };
 export const sizeLabel = (v) => { const s = parseSize(v); return CARTON_SIZES.find(([k]) => k === s.key)?.[1] || `${s.w} × ${s.h}`; };
