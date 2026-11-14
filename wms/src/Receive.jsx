@@ -1,10 +1,10 @@
 // Receiving. Product first: pick the brand, find the product on its inventory list, say how many pallets and how many
 // cartons are on each. The database hands back a PSKU# per pallet and a carton number per carton; the station is then
-// asked to print the 4x6 pallet label and one 3x1 label per carton, and the pallet opens for the carton scan.
+// asked to print the 4x6 pallet label and one small label per carton (sized to the roll at the station), and the pallet opens for the carton scan.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, fmtTime, sameDay } from './lib';
-import { printPalletLabels, printCartonLabels, cartonCodes } from './label';
-import { LabelPreview, CartonPreview, StatusTag, beep } from './parts.jsx';
+import { printPalletLabels, printCartonLabels, cartonCodes, sizeLabel } from './label';
+import { LabelPreview, CartonPreview, CartonSizePicker, useCartonSize, StatusTag, beep } from './parts.jsx';
 
 const num = (n) => Number(n || 0).toLocaleString();
 
@@ -24,6 +24,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const [err, setErr] = useState(null);
   const key = useRef(crypto.randomUUID());
   const searchRef = useRef(null);
+  const [csize, setCsize] = useCartonSize();
 
   useEffect(() => { if (orgs && org && !orgs.some((o) => o.id === org)) setOrg(''); }, [orgs]);
   useEffect(() => {
@@ -66,7 +67,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
     const { error } = await supabase.rpc('wms_mark_printed', { p_ids: done.map((r) => r.id) });
     if (!error) merge(done.map((r) => ({ ...r, label_prints: (r.label_prints || 0) + 1, last_printed_at: new Date().toISOString() })));
   };
-  const printCartons = async () => { await printCartonLabels(done, (p) => brandName(p.org_id)); setPrinted((x) => ({ ...x, cartons: true })); };
+  const printCartons = async () => { await printCartonLabels(done, (p) => brandName(p.org_id), null, csize); setPrinted((x) => ({ ...x, cartons: true })); };
   const toPallet = () => { const first = done[0]; setDone(null); open(first.psku); };
 
   const cur = orgs?.find((o) => o.id === org);
@@ -150,9 +151,9 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
         </form>
 
         <div className="panel preview">
-          <div className="panelhead"><h3>Labels</h3><span>4 × 6 and 3 × 1 in</span></div>
+          <div className="panelhead"><h3>Labels</h3><span>4 × 6 and {sizeLabel(csize)} in</span></div>
           <LabelPreview pallet={sample} brand={cur?.name || 'Brand'} ghost />
-          {c > 0 && <CartonPreview pallet={sample} brand={cur?.name || 'Brand'} carton={{ seq: 1, code: 'C00000001' }} />}
+          {c > 0 && <CartonPreview pallet={sample} brand={cur?.name || 'Brand'} carton={{ seq: 1, code: 'C00000001' }} size={csize} />}
         </div>
       </div>
 
@@ -180,15 +181,17 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
             <h2>{done.length === 1 ? done[0].psku : `${done[0].psku} → ${done[done.length - 1].psku}`}<span className="dot">.</span></h2>
             <p className="lead">{brandName(done[0].org_id)} · {done[0].item_name || done[0].notes}</p>
             <div className={`printrow ${printed.pallet ? 'done' : ''}`}>
-              <i>4 × 6</i><div><b>{done.length} pallet label{done.length > 1 ? 's' : ''}</b><span>Load the 4 × 6 printer</span></div>
+              <i>4 × 6</i><div><b>{done.length} pallet label{done.length > 1 ? 's' : ''}</b><span>Paper 4 × 6 in · margins none · headers and footers off · scale 100%</span></div>
               <button className={`btn ${printed.pallet ? '' : 'go'}`} onClick={printPallet}>{printed.pallet ? 'Print again' : 'Print'}</button>
             </div>
             {doneCartons > 0 && (
               <div className={`printrow ${printed.cartons ? 'done' : ''}`}>
-                <i>3 × 1</i><div><b>{num(doneCartons)} carton label{doneCartons > 1 ? 's' : ''}</b><span>Load the 3 × 1 printer · one label per carton, {cartonCodes(done[0])[0].code} onward</span></div>
+                <CartonSizePicker size={csize} onChange={(v) => { setCsize(v); setPrinted((x) => ({ ...x, cartons: false })); }} />
+                <div><b>{num(doneCartons)} carton label{doneCartons > 1 ? 's' : ''}</b><span>Paper {sizeLabel(csize)} in · margins none · headers and footers off · scale 100% · {cartonCodes(done[0])[0].code} onward</span></div>
                 <button className={`btn ${printed.cartons ? '' : 'go'}`} onClick={printCartons}>{printed.cartons ? 'Print again' : 'Print'}</button>
               </div>
             )}
+            {doneCartons > 0 && <div className="proof"><CartonPreview pallet={done[0]} brand={brandName(done[0].org_id)} carton={cartonCodes(done[0])[0]} size={csize} width={300} /></div>}
             <button className={`btn big ${printed.pallet && (printed.cartons || !doneCartons) ? 'go' : ''}`} onClick={toPallet}>{doneCartons ? 'Labels are on · scan the cartons' : 'Label is on · put it away'}</button>
           </div>
         </div>

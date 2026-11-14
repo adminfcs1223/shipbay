@@ -52,9 +52,10 @@ const pickLoc = (p) => { const l = locations.find((x) => x.kind === 'pallet' && 
   await page.locator('.search .scanbox input').fill('mini blocks'); await page.waitForTimeout(250); await shot('01-search');
   await page.keyboard.press('Enter'); await page.waitForTimeout(150);
   await page.getByLabel(/^Cartons on/).fill('27'); await page.waitForTimeout(200); await shot('02-product-picked');
-  await page.locator('.btn.big').click(); await page.waitForTimeout(500); await shot('03-print-prompt', false);
+  await page.locator('.btn.big').click(); await page.waitForTimeout(500);
   await page.locator('.printrow .btn').nth(0).click(); await page.waitForTimeout(500); await pdf('pallet-label');
-  await page.locator('.printrow .btn').nth(1).click(); await page.waitForTimeout(700); await pdf('carton-labels');
+  for (const z of ['3x1', '2x1', '4x2', '2.25x1.25']) { await page.locator('.printrow .sizepick').selectOption(z); await page.waitForTimeout(150); await page.locator('.printrow .btn').nth(1).click(); await page.waitForTimeout(600); await pdf(`carton-labels-${z}`); }
+  await shot('03-print-prompt', false);
   await page.locator('.dialog .btn.big').click(); await page.waitForTimeout(600); await shot('04-pallet-cartons-not-scanned');
   const mine = pallets[pallets.length - 1]; const codes = cartons.filter((c) => c.pallet_id === mine.id).map((c) => c.code);
   for (const c of codes.slice(0, 11)) await scan(c);

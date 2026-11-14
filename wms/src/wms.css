@@ -199,7 +199,14 @@ section.panel, .register > .panel:first-child { overflow-x: auto; }
 label em { font-style: normal; font-weight: 500; color: var(--muted); }
 label input.bignum { height: 59px; font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .preview { gap: 14px; }
-.labelview.carton { margin: 0 18px; }
+.labelview.carton { margin: 0 18px; border-radius: 6px; }
+.detail .labelview.carton { align-self: center; margin: 0; }
+.sizepick { height: 48px; padding: 0 10px; border: 2px solid var(--ink); border-radius: 3px; background: #fff; font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; }
+.printrow .sizepick { width: 104px; }
+.proof { display: flex; justify-content: center; padding: 4px 0 2px; }
+.proof .labelview.carton { margin: 0; }
+.sizerow { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); padding-top: 4px; }
+.sizerow .sizepick { width: 100%; height: 44px; border-width: 1.5px; border-color: var(--line-2); font-weight: 700; color: var(--ink); }
 .clip { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
 .tag.warn { background: var(--orange-tint); color: var(--orange-text); }
 .tag.go { background: var(--ink); color: #fff; }

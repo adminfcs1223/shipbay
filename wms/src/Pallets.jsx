@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase, fmtStamp, sameDay } from './lib';
 import { printPalletLabels, printCartonLabels } from './label';
-import { LabelPreview, ScanBox, StatusTag, FloorMap, beep, normPsku } from './parts.jsx';
+import { LabelPreview, CartonPreview, CartonSizePicker, useCartonSize, ScanBox, StatusTag, FloorMap, beep, normPsku } from './parts.jsx';
 
 const WHEN = [['open', 'Not finished'], ['today', 'Today'], ['week', '7 days'], ['all', 'All']];
 const cartonOf = (code) => { const m = String(code).trim().toUpperCase().match(/^C(\d{6})(\d{2,3})$/); return m ? { psku: `PSKU-${m[1]}`, seq: Number(m[2]), code: m[0] } : null; };
@@ -98,6 +98,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
   const [voiding, setVoiding] = useState(false);
   const [reason, setReason] = useState('');
   const brand = brandName(p.org_id);
+  const [csize, setCsize] = useCartonSize();
   const loc = (locations || []).find((l) => l.id === p.location_id) || null;
 
   const loadCartons = async () => { const { data } = await supabase.from('wms_cartons').select('*').eq('pallet_id', p.id).order('seq'); setCartons(data || []); };
@@ -110,7 +111,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
     setScanV('');
     let c = cartonOf(raw);
     if (!c && /^\d{1,3}$/.test(raw.trim()) && total) { const seq = Number(raw); const row = cartons.find((x) => x.seq === seq); if (row) c = { psku: p.psku, seq, code: row.code }; }
-    if (!c) { const other = (pallets || []).find((x) => x.psku === normPsku(raw)); if (other && other.id !== p.id) return onOpen(other); return say('bad', /^PSKU/i.test(raw.trim()) ? 'That is the pallet label. Scan the 3 × 1 label on each carton.' : `${raw.trim()} is not a carton label.`); }
+    if (!c) { const other = (pallets || []).find((x) => x.psku === normPsku(raw)); if (other && other.id !== p.id) return onOpen(other); return say('bad', /^PSKU/i.test(raw.trim()) ? 'That is the pallet label. Scan the small label on each carton.' : `${raw.trim()} is not a carton label.`); }
     if (c.psku !== p.psku) return say('bad', `Carton ${c.seq} belongs to ${c.psku}, not this pallet. Set it aside.`);
     const { data, error } = await supabase.rpc('wms_scan_carton', { p_code: c.code });
     if (error) return say('bad', error.message);
@@ -190,7 +191,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
               <button className="btn go big" disabled={busy || !total || scanned < total} onClick={complete}>
                 {scanned < total ? `${total - scanned} carton${total - scanned === 1 ? '' : 's'} not scanned in yet` : busy ? 'Saving…' : 'All cartons in · show where it goes'}
               </button>
-              {missing.length > 0 && scanned > 0 && <button className="swap" onClick={() => printCartonLabels([p], () => brand, missing)}>Reprint the {missing.length} label{missing.length === 1 ? '' : 's'} not scanned yet</button>}
+              {missing.length > 0 && scanned > 0 && <button className="swap" onClick={() => printCartonLabels([p], () => brand, missing, csize)}>Reprint the {missing.length} label{missing.length === 1 ? '' : 's'} not scanned yet</button>}
             </section>
           )}
 
@@ -216,6 +217,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
 
         <aside className="panel detail">
           <LabelPreview pallet={p} brand={brand} inch={52} />
+          {total > 0 && <CartonPreview pallet={p} brand={brand} carton={cartons[0]} size={csize} width={208} />}
           <dl>
             <div><dt>Brand</dt><dd>{brand}</dd></div>
             <div><dt>Product</dt><dd>{p.item_name || p.notes || 'Not recorded'}{p.item_no ? ` · ${p.item_no}` : ''}</dd></div>
@@ -225,7 +227,8 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
           </dl>
           {p.status !== 'void' && !voiding && <div className="acts">
             <button className="btn" onClick={reprint}>Reprint pallet label</button>
-            {total > 0 && <button className="btn" onClick={() => printCartonLabels([p], () => brand)}>Reprint {total} carton labels</button>}
+            {total > 0 && <button className="btn" onClick={() => printCartonLabels([p], () => brand, null, csize)}>Reprint {total} carton labels</button>}
+            {total > 0 && <label className="sizerow">Carton label roll<CartonSizePicker size={csize} onChange={setCsize} /></label>}
             <button className="btn" onClick={() => setVoiding(true)}>Void pallet</button>
           </div>}
           {voiding && (

@@ -52,13 +52,23 @@ export function labelHtml(p, brand) {
   </section>`;
 }
 
-/** One 3x1 carton label: product, the carton's own barcode, "5 / 27", and which pallet and brand it belongs to. */
-export function cartonLabelHtml(p, brand, c) {
+/** Carton label sizes (inches, width across the roll × height along the feed). The station remembers which roll it has. */
+export const CARTON_SIZES = [['2.25x1.25', '2¼ × 1¼'], ['3x1', '3 × 1'], ['2x1', '2 × 1'], ['4x2', '4 × 2'], ['4x6', '4 × 6']];
+export const DEFAULT_CARTON_SIZE = '2.25x1.25';
+export const parseSize = (v) => { const m = String(v || '').match(/^(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)$/); const w = m ? Number(m[1]) : 2.25; const h = m ? Number(m[2]) : 1.25; return w >= 1 && w <= 8.5 && h >= 0.75 && h <= 11 ? { w, h, key: `${w}x${h}` } : { w: 2.25, h: 1.25, key: DEFAULT_CARTON_SIZE }; };
+export const sizeLabel = (v) => { const s = parseSize(v); return CARTON_SIZES.find(([k]) => k === s.key)?.[1] || `${s.w} × ${s.h}`; };
+export function getCartonSize() { try { return parseSize(localStorage.getItem('wms-carton-size') || DEFAULT_CARTON_SIZE).key; } catch { return DEFAULT_CARTON_SIZE; } }
+export function setCartonSize(v) { try { localStorage.setItem('wms-carton-size', parseSize(v).key); } catch { /* storage off */ } }
+
+/** One carton label: brand and "Carton 5 of 27", the product, the carton's own barcode, then carton / item / pallet numbers. */
+export function cartonLabelHtml(p, brand, c, size) {
+  const z = parseSize(size); const k = Math.min(z.w / 2.25, z.h / 1.25);   // type grows with the label, never past what the short side allows
   return `
-  <section class="clabel">
-    <div class="cn">${esc(p.item_name || p.notes || brand)}</div>
-    <div class="cm"><div class="cb">${barcodeSvg(c.code, { height: 60, width: 2 })}</div><div class="cq"><b>${c.seq}</b><i>of ${p.cartons}</i></div></div>
-    <div class="cf"><span>${esc(c.code)}</span><span>${esc(p.item_no || '')}</span><span>${esc(p.psku)}</span><span>${esc(brand)}</span></div>
+  <section class="clabel" style="--lw: ${z.w}; --lh: ${z.h}; --k: ${Math.max(0.8, Math.min(k, 2.6)).toFixed(3)}">
+    <div class="ct"><span>${esc(brand)}</span><b>${c.seq} <i>of</i> ${p.cartons}</b></div>
+    <div class="cn" style="-webkit-line-clamp: ${z.h >= 1.2 ? 2 : 1}">${esc(p.item_name || p.notes || brand)}</div>
+    <div class="cb">${barcodeSvg(c.code, { height: 60, width: 2 })}</div>
+    <div class="cf"><span>${esc(c.code)}</span><span>${esc(p.item_no || '')}</span><span>${esc(p.psku)}</span></div>
   </section>`;
 }
 
@@ -97,17 +107,16 @@ export const LABEL_CSS = `
   .plabel .meta div:nth-child(odd) { padding-right: calc(var(--u) * .1); }
   .plabel .meta span { display: block; font-size: calc(var(--u) * .16); font-weight: 700; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .plabel .notes { font-size: calc(var(--u) * .13); font-weight: 500; line-height: 1.25; padding-top: calc(var(--u) * .08); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .clabel { width: calc(var(--u) * 3); height: calc(var(--u) * 1); padding: calc(var(--u) * .05) calc(var(--u) * .1) calc(var(--u) * .04); display: flex; flex-direction: column; font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif; color: #000; background: #fff; overflow: hidden; box-sizing: border-box; }
+  .clabel { --lw: 2.25; --lh: 1.25; --k: 1; --v: calc(var(--u) * var(--k)); width: calc(var(--u) * var(--lw)); height: calc(var(--u) * var(--lh)); padding: calc(var(--v) * .07) calc(var(--v) * .1) calc(var(--v) * .06); display: flex; flex-direction: column; font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif; color: #000; background: #fff; overflow: hidden; box-sizing: border-box; }
   .clabel * { box-sizing: border-box; margin: 0; padding: 0; }
-  .clabel .cn { font-size: calc(var(--u) * .115); font-weight: 800; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .clabel .cm { flex: 1; min-height: 0; display: flex; align-items: stretch; gap: calc(var(--u) * .12); padding: calc(var(--u) * .03) 0; }
-  .clabel .cb { flex: 1; min-width: 0; padding: 0 calc(var(--u) * .06); }
+  .clabel .ct { display: flex; justify-content: space-between; align-items: baseline; gap: calc(var(--v) * .08); font-size: calc(var(--v) * .085); font-weight: 700; line-height: 1.1; }
+  .clabel .ct span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .clabel .ct b { flex: none; font-size: calc(var(--v) * .17); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .clabel .ct i { font-style: normal; font-size: calc(var(--v) * .09); font-weight: 700; }
+  .clabel .cn { font-size: calc(var(--v) * .112); font-weight: 800; line-height: 1.1; margin-top: calc(var(--v) * .02); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+  .clabel .cb { flex: 1; min-height: 0; padding: calc(var(--v) * .04) calc(var(--v) * .1) calc(var(--v) * .03); }
   .clabel .cb svg { width: 100%; height: 100%; display: block; }
-  .clabel .cq { flex: none; text-align: right; display: flex; flex-direction: column; justify-content: center; line-height: 1; }
-  .clabel .cq b { font-size: calc(var(--u) * .34); font-weight: 800; font-variant-numeric: tabular-nums; }
-  .clabel .cq i { font-style: normal; font-size: calc(var(--u) * .1); font-weight: 700; }
-  .clabel .cf { display: flex; gap: calc(var(--u) * .1); font-size: calc(var(--u) * .08); font-weight: 700; white-space: nowrap; overflow: hidden; font-variant-numeric: tabular-nums; }
-  .clabel .cf span:last-child { margin-left: auto; overflow: hidden; text-overflow: ellipsis; }
+  .clabel .cf { display: flex; justify-content: space-between; gap: calc(var(--v) * .06); font-size: calc(var(--v) * .082); font-weight: 700; white-space: nowrap; overflow: hidden; font-variant-numeric: tabular-nums; }
   .plabel footer { margin-top: auto; display: flex; justify-content: space-between; font-size: calc(var(--u) * .1); font-weight: 600; padding-top: calc(var(--u) * .06); }
 `;
 
@@ -133,11 +142,11 @@ function printPages(pages, cls, size, title) {
   });
 }
 /** 4x6: one page per pallet. */
-export const printPalletLabels = (pallets, brandOf) => printPages(pallets.map((p) => labelHtml(p, brandOf(p))), 'plabel', '4in 6in', 'Pallet labels 4x6');
-/** 3x1: one page per carton, for every carton of the pallets given (or only the cartons listed). */
-export const printCartonLabels = (pallets, brandOf, only) => printPages(pallets.flatMap((p) => cartonCodes(p).filter((c) => !only || only.includes(c.seq)).map((c) => cartonLabelHtml(p, brandOf(p), c))), 'clabel', '3in 1in', 'Carton labels 3x1');
+export const printPalletLabels = (pallets, brandOf) => printPages(pallets.map((p) => labelHtml(p, brandOf(p))), 'plabel', '4in 6in', 'Pallet labels');
+/** One page per carton at the size of the roll in the printer, for every carton of the pallets given (or only the cartons listed). */
+export const printCartonLabels = (pallets, brandOf, only, size = getCartonSize()) => { const z = parseSize(size); return printPages(pallets.flatMap((p) => cartonCodes(p).filter((c) => !only || only.includes(c.seq)).map((c) => cartonLabelHtml(p, brandOf(p), c, z.key))), 'clabel', `${z.w}in ${z.h}in`, 'Carton labels'); };
 /** 4x6: one page per position. */
-export const printLocationLabels = (locs) => printPages(locs.map(locationLabelHtml), 'plabel', '4in 6in', 'Position labels 4x6');
+export const printLocationLabels = (locs) => printPages(locs.map(locationLabelHtml), 'plabel', '4in 6in', 'Position labels');
 
 // the on-screen preview uses the same rules as the printed label
 if (typeof document !== 'undefined' && !document.getElementById('wms-label-css')) {

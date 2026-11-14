@@ -1,15 +1,31 @@
 // Pieces both WMS screens share: the on-screen 4x6 label (same markup that prints), the scanner box and the beeps.
 import { useEffect, useRef, useState } from 'react';
-import { labelHtml, cartonLabelHtml } from './label';
+import { labelHtml, cartonLabelHtml, CARTON_SIZES, parseSize, sizeLabel, getCartonSize, setCartonSize } from './label';
 
 /** The label at screen size. `inch` = how many CSS pixels one label inch gets. */
 export function LabelPreview({ pallet, brand, inch = 62, ghost }) {
   return <div className={`labelview ${ghost ? 'ghost' : ''}`} style={{ '--u': `${inch}px`, width: inch * 4, height: inch * 6 }} dangerouslySetInnerHTML={{ __html: labelHtml(pallet, brand) }} />;
 }
 
-/** A 3x1 carton label at screen size. */
-export function CartonPreview({ pallet, brand, carton, inch = 82 }) {
-  return <div className="labelview carton" style={{ '--u': `${inch}px`, width: inch * 3, height: inch }} dangerouslySetInnerHTML={{ __html: cartonLabelHtml(pallet, brand, carton) }} />;
+/** A carton label at screen size, as wide as `width` pixels. */
+export function CartonPreview({ pallet, brand, carton, size, width = 246 }) {
+  const z = parseSize(size); const inch = width / z.w;
+  return <div className="labelview carton" style={{ '--u': `${inch}px`, width, height: inch * z.h }} dangerouslySetInnerHTML={{ __html: cartonLabelHtml(pallet, brand, carton, z.key) }} />;
+}
+
+/** Which carton-label roll this station has. Remembered per station (browser). */
+export function useCartonSize() {
+  const [size, set] = useState(getCartonSize);
+  return [size, (v) => { setCartonSize(v); set(parseSize(v).key); }];
+}
+export function CartonSizePicker({ size, onChange }) {
+  const known = CARTON_SIZES.some(([k]) => k === size);
+  return (
+    <select className="sizepick" value={size} onChange={(e) => onChange(e.target.value)} aria-label="Carton label size">
+      {CARTON_SIZES.map(([k, l]) => <option key={k} value={k}>{l} in</option>)}
+      {!known && <option value={size}>{sizeLabel(size)} in</option>}
+    </select>
+  );
 }
 
 export const STATUS = { open: ['Scan cartons', 'warn'], counted: ['Put away', 'go'], stored: ['Received', 'ok'], received: ['Received', 'ok'], void: ['Void', 'bad'] };
