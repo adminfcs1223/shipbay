@@ -112,6 +112,8 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
   const step = p.status === 'open' ? 1 : p.status === 'counted' ? 2 : 3;
   const pp = useMemo(() => ({ ...p, _cartons: cartons || [] }), [p, cartons]);   // the pallet with its cartons: labels and prints read each carton's own product
   const plines = useMemo(() => (cartons?.length ? linesOf(pp) : []), [pp]);
+  // how a carton is named on screen: as its label reads. On a mixed pallet that is its number within its own product.
+  const cname = (seq) => { const ln = plines.length > 1 ? plines.find((l) => seq >= l.from && seq <= l.to) : null; return ln ? `${ln.item_name}, carton ${seq - ln.from + 1} of ${ln.cartons},` : `Carton ${seq}`; };
   const shelfOf = (id) => (locations || []).find((l) => l.id === id)?.code || '';
   const say = (kind, text) => { beep(kind === 'ok' ? 'ok' : 'bad'); setFeed({ kind, text }); };
 
@@ -124,8 +126,8 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
     const { data, error } = await supabase.rpc('wms_scan_carton', { p_code: c.code });
     if (error) return say('bad', error.message);
     setCartons((cs) => cs.map((x) => (x.seq === data.seq ? { ...x, scanned_at: x.scanned_at || new Date().toISOString() } : x)));
-    if (data.already) return say('bad', `Carton ${data.seq} was already scanned. ${data.scanned} of ${data.total}.`);
-    setFeed({ kind: 'ok', text: data.scanned === data.total ? `All ${data.total} cartons are in.` : `Carton ${data.seq} in. ${data.scanned} of ${data.total}.` }); beep('ok');
+    if (data.already) return say('bad', `${cname(data.seq)} was already scanned. ${data.scanned} of ${data.total}.`);
+    setFeed({ kind: 'ok', text: data.scanned === data.total ? `All ${data.total} cartons are in.` : `${cname(data.seq)} in. ${data.scanned} of ${data.total} on the pallet.` }); beep('ok');
   };
   const complete = async () => {
     setBusy(true);
@@ -209,7 +211,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
                 (plines.length > 1 ? plines : [null]).map((ln, i) => (
                   <div key={i} className="cgroup">
                     {ln && <div className="cgname">{ln.fba && <span className="tag fba">FBA</span>} <b>{ln.item_name}</b><span>{ln.item_no ? `${ln.item_no} · ` : ''}{ln.cartons} carton{ln.cartons === 1 ? '' : 's'}</span><button className="swap" onClick={() => printCartonLabels([pp], () => brand, Array.from({ length: ln.cartons }, (_, k) => ln.from + k), csize, cturn)}>Print these {ln.cartons} label{ln.cartons === 1 ? '' : 's'}</button></div>}
-                    <div className="ctiles">{cartons.filter((c) => !ln || (c.seq >= ln.from && c.seq <= ln.to)).map((c) => <span key={c.id} className={`${c.scanned_at ? 'in' : ''} ${c.open_box_at ? 'ob' : ''}`} title={c.open_box_at ? `${c.code} · open box, ${c.open_units} units` : c.code}>{c.seq}</span>)}</div>
+                    <div className="ctiles">{cartons.filter((c) => !ln || (c.seq >= ln.from && c.seq <= ln.to)).map((c) => <span key={c.id} className={`${c.scanned_at ? 'in' : ''} ${c.open_box_at ? 'ob' : ''}`} title={c.open_box_at ? `${c.code} · open box, ${c.open_units} units` : c.code}>{ln ? c.seq - ln.from + 1 : c.seq}</span>)}</div>
                   </div>
                 ))
               )}
@@ -242,7 +244,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
               <div className="obhead"><h3>Open boxes</h3><span>{units.length ? `${units.length} loose unit${units.length === 1 ? '' : 's'} from this pallet` : 'Units from an open box get their own labels and are picked first'}</span>
                 <button className="btn" onClick={() => setOb({ carton: '', units: '' })}>Found an open box</button></div>
               {(cartons || []).filter((c) => c.open_box_at).map((c) => { const us = units.filter((u) => u.carton_id === c.id); return (
-                <div className="obrow" key={c.id}><b>Carton {c.seq}</b><span>{c.open_units} unit{c.open_units === 1 ? '' : 's'} · {us[0]?.item_name || ''} · shelf {shelfOf(us[0]?.location_id) || '—'}{c.open_by_name ? ` · ${c.open_by_name}` : ''}</span>
+                <div className="obrow" key={c.id}><b>{cname(c.seq).replace(/,$/, '')}</b><span>{c.open_units} unit{c.open_units === 1 ? '' : 's'} · {us[0]?.item_name || ''} · shelf {shelfOf(us[0]?.location_id) || '—'}{c.open_by_name ? ` · ${c.open_by_name}` : ''}</span>
                   <button className="btn sm" onClick={() => printUnitLabels(us, brand, shelfOf(us[0]?.location_id), csize, cturn)}>Reprint {us.length} unit labels</button></div>
               ); })}
             </section>
@@ -281,7 +283,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
         <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && !ob.made && setOb(null)}>
           {ob.made ? (
             <div className="dialog" role="dialog" aria-label="Open box labels">
-              <h2>Carton {ob.seq}<span className="dot">.</span></h2>
+              <h2>{plines.length > 1 ? 'Open box' : `Carton ${ob.seq}`}<span className="dot">.</span></h2>
               <p className="lead">{ob.made.length} loose unit{ob.made.length === 1 ? '' : 's'} · {ob.made[0]?.item_name} · shelf {ob.shelf}</p>
               <div className="printrow">
                 <div className="picks"><CartonSizePicker size={csize} onChange={setCsize} /><CartonTurnPicker turn={cturn} onChange={setCturn} /></div>

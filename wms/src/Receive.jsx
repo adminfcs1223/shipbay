@@ -16,7 +16,6 @@ const lineReady = (l) => !!(l.prod || (l.off && l.what.trim()));
 const lineCartons = (l) => (l.cartons === '' ? 0 : Math.max(0, Math.min(500, Math.round(Number(l.cartons) || 0))));
 // labels printed before Receive: the form and the PSKU numbers it took, kept on this station until the pallet is received
 const loadHold = () => { try { const h = JSON.parse(localStorage.getItem('wms-hold') || 'null'); return h && h.key && h.org && Array.isArray(h.lines) && h.lines.length && h.pskus?.length ? h : null; } catch { return null; } };
-const range = (a, b) => (a === b ? `Carton ${a}` : `Cartons ${a} to ${b}`);
 
 export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const [saved] = useState(loadHold);
@@ -166,7 +165,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
           {sampleLines.map((ln) => (
             <div className="flav" key={ln.from}>
               <CartonPreview pallet={sample} brand={cur?.name || 'Brand'} carton={cartonCodes(sample)[ln.from - 1]} size={csize} />
-              {mixed && <small>{range(ln.from, ln.to)} · one label each<button type="button" className="swap" disabled={holding || !!problem} onClick={() => printFirst(Array.from({ length: ln.cartons }, (_, i) => ln.from + i))}>Print {num(ln.cartons * n)}</button></small>}
+              {mixed && <small>{num(ln.cartons)} carton{ln.cartons === 1 ? '' : 's'} · labels 1 to {ln.cartons}<button type="button" className="swap" disabled={holding || !!problem} onClick={() => printFirst(Array.from({ length: ln.cartons }, (_, i) => ln.from + i))}>Print {num(ln.cartons * n)}</button></small>}
             </div>
           ))}
           {total > 0 && !problem && (
@@ -220,7 +219,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
               <div className="flavs">{doneLines.map((ln) => (
                 <div className="flavrow" key={ln.from}>
                   <CartonPreview pallet={done[0]} brand={brandName(done[0].org_id)} carton={cartonCodes(done[0])[ln.from - 1]} size={csize} width={150} />
-                  <div><b>{ln.fba && <span className="tag fba">FBA</span>} {ln.item_name}</b><span>{range(ln.from, ln.to)}{ln.item_no ? ` · ${ln.item_no}` : ''}</span></div>
+                  <div><b>{ln.fba && <span className="tag fba">FBA</span>} {ln.item_name}</b><span>{num(ln.cartons)} carton{ln.cartons === 1 ? '' : 's'} · labels 1 to {ln.cartons}{ln.item_no ? ` · ${ln.item_no}` : ''}</span></div>
                   <button className="btn sm" onClick={() => printCartonLabels(done, (p) => brandName(p.org_id), Array.from({ length: ln.cartons }, (_, i) => ln.from + i), csize, cturn)}>Print {num(ln.cartons * done.length)}</button>
                 </div>
               ))}</div>

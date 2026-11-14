@@ -109,12 +109,18 @@ export const printUnitLabels = (units, brand, shelf, size = getCartonSize(), tur
   return printPages(units.map((u) => turnedPage(unitLabelHtml(u, brand, shelf, z.key), z.key, turn)), 'cpage', side ? `${z.h}in ${z.w}in` : `${z.w}in ${z.h}in`, 'Unit labels', false);
 };
 
-/** One carton label: brand and "Carton 5 of 27", the product, the carton's own barcode, then carton / item / pallet numbers. */
+/** A carton's place within its own product on the pallet: on a mixed pallet the label counts "3 of 15" of that product, never of the whole pallet. */
+export function cartonPlace(p, c) {
+  if (!p.mixed) return { n: c.seq, of: p.cartons };
+  const ln = linesOf(p).find((l) => c.seq >= l.from && c.seq <= l.to);
+  return ln ? { n: c.seq - ln.from + 1, of: ln.cartons } : { n: c.seq, of: p.cartons };
+}
+/** One carton label: brand and "5 of 27" (of its own product), the product, the carton's own barcode, then carton / item / pallet numbers. */
 export function cartonLabelHtml(p, brand, c, size) {
-  const z = parseSize(size); const k = Math.min(z.w / 2.25, z.h / 1.25);   // type grows with the label, never past what the short side allows
+  const z = parseSize(size); const at = cartonPlace(p, c); const k = Math.min(z.w / 2.25, z.h / 1.25);   // type grows with the label, never past what the short side allows
   return `
   <section class="clabel" style="--lw: ${z.w}; --lh: ${z.h}; --k: ${Math.max(0.8, Math.min(k, 2.6)).toFixed(3)}">
-    <div class="ct"><span>${(c.fba ?? p.fba) ? '<em>FBA</em> ' : ''}${esc(brand)}</span><b>${c.seq} <i>of</i> ${p.cartons}</b></div>
+    <div class="ct"><span>${(c.fba ?? p.fba) ? '<em>FBA</em> ' : ''}${esc(brand)}</span><b>${at.n} <i>of</i> ${at.of}</b></div>
     <div class="cn" style="-webkit-line-clamp: ${z.h >= 1.2 ? 2 : 1}">${esc(c.item_name || (p.mixed ? '' : p.item_name) || p.notes || brand)}</div>
     <div class="cb">${barcodeSvg(c.code, { height: 60, width: 2 })}</div>
     <div class="cf"><span>${esc(c.code)}</span><span>${esc((c.item_no ?? (p.mixed ? '' : p.item_no)) || '')}</span><span>${esc(p.psku)}</span></div>
