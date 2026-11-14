@@ -8,9 +8,10 @@ const UID = '2ad97f56-03f5-453b-99a0-5b7523ef5c8a'; const WHO = 'Marcus Reyes';
 const orgs = [{ id: 'o1', name: 'Souled Worldwide', status: 'onboarding' }, { id: 'o2', name: 'Steel Horse Leather', status: 'onboarding' }, { id: 'o3', name: 'Vinyl Moon', status: 'onboarding' }];
 const src = process.argv[3] && fs.existsSync(process.argv[3]) ? JSON.parse(fs.readFileSync(process.argv[3], 'utf8')) : [{ name: 'Generation Mini Blocks (20 gm.) 16 lb. Pail', asins: ['B095SXKKLW'], supplier: 'Summit Chemical (Lipha Tech)', qty: 7, qty_fba: 0, qty_fbm: 7 }];
 const products = src.map((i, n) => ({ id: `s${n + 1}`, sku: `ITM-${String(n + 1).padStart(6, '0')}`, name: i.name, asins: i.asins, supplier: i.supplier, barcode: null, expected_qty: i.qty, expected_fba: i.qty_fba, expected_fbm: i.qty_fbm })).sort((a, b) => a.name.localeCompare(b.name));
-const locations = [['P-01', 'Bulk'], ['P-02', 'Bulk'], ['P-03', 'Bulk'], ['P-04', 'Bulk'], ['L1-01', 'Lane 1'], ['L1-02', 'Lane 1'], ['L1-03', 'Lane 1'], ['L1-04', 'Lane 1'], ['L1-05', 'Lane 1'], ['L1-06', 'Lane 1']].map(([code, zone], i) => ({ id: `l${i}`, code, zone, kind: 'pallet', active: true })).concat([{ id: 'lf', code: 'STG-01', zone: 'Staging', kind: 'floor', active: true }, { id: 'ls', code: 'A-01', zone: 'pick', kind: 'shelf', active: true }]);
-let seq = 0; const pallets = []; const cartons = [];
-const mk = (org, sku, n, c, extra = {}) => { const key = `k${seq}`; const out = []; for (let i = 1; i <= n; i++) { const num = String(++seq).padStart(6, '0'); const p = { id: `p${seq}`, psku: `PSKU-${num}`, org_id: org, status: c ? 'open' : 'counted', sku_id: sku?.id || null, item_no: sku?.sku || null, item_name: sku?.name || null, cartons: c || null, units_per_carton: null, location_id: null, reference: null, carrier: null, notes: null, batch_key: key, batch_pos: i, batch_size: n, received_at: new Date().toISOString(), received_by_name: WHO, label_prints: 0, ...extra }; pallets.push(p); const w = Math.max(2, String(c).length); for (let g = 1; g <= c; g++) cartons.push({ id: `c${p.id}-${g}`, pallet_id: p.id, org_id: org, seq: g, code: `C${num}${String(g).padStart(w, '0')}`, scanned_at: null }); out.push(p); } return out; };
+const locations = [['P-01', 'Bulk'], ['P-02', 'Bulk'], ['P-03', 'Bulk'], ['P-04', 'Bulk'], ['L1-01', 'Lane 1'], ['L1-02', 'Lane 1'], ['L1-03', 'Lane 1'], ['L1-04', 'Lane 1'], ['L1-05', 'Lane 1'], ['L1-06', 'Lane 1']].map(([code, zone], i) => ({ id: `l${i}`, code, zone, kind: 'pallet', active: true })).concat([{ id: 'lob', code: 'OB-01', zone: 'open box', kind: 'shelf', active: true }, { id: 'lf', code: 'STG-01', zone: 'Staging', kind: 'floor', active: true }, { id: 'ls', code: 'A-01', zone: 'pick', kind: 'shelf', active: true }]);
+let seq = 0; let useq = 0; const pallets = []; const cartons = []; const units = [];
+const mkLines = (org, lines, n, extra = {}) => { const key = `k${seq}`; const out = []; const total = lines.reduce((t, l) => t + (l.cartons || 0), 0); const mixed = lines.length > 1; for (let i = 1; i <= n; i++) { const num = String(++seq).padStart(6, '0'); const one = lines[0]; const p = { id: `p${seq}`, psku: `PSKU-${num}`, org_id: org, status: total ? 'open' : 'counted', mixed, fba: lines.every((l) => l.fba), sku_id: mixed ? null : one.sku?.id || null, item_no: mixed ? null : one.sku?.sku || null, item_name: mixed ? `Mixed pallet · ${lines.length} products` : one.sku?.name || one.name || null, cartons: total || null, units_per_carton: mixed ? null : one.upc || null, location_id: null, reference: null, carrier: null, notes: null, batch_key: key, batch_pos: i, batch_size: n, received_at: new Date().toISOString(), received_by_name: WHO, label_prints: 0, ...extra }; pallets.push(p); const w = Math.max(2, String(total).length); let g = 0; for (const l of lines) for (let x = 0; x < (l.cartons || 0); x++) { g++; cartons.push({ id: `c${p.id}-${g}`, pallet_id: p.id, org_id: org, seq: g, code: `C${num}${String(g).padStart(w, '0')}`, scanned_at: null, sku_id: l.sku?.id || null, item_no: l.sku?.sku || null, item_name: l.sku?.name || l.name, units_per_carton: l.upc || null, fba: !!l.fba, open_box_at: null, open_units: null }); } out.push(p); } return out; };
+const mk = (org, sku, n, c, extra = {}) => mkLines(org, [{ sku, cartons: c }], n, extra);
 const taken = (lid) => pallets.some((p) => p.location_id === lid && ['counted', 'stored'].includes(p.status));
 const pickLoc = (p) => { const l = locations.find((x) => x.kind === 'pallet' && !taken(x.id)); p.location_id = l?.id || null; };
 // two pallets already on the floor
@@ -29,8 +30,10 @@ const pickLoc = (p) => { const l = locations.find((x) => x.kind === 'pallet' && 
       case 'wms_products': return j(b.p_org === 'o1' ? products : []);
       case 'locations': return j(locations);
       case 'wms_pallets': return j([...pallets].reverse());
-      case 'wms_cartons': { const id = new URL(req.url()).searchParams.get('pallet_id')?.replace('eq.', ''); return j(cartons.filter((c) => c.pallet_id === id)); }
-      case 'wms_receive_product': { const out = mk(b.p_org, products.find((s) => s.id === b.p_sku), b.p_pallets, b.p_cartons || 0, { units_per_carton: b.p_units_per_carton, notes: b.p_notes }); out.filter((p) => p.status === 'counted').forEach(pickLoc); return j(out); }
+      case 'wms_cartons': { const q = new URL(req.url()).searchParams.get('pallet_id') || ''; const ids = q.startsWith('in.') ? q.slice(4, -1).split(',') : [q.replace('eq.', '')]; return j(cartons.filter((c) => ids.includes(c.pallet_id))); }
+      case 'wms_units': { const u = new URL(req.url()).searchParams; const pid = u.get('pallet_id')?.replace('eq.', ''); const cid = u.get('carton_id')?.replace('eq.', ''); return j(units.filter((x) => (pid ? x.pallet_id === pid : x.carton_id === cid))); }
+      case 'wms_open_box': { const c = cartons.find((x) => x.code === b.p_carton_code); const p = pallets.find((x) => x.id === c.pallet_id); c.open_box_at = new Date().toISOString(); c.open_units = b.p_units; c.scanned_at = c.scanned_at || c.open_box_at; c.open_by_name = WHO; for (let i = 0; i < b.p_units; i++) units.push({ id: `u${++useq}`, code: `U${String(useq).padStart(7, '0')}`, org_id: c.org_id, carton_id: c.id, pallet_id: p.id, item_no: c.item_no, item_name: c.item_name, fba: c.fba, location_id: 'lob', status: 'shelved' }); return j({ pallet_id: p.id, psku: p.psku, seq: c.seq, units: b.p_units, location: 'OB-01' }); }
+      case 'wms_receive': { const out = mkLines(b.p_org, b.p_lines.map((l) => ({ sku: products.find((s) => s.id === l.sku), name: l.name, cartons: l.cartons, upc: l.units_per_carton, fba: l.fba })), b.p_pallets); out.filter((p) => p.status === 'counted').forEach(pickLoc); return j(out); }
       case 'wms_mark_printed': return j(1);
       case 'wms_scan_carton': { const c = cartons.find((x) => x.code === b.p_code); if (!c) return fail(`${b.p_code} is not a carton label on file.`); const already = !!c.scanned_at; c.scanned_at = c.scanned_at || new Date().toISOString(); const all = cartons.filter((x) => x.pallet_id === c.pallet_id); return j({ pallet_id: c.pallet_id, psku: pallets.find((p) => p.id === c.pallet_id).psku, seq: c.seq, already, scanned: all.filter((x) => x.scanned_at).length, total: all.length }); }
       case 'wms_complete_count': { const p = pallets.find((x) => x.id === b.p_pallet); p.status = 'counted'; p.counted_at = new Date().toISOString(); p.counted_by_name = WHO; pickLoc(p); return j(p); }
@@ -49,27 +52,36 @@ const pickLoc = (p) => { const l = locations.find((x) => x.kind === 'pallet' && 
   await page.evaluate((s) => localStorage.setItem('shipbay-wms-auth', JSON.stringify(s)), sess);
   await page.goto(`http://localhost:${PORT}/`); await page.waitForTimeout(900);
   await page.locator('.brands button', { hasText: 'Souled Worldwide' }).click(); await page.waitForTimeout(400);
-  await page.locator('.search .scanbox input').fill('mini blocks'); await page.waitForTimeout(250); await shot('01-search');
-  await page.keyboard.press('Enter'); await page.waitForTimeout(150);
-  await page.getByLabel(/^Cartons on/).fill('27'); await page.waitForTimeout(200); await shot('02-product-picked');
-  await page.locator('.btn.big').click(); await page.waitForTimeout(500);
-  await page.locator('.printrow .btn').nth(0).click(); await page.waitForTimeout(500); await pdf('pallet-label');
-  for (const [z, t] of [['2.25x1.25', '0'], ['2x1', '0'], ['2x1', '180'], ['2x1', 'right'], ['2x1', 'left']]) { await page.locator('.printrow .sizepick').nth(0).selectOption(z); await page.locator('.printrow .sizepick').nth(1).selectOption(t); await page.waitForTimeout(150); await page.locator('.printrow .btn.sm').click(); await page.waitForTimeout(500); await pdf(`test-${z}-${t}`); await page.locator('.printrow .btn').nth(1).click(); await page.waitForTimeout(600); await pdf(`carton-${z}-${t}`); }
-  await shot('03-print-prompt', false);
-  await page.locator('.dialog .btn.big').click(); await page.waitForTimeout(600); await shot('04-pallet-cartons-not-scanned');
+  const pickProduct = async (i, q, cartons, fba) => { const line = page.locator('.line').nth(i); await line.locator('.scanbox input').fill(q); await page.waitForTimeout(200); await line.locator('.scanbox input').press('Enter'); await page.waitForTimeout(150); await line.getByLabel(/^Cartons/).fill(String(cartons)); if (fba) await line.locator('.fbatoggle').click(); };
+  // a mixed pallet: three products, one FBA
+  await pickProduct(0, 'mini blocks', 6, true);
+  await page.locator('.addline').click(); await pickProduct(1, 'sabrett onions 16 oz', 9, false);
+  await page.locator('.addline').click(); await pickProduct(2, 'tenax ager pen', 5, false);
+  await page.waitForTimeout(250); await shot('01-mixed-pallet');
+  await page.locator('.btn.big').click(); await page.waitForTimeout(700);
+  await page.locator('.printrow .btn').nth(0).click(); await page.waitForTimeout(500); await pdf('pallet-label-mixed');
+  await page.locator('.printrow .sizepick').nth(0).selectOption('2x1'); await page.locator('.printrow .sizepick').nth(1).selectOption('0'); await page.waitForTimeout(150);
+  await page.locator('.printrow .twobtn .btn').nth(0).click(); await page.waitForTimeout(700); await pdf('carton-labels-mixed');
+  await shot('02-print-prompt', false);
+  await page.locator('.dialog .btn.big').click(); await page.waitForTimeout(600);
   const mine = pallets[pallets.length - 1]; const codes = cartons.filter((c) => c.pallet_id === mine.id).map((c) => c.code);
-  for (const c of codes.slice(0, 11)) await scan(c);
-  await scan(codes[3]); await page.waitForTimeout(150); await shot('05-scanning-duplicate');
-  await scan('C00000101'); await page.waitForTimeout(150); console.log('wrong-pallet carton:', await page.locator('.strip').innerText().then((t) => t.replace(/\n/g, ' ')));
-  for (const c of codes.slice(11)) await scan(c);
-  await page.waitForTimeout(200); await shot('06-all-cartons-in');
+  for (const c of codes.slice(0, 8)) await scan(c);
+  await page.waitForTimeout(200); await shot('03-mixed-scanning');
+  // an open box: carton 12 has 7 loose units
+  await page.getByRole('button', { name: 'Found an open box' }).click(); await page.waitForTimeout(200);
+  await page.getByLabel('Carton', { exact: true }).fill('12'); await page.getByLabel('Units in it').fill('7'); await page.waitForTimeout(100); await shot('04-open-box-form', false);
+  await page.locator('.dialog .btn.go').click(); await page.waitForTimeout(700); await shot('05-open-box-labels', false);
+  await page.locator('.dialog .printrow .btn.go').click(); await page.waitForTimeout(600); await pdf('unit-labels');
+  await page.locator('.dialog .btn.big').click(); await page.waitForTimeout(300);
+  for (const c of codes.slice(8)) await scan(c);
+  await page.waitForTimeout(250); await shot('06-all-cartons-in');
   await page.locator('.pmain .btn.big').click(); await page.waitForTimeout(500); await shot('07-put-away-map');
-  await scan('LOC-P-04'); await page.waitForTimeout(150); console.log('wrong position:', await page.locator('.strip').innerText().then((t) => t.replace(/\n/g, ' ')));
-  await scan('LOC-P-01'); await page.waitForTimeout(150); await shot('08-position-confirmed');
-  await scan(mine.psku); await page.waitForTimeout(500); await shot('09-received');
+  const target = locations.find((l) => l.id === mine.location_id).code;
+  await scan('LOC-' + target); await scan(mine.psku); await page.waitForTimeout(500); await shot('08-received');
   await page.locator('.rail nav button', { hasText: 'Locations' }).click(); await page.waitForTimeout(400);
-  await page.getByRole('button', { name: '+ Add positions' }).click(); await page.waitForTimeout(150); await shot('10-locations');
-  await page.getByRole('button', { name: 'Print Bulk labels' }).click(); await page.waitForTimeout(500); await pdf('position-labels');
+  await page.waitForTimeout(150);
+  await page.locator('.inlinepick .sizepick').selectOption('2x1'); await page.waitForTimeout(150); await shot('10-locations');
+  await page.getByRole('button', { name: /Print 4 Bulk labels/ }).click(); await page.waitForTimeout(500); await pdf('position-labels-2x1');
   await page.locator('.rail nav button', { hasText: 'Pallets' }).click(); await page.waitForTimeout(300); await page.locator('.seg button', { hasText: 'All' }).click(); await page.waitForTimeout(200); await shot('11-register');
   await browser.close(); process.exit(0);
 })().catch((e) => { console.log('FAILED', e.message.split('\n').slice(0, 3).join(' | ')); process.exit(1); });

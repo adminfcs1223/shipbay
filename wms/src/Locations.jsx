@@ -2,7 +2,7 @@
 // and print their 4x6 labels; the put-away scan reads those labels.
 import { useMemo, useState } from 'react';
 import { supabase } from './lib';
-import { printLocationLabels } from './label';
+import { printLocationLabels, CARTON_SIZES } from './label';
 import { FloorMap, occupantOf } from './parts.jsx';
 
 export default function Locations({ me, locations, pallets, brandName, reload, open }) {
@@ -10,8 +10,11 @@ export default function Locations({ me, locations, pallets, brandName, reload, o
   const [adding, setAdding] = useState(false);
   const [f, setF] = useState({ zone: '', prefix: '', from: '1', count: '4' });
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState(null);
+  const [psize, setPsizeRaw] = useState(() => { try { return localStorage.getItem('wms-pos-size') || '4x6'; } catch { return '4x6'; } });   // which roll the position labels print on, per station
+  const setPsize = (v) => { setPsizeRaw(v); try { localStorage.setItem('wms-pos-size', v); } catch { /* storage off */ } };
+  const isSpot = (l) => l.kind === 'pallet' || l.kind === 'floor' || (l.zone || '').toLowerCase() === 'open box';
   const spots = useMemo(() => (locations || []).filter((l) => l.active !== false && l.kind === 'pallet'), [locations]);
-  const zones = useMemo(() => [...new Set((locations || []).filter((l) => l.kind === 'pallet' || l.kind === 'floor').map((l) => l.zone).filter(Boolean))].sort(), [locations]);
+  const zones = useMemo(() => [...new Set((locations || []).filter(isSpot).map((l) => l.zone).filter(Boolean))].sort(), [locations]);
   const taken = spots.filter((l) => occupantOf(pallets, l.id)).length;
   const codes = useMemo(() => { const n = Math.max(0, Math.min(200, Number(f.count) || 0)); const a = Math.max(0, Number(f.from) || 0); const p = f.prefix.trim().toUpperCase(); return p ? Array.from({ length: n }, (_, i) => `${p}-${String(a + i).padStart(2, '0')}`) : []; }, [f]);
   const clash = codes.filter((c) => (locations || []).some((l) => l.code.toUpperCase() === c));
@@ -37,7 +40,8 @@ export default function Locations({ me, locations, pallets, brandName, reload, o
       {msg && <div className={`strip ${msg.kind}`}><span>{msg.text}</span><button className="x" onClick={() => setMsg(null)} aria-label="Dismiss">×</button></div>}
 
       <div className="toolbar">
-        {zones.map((z) => <button key={z} className="btn" onClick={() => printLocationLabels((locations || []).filter((l) => l.zone === z && (l.kind === 'pallet' || l.kind === 'floor') && l.active !== false).sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })))}>Print {z} labels</button>)}
+        <label className="inlinepick">Position labels on<select className="sizepick" value={psize} onChange={(e) => setPsize(e.target.value)}><option value="4x6">4 × 6 in</option>{CARTON_SIZES.filter(([k]) => k !== '4x6').map(([k, l]) => <option key={k} value={k}>{l} in</option>)}</select></label>
+        {zones.map((z) => { const ls = (locations || []).filter((l) => l.zone === z && isSpot(l) && l.active !== false).sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })); return <button key={z} className="btn cap" onClick={() => printLocationLabels(ls, psize)}>Print {ls.length} {z} label{ls.length === 1 ? '' : 's'}</button>; })}
         <span style={{ flex: 1 }} />
         {admin && !adding && <button className="btn go" onClick={() => setAdding(true)}>+ Add positions</button>}
       </div>

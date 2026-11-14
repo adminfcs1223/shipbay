@@ -3,7 +3,7 @@
 //   the PSKU label there · Received. A pallet entered by mistake is voided with a reason, never deleted.
 import { useEffect, useMemo, useState } from 'react';
 import { supabase, fmtStamp, sameDay } from './lib';
-import { printPalletLabels, printCartonLabels } from './label';
+import { printPalletLabels, printCartonLabels, printUnitLabels, linesOf } from './label';
 import { LabelPreview, CartonPreview, CartonSizePicker, CartonTurnPicker, useCartonSize, ScanBox, StatusTag, FloorMap, beep, normPsku } from './parts.jsx';
 
 const WHEN = [['open', 'Not finished'], ['today', 'Today'], ['week', '7 days'], ['all', 'All']];
@@ -75,7 +75,7 @@ export default function Pallets({ orgs, pallets, locations, brandName, merge, fi
             <tbody>{list.map((p) => (
               <tr key={p.id} className={p.status === 'void' ? 'void' : ''} onClick={() => setSel(p.id)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setSel(p.id)}>
                 <td className="code">{p.psku}</td><td><b>{brandName(p.org_id)}</b></td>
-                <td className="clip">{p.item_name || p.notes || '—'}</td>
+                <td className="clip">{p.fba && <span className="tag fba">FBA</span>} {p.item_name || p.notes || '—'}</td>
                 <td className="n num">{p.cartons ?? '—'}</td><td className="code">{p.status === 'stored' ? locName(p.location_id) : p.status === 'counted' && p.location_id ? `→ ${locName(p.location_id)}` : '—'}</td>
                 <td className="num">{fmtStamp(p.received_at)}</td><td>{p.received_by_name || '—'}</td>
                 <td><StatusTag s={p.status} /></td>
@@ -97,14 +97,22 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
   const [busy, setBusy] = useState(false);
   const [voiding, setVoiding] = useState(false);
   const [reason, setReason] = useState('');
+  const [units, setUnits] = useState([]);          // loose units from this pallet's open boxes
+  const [ob, setOb] = useState(null);              // open-box dialog: { carton, units } while typing, { made: [...] } once created
   const brand = brandName(p.org_id);
   const [csize, setCsize, cturn, setCturn] = useCartonSize();
   const loc = (locations || []).find((l) => l.id === p.location_id) || null;
 
-  const loadCartons = async () => { const { data } = await supabase.from('wms_cartons').select('*').eq('pallet_id', p.id).order('seq'); setCartons(data || []); };
+  const loadCartons = async () => {
+    const [c, u] = await Promise.all([supabase.from('wms_cartons').select('*').eq('pallet_id', p.id).order('seq'), supabase.from('wms_units').select('*').eq('pallet_id', p.id).order('code')]);
+    setCartons(c.data || []); setUnits(u.data || []);
+  };
   useEffect(() => { loadCartons(); }, [p.id]);
   const scanned = (cartons || []).filter((c) => c.scanned_at).length; const total = (cartons || []).length;
   const step = p.status === 'open' ? 1 : p.status === 'counted' ? 2 : 3;
+  const pp = useMemo(() => ({ ...p, _cartons: cartons || [] }), [p, cartons]);   // the pallet with its cartons: labels and prints read each carton's own product
+  const plines = useMemo(() => (cartons?.length ? linesOf(pp) : []), [pp]);
+  const shelfOf = (id) => (locations || []).find((l) => l.id === id)?.code || '';
   const say = (kind, text) => { beep(kind === 'ok' ? 'ok' : 'bad'); setFeed({ kind, text }); };
 
   const scanCarton = async (raw) => {
@@ -144,8 +152,20 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
     setBusy(false); if (error) { setGot({}); return say('bad', error.message); }
     merge([data]); setFeed(null); beep('ok');
   };
+  const openBox = async (e) => {
+    e.preventDefault();
+    const seq = Number(String(ob.carton).trim()); const viaLabel = cartonOf(ob.carton);
+    const row = viaLabel ? (cartons || []).find((x) => x.code === viaLabel.code) : (cartons || []).find((x) => x.seq === seq);
+    if (!row) return say('bad', viaLabel ? `Carton ${viaLabel.seq} belongs to ${viaLabel.psku}, not this pallet.` : 'Scan the carton label, or type the carton number.');
+    setBusy(true);
+    const { data, error } = await supabase.rpc('wms_open_box', { p_carton_code: row.code, p_units: Number(ob.units) });
+    setBusy(false); if (error) return say('bad', error.message);
+    await loadCartons();
+    const { data: made } = await supabase.from('wms_units').select('*').eq('carton_id', row.id).order('code');
+    beep('ok'); setFeed(null); setOb({ made: made || [], seq: data.seq, shelf: data.location });
+  };
   const reprint = async () => {
-    await printPalletLabels([p], () => brand);
+    await printPalletLabels([pp], () => brand);
     const { error } = await supabase.rpc('wms_mark_printed', { p_ids: [p.id] });
     if (!error) merge([{ ...p, label_prints: (p.label_prints || 0) + 1, last_printed_at: new Date().toISOString() }]);
   };
@@ -186,12 +206,17 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
               <ScanBox value={scanV} onChange={setScanV} onScan={scanCarton} placeholder="Scan each carton label" autoFocus />
               <div className="progress"><div><i style={{ width: `${total ? (100 * scanned) / total : 0}%` }} /></div><b>{scanned} of {total}</b></div>
               {cartons === null ? <div className="empty">Loading cartons…</div> : (
-                <div className="ctiles">{cartons.map((c) => <span key={c.id} className={c.scanned_at ? 'in' : ''} title={c.code}>{c.seq}</span>)}</div>
+                (plines.length > 1 ? plines : [null]).map((ln, i) => (
+                  <div key={i} className="cgroup">
+                    {ln && <div className="cgname">{ln.fba && <span className="tag fba">FBA</span>} <b>{ln.item_name}</b><span>{ln.item_no ? `${ln.item_no} · ` : ''}{ln.cartons} carton{ln.cartons === 1 ? '' : 's'}</span></div>}
+                    <div className="ctiles">{cartons.filter((c) => !ln || (c.seq >= ln.from && c.seq <= ln.to)).map((c) => <span key={c.id} className={`${c.scanned_at ? 'in' : ''} ${c.open_box_at ? 'ob' : ''}`} title={c.open_box_at ? `${c.code} · open box, ${c.open_units} units` : c.code}>{c.seq}</span>)}</div>
+                  </div>
+                ))
               )}
               <button className="btn go big" disabled={busy || !total || scanned < total} onClick={complete}>
                 {scanned < total ? `${total - scanned} carton${total - scanned === 1 ? '' : 's'} not scanned in yet` : busy ? 'Saving…' : 'All cartons in · show where it goes'}
               </button>
-              {missing.length > 0 && scanned > 0 && <button className="swap" onClick={() => printCartonLabels([p], () => brand, missing, csize, cturn)}>Reprint the {missing.length} label{missing.length === 1 ? '' : 's'} not scanned yet</button>}
+              {missing.length > 0 && scanned > 0 && <button className="swap" onClick={() => printCartonLabels([pp], () => brand, missing, csize, cturn)}>Reprint the {missing.length} label{missing.length === 1 ? '' : 's'} not scanned yet</button>}
             </section>
           )}
 
@@ -212,23 +237,33 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
               {loc && <FloorMap locations={locations} pallets={pallets} brandName={brandName} target={p.location_id} onOpen={onOpen} />}
             </section>
           )}
+          {p.status !== 'void' && total > 0 && (
+            <section className="panel pad obox">
+              <div className="obhead"><h3>Open boxes</h3><span>{units.length ? `${units.length} loose unit${units.length === 1 ? '' : 's'} from this pallet` : 'Units from an open box get their own labels and are picked first'}</span>
+                <button className="btn" onClick={() => setOb({ carton: '', units: '' })}>Found an open box</button></div>
+              {(cartons || []).filter((c) => c.open_box_at).map((c) => { const us = units.filter((u) => u.carton_id === c.id); return (
+                <div className="obrow" key={c.id}><b>Carton {c.seq}</b><span>{c.open_units} unit{c.open_units === 1 ? '' : 's'} · {us[0]?.item_name || ''} · shelf {shelfOf(us[0]?.location_id) || '—'}{c.open_by_name ? ` · ${c.open_by_name}` : ''}</span>
+                  <button className="btn sm" onClick={() => printUnitLabels(us, brand, shelfOf(us[0]?.location_id), csize, cturn)}>Reprint {us.length} unit labels</button></div>
+              ); })}
+            </section>
+          )}
           {p.status === 'void' && <section className="panel pad"><div className="goto"><small>Voided</small><b>{p.void_reason}</b></div></section>}
         </div>
 
         <aside className="panel detail">
-          <LabelPreview pallet={p} brand={brand} inch={52} />
-          {total > 0 && <CartonPreview pallet={p} brand={brand} carton={cartons[0]} size={csize} width={208} />}
+          <LabelPreview pallet={pp} brand={brand} inch={52} />
+          {total > 0 && <CartonPreview pallet={pp} brand={brand} carton={cartons[0]} size={csize} width={208} />}
           <dl>
             <div><dt>Brand</dt><dd>{brand}</dd></div>
-            <div><dt>Product</dt><dd>{p.item_name || p.notes || 'Not recorded'}{p.item_no ? ` · ${p.item_no}` : ''}</dd></div>
+            <div><dt>{p.mixed ? 'Mixed pallet' : 'Product'}</dt><dd>{p.mixed && plines.length ? <ul className="plines">{plines.map((ln, i) => <li key={i}><b>{ln.cartons}</b> {ln.fba && <span className="tag fba">FBA</span>} {ln.item_name}{ln.item_no ? ` · ${ln.item_no}` : ''}</li>)}</ul> : <>{p.fba && <span className="tag fba">FBA</span>} {p.item_name || p.notes || 'Not recorded'}{p.item_no ? ` · ${p.item_no}` : ''}</>}</dd></div>
             <div><dt>Cartons</dt><dd>{p.cartons ?? 'None recorded'}{p.units_per_carton ? ` · ${p.units_per_carton} units each = ${(p.cartons * p.units_per_carton).toLocaleString()}` : ''}</dd></div>
             <div><dt>Entered</dt><dd>{fmtStamp(p.received_at)}{p.received_by_name ? ` · ${p.received_by_name}` : ''}</dd></div>
             {p.counted_at && total > 0 && <div><dt>Cartons checked</dt><dd>{fmtStamp(p.counted_at)}{p.counted_by_name ? ` · ${p.counted_by_name}` : ''}</dd></div>}
           </dl>
           {p.status !== 'void' && !voiding && <div className="acts">
             <button className="btn" onClick={reprint}>Reprint pallet label</button>
-            {total > 0 && <button className="btn" onClick={() => printCartonLabels([p], () => brand, null, csize, cturn)}>Reprint {total} carton labels</button>}
-            {total > 0 && <button className="btn sm" onClick={() => printCartonLabels([p], () => brand, [1], csize, cturn)}>Test with 1 carton label</button>}
+            {total > 0 && <button className="btn" onClick={() => printCartonLabels([pp], () => brand, null, csize, cturn)}>Reprint {total} carton labels</button>}
+            {total > 0 && <button className="btn sm" onClick={() => printCartonLabels([pp], () => brand, [1], csize, cturn)}>Test with 1 carton label</button>}
             {total > 0 && <label className="sizerow">Carton label roll<CartonSizePicker size={csize} onChange={setCsize} /></label>}
             {total > 0 && <label className="sizerow">Label direction<CartonTurnPicker turn={cturn} onChange={setCturn} /></label>}
             <button className="btn" onClick={() => setVoiding(true)}>Void pallet</button>
@@ -241,6 +276,35 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
           )}
         </aside>
       </div>
+
+      {ob && (
+        <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && !ob.made && setOb(null)}>
+          {ob.made ? (
+            <div className="dialog" role="dialog" aria-label="Open box labels">
+              <h2>Carton {ob.seq}<span className="dot">.</span></h2>
+              <p className="lead">{ob.made.length} loose unit{ob.made.length === 1 ? '' : 's'} · {ob.made[0]?.item_name} · shelf {ob.shelf}</p>
+              <div className="printrow">
+                <div className="picks"><CartonSizePicker size={csize} onChange={setCsize} /><CartonTurnPicker turn={cturn} onChange={setCturn} /></div>
+                <div><b>{ob.made.length} unit label{ob.made.length === 1 ? '' : 's'}</b><span>One on each unit · {ob.made[0]?.code}{ob.made.length > 1 ? ` to ${ob.made[ob.made.length - 1].code}` : ''}</span></div>
+                <button className="btn go" onClick={() => printUnitLabels(ob.made, brand, ob.shelf, csize, cturn)}>Print</button>
+              </div>
+              <div className="goto"><small>Then put the units on</small><b>{ob.shelf}</b></div>
+              <button className="btn big" onClick={() => setOb(null)}>Done</button>
+            </div>
+          ) : (
+            <form className="dialog" onSubmit={openBox} role="dialog" aria-label="Found an open box">
+              <h2>Open box<span className="dot">.</span></h2>
+              <p className="lead">{p.psku} · {brand}</p>
+              <div className="fields">
+                <label>Carton<input value={ob.carton} onChange={(e) => setOb({ ...ob, carton: e.target.value })} placeholder="Scan its label or type its number" autoFocus required /></label>
+                <label>Units in it<input className="bignum" type="number" min="1" max="500" inputMode="numeric" value={ob.units} onChange={(e) => setOb({ ...ob, units: e.target.value })} required /></label>
+              </div>
+              {feed?.kind === 'bad' && <div className="strip bad"><span>{feed.text}</span></div>}
+              <div className="rowbtns"><button className="btn go" disabled={busy || !ob.carton || !Number(ob.units)}>{busy ? 'Saving…' : `Make ${Number(ob.units) || ''} unit labels`}</button><button type="button" className="btn" onClick={() => setOb(null)}>Cancel</button></div>
+            </form>
+          )}
+        </div>
+      )}
     </>
   );
 }

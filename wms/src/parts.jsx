@@ -41,7 +41,7 @@ export const occupantOf = (pallets, locId) => (pallets || []).find((p) => p.loca
 
 /** The floor by section: every pallet position as a cell. `target` is where the open pallet goes; a free cell can be picked. */
 export function FloorMap({ locations, pallets, brandName, target, onPick, onOpen }) {
-  const spots = (locations || []).filter((l) => l.active !== false && (l.kind === 'pallet' || l.kind === 'floor'));
+  const spots = (locations || []).filter((l) => l.active !== false && (l.kind === 'pallet' || l.kind === 'floor' || (l.zone || '').toLowerCase() === 'open box'));
   const zones = [...new Set(spots.map((l) => l.zone || 'Other'))].sort((a, b) => (a === (spots.find((l) => l.id === target)?.zone || '') ? -1 : b === (spots.find((l) => l.id === target)?.zone || '') ? 1 : a.localeCompare(b)));
   if (!spots.length) return <div className="empty">No pallet positions set up yet.</div>;
   return (
@@ -50,12 +50,13 @@ export function FloorMap({ locations, pallets, brandName, target, onPick, onOpen
         <div className="zhead"><b>{z}</b>{spots.some((l) => (l.zone || 'Other') === z && l.kind === 'pallet') && <span>{spots.filter((l) => (l.zone || 'Other') === z && l.kind === 'pallet' && !occupantOf(pallets, l.id)).length} free</span>}</div>
         <div className="cells">{spots.filter((l) => (l.zone || 'Other') === z).sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })).map((l) => {
           const occ = l.kind === 'pallet' ? occupantOf(pallets, l.id) : null; const here = l.id === target;
+          const shelf = l.kind !== 'pallet' && l.kind !== 'floor';
           const many = l.kind === 'floor' ? (pallets || []).filter((p) => p.location_id === l.id && (p.status === 'counted' || p.status === 'stored')).length : 0;
-          const can = !here && ((!occ && onPick) || (occ && onOpen));
+          const can = !here && !shelf && ((!occ && onPick) || (occ && onOpen));
           return (
-            <button type="button" key={l.id} disabled={!can} className={`cell ${here ? 'here' : occ ? 'full' : ''} ${l.kind}`} onClick={() => (occ ? onOpen?.(occ) : onPick?.(l))} title={occ ? `${occ.psku} · ${brandName(occ.org_id)}` : here ? 'This pallet goes here' : 'Free'}>
+            <button type="button" key={l.id} disabled={!can} className={`cell ${here ? 'here' : occ ? 'full' : ''} ${shelf ? 'floor' : l.kind}`} onClick={() => (occ ? onOpen?.(occ) : onPick?.(l))} title={occ ? `${occ.psku} · ${brandName(occ.org_id)}` : here ? 'This pallet goes here' : 'Free'}>
               <b>{l.code}</b>
-              <small>{here ? 'Goes here' : occ ? <>{occ.psku.replace('PSKU-', '')}<br />{brandName(occ.org_id)}</> : l.kind === 'floor' ? (many ? `${many} pallet${many > 1 ? 's' : ''}` : 'Floor area') : 'Free'}</small>
+              <small>{here ? 'Goes here' : occ ? <>{occ.psku.replace('PSKU-', '')}<br />{brandName(occ.org_id)}</> : shelf ? 'Open-box shelf' : l.kind === 'floor' ? (many ? `${many} pallet${many > 1 ? 's' : ''}` : 'Floor area') : 'Free'}</small>
             </button>
           );
         })}</div>
