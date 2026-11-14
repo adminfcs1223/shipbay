@@ -574,7 +574,7 @@ begin
     values ('PSKU-' || v_num, p_org, case when v_log > 0 then 'open' else 'counted' end, v_mixed, v_allfba, v_allcle,
             case when v_mixed then null else s.id end, case when v_mixed then null else s.sku end,
             case when v_mixed then 'Mixed pallet · ' || v_lines || ' products' else coalesce(s.name, left(trim(l->>'name'), 300)) end,
-            nullif(v_log, 0), case when v_mixed then null else nullif(l->>'units_per_carton', '')::int end, nullif(trim(p_notes), ''),
+            nullif(v_log, 0), case when v_mixed or v_cle then null else nullif(l->>'units_per_carton', '')::int end, nullif(trim(p_notes), ''),
             v_key, i, v_n, v_key || ':' || i, auth.uid(), v_who,
             case when v_log > 0 then null else now() end, case when v_log > 0 then null else v_who end)
     returning id into v_id;
