@@ -19,8 +19,8 @@ pallets[pallets.length - 1].status = 'void'; pallets[pallets.length - 1].void_re
   await ctx.route(/\/rest\/v1\/(rpc\/)?([a-z_]+)/, (route) => {
     const req = route.request(); const m = req.url().match(/\/rest\/v1\/(rpc\/)?([a-z_]+)/); const single = (req.headers()['accept'] || '').includes('object');
     const j = (b) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b) });
-    if (m[2] === 'profiles') return j(single ? { id: UID, full_name: 'Derek Harrison', email: 'derekh@shipbay3pl.com', role: 'shipbay_admin' } : []);
-    if (m[2] === 'orgs') return j(orgs);
+    if (m[2] === 'profiles') return j(single ? { id: UID, full_name: 'Marcus Reyes', email: 'emp@wms.shipbay3pl.com', role: 'wms_employee', employee_no: 1002 } : []);
+    if (m[2] === 'orgs' || m[2] === 'wms_brands') return j(orgs);
     if (m[2] === 'wms_pallets') return j([...pallets].reverse());
     if (m[2] === 'wms_receive_pallets') { const b = req.postDataJSON(); return j(add(b.p_org, b.p_count, { reference: b.p_reference, carrier: b.p_carrier, cartons: b.p_cartons, notes: b.p_notes, label_prints: 0, last_printed_at: null })); }
     if (m[2] === 'wms_mark_printed') return j(1);
@@ -29,7 +29,7 @@ pallets[pallets.length - 1].status = 'void'; pallets[pallets.length - 1].void_re
   });
   const page = await ctx.newPage(); page.on('pageerror', (e) => console.log('PAGE ERROR', e.message)); page.on('console', (m) => m.type() === 'error' && console.log('CONSOLE', m.text()));
   const shot = (n, full = true) => page.screenshot({ path: `${OUT}/${n}.png`, fullPage: full });
-  await page.goto(`http://localhost:${PORT}/`); await page.waitForTimeout(700); await shot('00-signin', false);
+  await page.goto(`http://localhost:${PORT}/`); await page.waitForTimeout(700); await page.locator('input').nth(0).fill('1002'); await page.locator('input').nth(1).fill('482913'); await shot('00-signin', false);
   await page.evaluate((s) => localStorage.setItem('shipbay-wms-auth', JSON.stringify(s)), sess);
   await page.goto(`http://localhost:${PORT}/`); await page.waitForTimeout(900); await shot('01-receiving-empty');
   await page.locator('.brands button', { hasText: 'Souled Worldwide' }).click();

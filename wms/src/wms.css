@@ -43,6 +43,7 @@ h3 { font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
 .clock span { font-size: 13px; color: #B9C2CF; }
 .who { padding: 14px 20px 18px; font-size: 13.5px; }
 .who b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.who span { display: block; font-size: 13px; color: #B9C2CF; font-variant-numeric: tabular-nums; }
 .who button { background: none; border: 0; color: #B9C2CF; font-size: 13px; padding: 4px 0 0; text-decoration: underline; text-underline-offset: 3px; }
 .who button:hover { color: #fff; }
 .work { padding: 30px 36px 60px; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
@@ -180,7 +181,10 @@ section.panel, .register > .panel:first-child { overflow-x: auto; }
 .signin form h2 { margin-bottom: 8px; }
 .signin form label input { height: 54px; }
 .signin form .btn { height: 56px; font-size: 17px; margin-top: 6px; }
-.signin form a { font-size: 14px; font-weight: 600; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; align-self: flex-start; }
+.signin form .swap { background: none; border: 0; padding: 0; font-size: 14px; font-weight: 600; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; align-self: flex-start; }
+.signin form .swap:hover { color: var(--ink); }
+.signin form label input.bigin { height: 68px; font-size: 30px; font-weight: 700; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+.signin form label input.pin { letter-spacing: .3em; }
 .noaccess { min-height: 100vh; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 14px; padding: 40px; max-width: 620px; margin: 0 auto; }
 .noaccess p { color: var(--muted); font-size: 16px; }
 

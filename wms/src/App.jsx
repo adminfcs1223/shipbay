@@ -1,6 +1,7 @@
-// ShipBay WMS (wms.shipbay3pl.com). Same database and the same staff logins as the dashboard; floor staff only.
+// ShipBay WMS (wms.shipbay3pl.com). Same database as the dashboard. The floor signs in with an employee number + PIN
+// (created in the dashboard's Admin settings); admins can also use their dashboard email login.
 // Step 1: the receiving station (a pallet comes in for a brand → PSKU# → 4x6 label) and the pallet register.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase, WMS_ROLES } from './lib';
 import Receive from './Receive.jsx';
 import Pallets from './Pallets.jsx';
@@ -22,7 +23,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (!session) { setMe(null); return; }
-    supabase.from('profiles').select('id, full_name, email, role').eq('id', session.user.id).single()
+    supabase.from('profiles').select('id, full_name, email, role, employee_no').eq('id', session.user.id).single()
       .then(({ data }) => setMe(data || { id: session.user.id, email: session.user.email, role: null }));
   }, [session?.user?.id]);
 
@@ -42,7 +43,7 @@ function Shell({ me }) {
 
   const load = async () => {
     const [o, p] = await Promise.all([
-      supabase.from('orgs').select('id, name, status').order('name'),
+      supabase.rpc('wms_brands'),
       supabase.from('wms_pallets').select('*').order('received_at', { ascending: false }).order('batch_pos', { ascending: false }).limit(1000),
     ]);
     if (o.error || p.error) setErr((o.error || p.error).message); else setErr(null);
@@ -66,7 +67,7 @@ function Shell({ me }) {
         ))}</nav>
         <div className="railfoot">
           <Clock />
-          <div className="who"><b>{me.full_name || me.email}</b><button onClick={() => supabase.auth.signOut()}>Sign out</button></div>
+          <div className="who"><b>{me.full_name || me.email}</b>{me.employee_no && <span>Employee {me.employee_no}</span>}<button onClick={() => supabase.auth.signOut()}>{me.employee_no ? 'Switch employee' : 'Sign out'}</button></div>
         </div>
       </aside>
       <main className="work">
@@ -87,9 +88,27 @@ function Clock() {
 }
 
 function SignIn() {
+  const [mode, setMode] = useState('pin');    // 'pin' = employee number + PIN (the floor) · 'email' = an admin's dashboard login
+  const [no, setNo] = useState(''); const [pin, setPin] = useState('');
   const [email, setEmail] = useState(''); const [pw, setPw] = useState('');
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState(null);
-  const submit = async (e) => {
+  const pinRef = useRef(null);
+  const digits = (v, n) => v.replace(/\D/g, '').slice(0, n);
+
+  const byPin = async (e) => {
+    e.preventDefault(); if (busy) return;
+    if (!no || pin.length !== 6) return setMsg('Enter your employee number and your 6-digit PIN.');
+    setBusy(true); setMsg(null);
+    const { data, error } = await supabase.functions.invoke('wms-login', { body: { employee_no: Number(no), pin } });
+    if (error || !data?.access_token) {
+      let text = 'Can’t reach sign-in. Check the connection and try again.';
+      try { const j = await error?.context?.json?.(); if (j?.error) text = j.error; } catch { /* keep */ }
+      setBusy(false); setPin(''); pinRef.current?.focus(); return setMsg(text);
+    }
+    const { error: e2 } = await supabase.auth.setSession({ access_token: data.access_token, refresh_token: data.refresh_token });
+    setBusy(false); if (e2) setMsg(e2.message);
+  };
+  const byEmail = async (e) => {
     e.preventDefault(); setBusy(true); setMsg(null);
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pw });
     setBusy(false); if (error) setMsg(error.message === 'Invalid login credentials' ? 'That email and password don’t match.' : error.message);
@@ -101,14 +120,25 @@ function SignIn() {
         <h1>Every pallet has a number<span className="dot">.</span></h1>
         <div className="foot">Warehouse management</div>
       </aside>
-      <form onSubmit={submit}>
-        <h2>Sign in</h2>
-        {msg && <div className="strip bad"><span>{msg}</span></div>}
-        <label>Email<input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus /></label>
-        <label>Password<input type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} required /></label>
-        <button className="btn go" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
-        <a href="https://auth.shipbay3pl.com/">Forgot password</a>
-      </form>
+      {mode === 'pin' ? (
+        <form onSubmit={byPin} autoComplete="off">
+          <h2>Sign in</h2>
+          {msg && <div className="strip bad"><span>{msg}</span></div>}
+          <label>Employee number<input className="bigin" inputMode="numeric" pattern="[0-9]*" autoComplete="off" value={no} onChange={(e) => setNo(digits(e.target.value, 6))} onKeyDown={(e) => { if (e.key === 'Enter' && no && !pin) { e.preventDefault(); pinRef.current?.focus(); } }} autoFocus /></label>
+          <label>PIN<input ref={pinRef} className="bigin pin" type="password" inputMode="numeric" pattern="[0-9]*" autoComplete="off" maxLength={6} value={pin} onChange={(e) => setPin(digits(e.target.value, 6))} /></label>
+          <button className="btn go" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+          <button type="button" className="swap" onClick={() => { setMode('email'); setMsg(null); }}>Admin sign-in with email</button>
+        </form>
+      ) : (
+        <form onSubmit={byEmail}>
+          <h2>Admin sign-in</h2>
+          {msg && <div className="strip bad"><span>{msg}</span></div>}
+          <label>Email<input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus /></label>
+          <label>Password<input type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} required /></label>
+          <button className="btn go" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+          <button type="button" className="swap" onClick={() => { setMode('pin'); setMsg(null); }}>Sign in with employee number</button>
+        </form>
+      )}
     </div>
   );
 }

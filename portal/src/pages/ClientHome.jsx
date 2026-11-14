@@ -4,6 +4,7 @@ import { supabase } from '../lib';
 import { providerName } from '../providers';
 import { PHASES, PhaseIcon, fmt, acceptFor, DOC_KIND, BILLING, SIGN_KEYS, UploadButton, ConnectModal } from './Onboarding';
 import Tutorial, { tourSeen } from '../Tutorial';
+import { ListUploadModal, ListLine, useInventoryLists } from '../InventoryList';
 
 const GO_LIVE = { on_time: ['On track', 'ok'], at_risk: ['Needs attention', 'warn'], delayed: ['Delayed', 'bad'], on_hold: ['On hold', 'muted'], complete: ['Live', 'navy'] };
 const longDate = (d) => (d ? new Date(d + (d.length === 10 ? 'T12:00:00' : '')).toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' }) : null);
@@ -26,7 +27,7 @@ const HELP = {
   portal_login: 'You’re looking at it.',
   label_access: 'Connect your shipping-label account (ShipStation, Shippo, UPS, FedEx, USPS…) so labels print under your rates.',
   shopify_connected: 'Connect your store or marketplace so orders flow to the warehouse automatically.',
-  sku_catalog: 'Your product list — one row per SKU. A Shopify or WooCommerce export is perfect.',
+  sku_catalog: 'Your inventory list as an Excel file or .csv: products, ASINs or SKUs, and how many units of each.',
   packaging_spec: 'How you want orders packed: materials, inserts, branding.',
   returns_rules: 'What we do with returns and exchanges when they arrive.',
   packing_sops: 'Any step-by-step instructions your packers should follow.',
@@ -49,6 +50,8 @@ export default function ClientHome({ me }) {
   const [busyId, setBusyId] = useState(null);
   const [msg, setMsg] = useState(null);
   const [tour, setTour] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
+  const invLists = useInventoryLists(me?.org_id);
   useEffect(() => { if (me?.id && !tourSeen(me.id)) setTour(true); }, [me?.id]);
 
   const load = async () => {
@@ -115,9 +118,10 @@ export default function ClientHome({ me }) {
 
   const stateOf = (t) => {
     const latest = signedOf(t)[0];
+    if (t.kind === 'catalog' && invLists.pending) return 'pending';
     if (t.done) return 'done';
     if (t.kind === 'document' && SIGN_KEYS.includes(t.key) && !tplOf(t)) return 'locked';
-    if ((t.kind === 'document' || t.kind === 'catalog') && latest && latest.status !== 'rejected') return 'pending';
+    if (t.kind === 'document' && latest && latest.status !== 'rejected') return 'pending';
     if (t.kind === 'billing' && org.billing_method) return 'done';
     if (t.kind === 'portal') return 'done';
     if (t.kind === 'integration' && conns.some((c) => c.category === catOf(t) && c.status === 'connected')) return 'done';
@@ -193,18 +197,22 @@ export default function ClientHome({ me }) {
                       <div>
                         <div className="lbl">{t.label}{t.optional && <span className="opt">optional</span>}
                           {sign && tpl && state !== 'done' && <button className="btn-xs" onClick={() => viewDoc(tpl)}>Download &amp; sign</button>}
-                          {canUpload && uploadBtn(t, state === 'open' && !t.optional)}
+                          {canUpload && t.kind !== 'catalog' && uploadBtn(t, state === 'open' && !t.optional)}
+                          {t.kind === 'catalog' && <button className={`btn-xs ${state === 'open' ? 'primary' : ''}`} onClick={() => setListOpen(true)}>{invLists.pending ? 'Send a different list' : skuCount ? 'Send an updated list' : 'Upload inventory list'}</button>}
                           {t.kind === 'integration' && <button className="btn-xs primary" onClick={() => setConnectOpen(t.key)}>{list.length ? 'Connect another' : 'Connect'}</button>}
                         </div>
                         <div className="note">
                           {state === 'locked' && <span className="muted">Not yet uploaded by admin — shipbay will send this for your signature.</span>}
                           {state === 'done' && t.kind === 'document' && (sign ? 'Signed and approved' : 'Approved')}
-                          {state === 'done' && t.kind === 'catalog' && <>{skuCount.toLocaleString()} SKUs on file</>}
+                          {t.kind === 'catalog' && invLists.pending && <>Sent {fmt(invLists.pending.submitted_at)} · <ListLine list={invLists.pending} /> · being reviewed by shipbay</>}
+                          {t.kind === 'catalog' && !invLists.pending && state === 'done' && <>{skuCount.toLocaleString()} products on file</>}
+                          {t.kind === 'catalog' && !invLists.pending && state !== 'done' && invLists.latest?.status === 'rejected' && <span className="warn">We need a corrected list{invLists.latest.review_note ? ` — ${invLists.latest.review_note}` : ''}</span>}
+                          {t.kind === 'catalog' && !invLists.pending && state !== 'done' && invLists.latest?.status !== 'rejected' && HELP[t.key]}
                           {state === 'done' && t.kind === 'schedule' && <>Arriving {longDate(t.scheduled_for)}</>}
                           {state === 'done' && t.kind === 'billing' && <>{BILLING.find((b) => b[0] === org.billing_method)?.[1]}</>}
                           {state === 'done' && ['manual', 'portal'].includes(t.kind) && (t.done_at ? `Completed ${fmt(t.done_at)}` : 'Complete')}
-                          {state === 'pending' && t.kind !== 'integration' && <>Received {fmt(latest.created_at)} — being reviewed by shipbay</>}
-                          {state === 'open' && (latest?.status === 'rejected' ? <span className="warn">We need a corrected copy{latest.review_note ? ` — ${latest.review_note}` : ''}</span> : HELP[t.key])}
+                          {state === 'pending' && t.kind !== 'integration' && t.kind !== 'catalog' && <>Received {fmt(latest.created_at)} — being reviewed by shipbay</>}
+                          {state === 'open' && t.kind !== 'catalog' && (latest?.status === 'rejected' ? <span className="warn">We need a corrected copy{latest.review_note ? ` — ${latest.review_note}` : ''}</span> : HELP[t.key])}
                           {t.kind === 'integration' && list.length > 0 && (
                             <ul className="connlist">
                               {list.map((c) => (
@@ -261,6 +269,7 @@ export default function ClientHome({ me }) {
         </aside>
       </div>
       {tour && <Tutorial me={me} org={org} onClose={() => setTour(false)} />}
+      {listOpen && <ListUploadModal org={org} me={me} onClose={() => setListOpen(false)} onDone={(f) => { setListOpen(false); setMsg(f); invLists.reload(); load(); }} />}
       {connectOpen && <ConnectModal org={org} taskKey={connectOpen} onClose={() => setConnectOpen(null)} onDone={(f) => { setConnectOpen(null); if (f) setMsg(f); load(); }} />}
     </>
   );

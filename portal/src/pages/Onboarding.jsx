@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib';
 import { CATEGORY, providerName } from '../providers';
 import { printPackingSlip } from '../ops';
+import { ListUploadModal, ListReviewModal, ListLine, useInventoryLists } from '../InventoryList';
 
 export const DOC_KIND = { intake_form: 'intake_form', w9: 'w9', formation_cert: 'formation_cert', rate_card: 'rate_card', agreement: 'agreement', sla: 'sla', packaging_spec: 'packaging_spec', returns_rules: 'returns_rules', packing_sops: 'packing_sops', sku_catalog: 'sku_catalog' };
 // what a document task accepts: default PDF only; 'pdf,doc,image' for specs / SOPs
@@ -120,6 +121,8 @@ function AccountDetail({ account, me, onChange }) {
   const [busyId, setBusyId] = useState(null);
   const [skuCount, setSkuCount] = useState(0);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [listOpen, setListOpen] = useState(null);   // 'review' | 'upload'
+  const invLists = useInventoryLists(account.org_id);
 
   const load = async () => {
     const [{ data: o }, { data: t }, { data: d }, { data: c }, { count: n }] = await Promise.all([
@@ -285,7 +288,9 @@ function AccountDetail({ account, me, onChange }) {
                     {t.kind === 'document' && !sign && t.key !== 'packing_slip' && <UploadButton accept={acceptFor(t).ext} onFile={(f) => upload(t, f)} label={multi ? 'Upload PDF' : latest ? `Replace ${acceptFor(t).label}` : `Upload ${acceptFor(t).label}`} />}
                     {t.key === 'packing_slip' && <><button className={`btn-xs ${t.done && org.packing_slip === 'shipbay' ? '' : 'primary'}`} onClick={() => useOurSlip(t)}>{t.done && org.packing_slip === 'shipbay' ? 'Using ShipBay’s slip' : 'Use ShipBay’s slip'}</button><button className="viewdoc" onClick={sampleSlip}>View sample</button><UploadButton accept={acceptFor(t).ext} onFile={async (f) => { await supabase.from('orgs').update({ packing_slip: 'custom' }).eq('id', org.id); upload(t, f); }} label={latest ? 'Replace their template' : 'Upload their template'} /></>}
                     {t.kind === 'document' && sign && tpl && !latest && <UploadButton accept=".pdf" onFile={(f) => upload(t, f)} label="Upload signed copy" />}
-                    {t.kind === 'catalog' && <button className={`btn-xs ${skuCount ? '' : 'primary'}`} onClick={() => setCatalogOpen(true)}>{skuCount ? 'Upload CSV again' : 'Upload CSV'}</button>}
+                    {t.kind === 'catalog' && invLists.pending && <button className="btn-xs primary" onClick={() => setListOpen('review')}>Review inventory list</button>}
+                    {t.kind === 'catalog' && <button className={`btn-xs ${skuCount || invLists.pending ? '' : 'primary'}`} onClick={() => setListOpen('upload')}>Upload inventory list</button>}
+                    {t.kind === 'catalog' && <button className="btn-xs" onClick={() => setCatalogOpen(true)}>{skuCount ? 'Upload CSV again' : 'Upload CSV'}</button>}
                     {t.kind === 'schedule' && <input type="date" className="inlinedate sm" value={t.scheduled_for || ''} min={new Date().toISOString().slice(0, 10)} onChange={(e) => schedule(t, e.target.value)} />}
                     {t.kind === 'billing' && <button className="btn-xs" onClick={() => setBillingOpen(true)}>{org.billing_method ? 'Change billing method' : 'Add billing method'}</button>}
                     {t.kind === 'portal' && <button className={`btn-xs ${org.portal_user_id ? '' : 'primary'}`} onClick={() => setPortalOpen(true)}>{org.portal_user_id ? 'Reset & resend' : 'Create'}</button>}
@@ -300,6 +305,7 @@ function AccountDetail({ account, me, onChange }) {
                     </ul>
                   ) : <div className="note">Anything else the client sends over — insurance certificate, resale certificate, brand guidelines, prior 3PL reports.</div>)}
                   {t.kind === 'billing' && org.billing_method && <div className="note">{BILLING.find((b) => b[0] === org.billing_method)?.[1]}{org.billing_details?.summary ? ` · ${org.billing_details.summary}` : ''}</div>}
+                  {t.kind === 'catalog' && invLists.pending && <div className="note"><span className="warn">Inventory list waiting for your review</span> · sent {fmt(invLists.pending.submitted_at)}{invLists.pending.submitted_by_name ? ` by ${invLists.pending.submitted_by_name}` : ''} · <ListLine list={invLists.pending} /></div>}
                   {t.kind === 'catalog' && <div className="note">{skuCount
                     ? <><b>{skuCount.toLocaleString()} active SKUs</b>{catalogDoc ? <> · last file {fmt(catalogDoc.created_at)}</> : null} · re-uploading updates matching SKUs and adds new ones</>
                     : <>CSV with one row per SKU — Shopify / WooCommerce product exports work as-is. Columns are matched on the next screen.</>}</div>}
@@ -342,6 +348,8 @@ function AccountDetail({ account, me, onChange }) {
       {billingOpen && <BillingModal org={org} onClose={() => setBillingOpen(false)} onSaved={() => { setBillingOpen(false); load(); onChange(); }} />}
       {portalOpen && <PortalModal org={org} onClose={() => { setPortalOpen(false); load(); onChange(); }} />}
       {catalogOpen && <CatalogModal org={org} me={me} onClose={() => setCatalogOpen(false)} onDone={(f) => { setCatalogOpen(false); setFlash(f); load(); onChange(); }} />}
+      {listOpen === 'upload' && <ListUploadModal org={org} me={me} onClose={() => setListOpen(null)} onDone={(f) => { setListOpen(null); setFlash(f); invLists.reload(); load(); onChange(); }} />}
+      {listOpen === 'review' && invLists.pending && <ListReviewModal list={invLists.pending} org={org} onClose={() => setListOpen(null)} onDone={(f) => { setListOpen(null); setFlash(f); invLists.reload(); load(); onChange(); }} />}
       {connectOpen && <ConnectModal org={org} taskKey={connectOpen} onClose={() => setConnectOpen(null)} onDone={(f) => { setConnectOpen(null); if (f) setFlash(f); load(); onChange(); }} />}
     </div>
   );

@@ -40,8 +40,10 @@ export default function SkuTable({ orgId, title = 'Products', staff = false, onC
   };
   useEffect(() => { load(); setEditing(null); }, [orgId]);
 
-  const list = useMemo(() => (rows || []).filter((r) => (showInactive || r.active) && (!q || [r.sku, r.name, r.variant, r.barcode].join(' ').toLowerCase().includes(q.toLowerCase()))), [rows, q, showInactive]);
+  const list = useMemo(() => (rows || []).filter((r) => (showInactive || r.active) && (!q || [r.sku, r.name, r.variant, r.barcode, r.supplier, ...(r.asins || [])].join(' ').toLowerCase().includes(q.toLowerCase()))), [rows, q, showInactive]);
   const active = (rows || []).filter((r) => r.active).length;
+  // products that came from an inventory list carry ASINs, a supplier and expected units; show those columns only then
+  const listed = (rows || []).some((r) => r.expected_qty != null || r.asins?.length || r.supplier);
 
   const startEdit = (r) => { setEditing(r.id); setDraft(Object.fromEntries(COLS.map(([k]) => [k, r[k] ?? '']))); setMsg(null); };
   const startNew = () => { setEditing('new'); setDraft(EMPTY); setMsg(null); };
@@ -70,6 +72,7 @@ export default function SkuTable({ orgId, title = 'Products', staff = false, onC
   const editRow = (
     <tr className="editing">
       {COLS.map(([k, , type]) => <td key={k}>{cell(k, type)}</td>)}
+      {listed && <td colSpan={3} />}
       <td className="r"><button className="btn-xs primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button> <button className="btn-xs" onClick={cancel}>Cancel</button></td>
     </tr>
   );
@@ -86,16 +89,17 @@ export default function SkuTable({ orgId, title = 'Products', staff = false, onC
       {msg && <div className={`msg ${msg.kind}`} style={{ margin: '12px 18px 0' }}>{msg.text}</div>}
       <div className="tablewrap">
         <table className="skus">
-          <thead><tr>{COLS.map(([k, l, , w]) => <th key={k} style={{ minWidth: w }}>{l}</th>)}<th style={{ minWidth: 110 }} /></tr></thead>
+          <thead><tr>{COLS.map(([k, l, , w]) => <th key={k} style={{ minWidth: w }}>{l}</th>)}{listed && <><th style={{ minWidth: 110 }}>ASIN</th><th style={{ minWidth: 100 }}>Supplier</th><th style={{ minWidth: 90 }}>Expected</th></>}<th style={{ minWidth: 110 }} /></tr></thead>
           <tbody>
             {editing === 'new' && editRow}
-            {rows === null ? <tr><td colSpan={COLS.length + 1} className="empty">Loading…</td></tr>
-              : list.length === 0 && editing !== 'new' ? <tr><td colSpan={COLS.length + 1} className="empty">{q ? 'No SKUs match.' : staff ? 'No SKUs yet — upload the client’s CSV from Onboarding → Inventory, or add one here.' : 'No products yet. Add them here or upload your product list from the Overview.'}</td></tr>
+            {rows === null ? <tr><td colSpan={COLS.length + 4} className="empty">Loading…</td></tr>
+              : list.length === 0 && editing !== 'new' ? <tr><td colSpan={COLS.length + 4} className="empty">{q ? 'No SKUs match.' : staff ? 'No SKUs yet — upload the client’s CSV from Onboarding → Inventory, or add one here.' : 'No products yet. Add them here or upload your inventory list from the Overview.'}</td></tr>
               : list.map((r) => editing === r.id ? <EditRowWrapper key={r.id}>{editRow}</EditRowWrapper> : (
                 <tr key={r.id} className={r.active ? '' : 'inactive'}>
                   <td><b>{r.sku}</b></td><td>{r.name}</td><td>{r.variant || ''}</td><td>{r.barcode || ''}</td>
                   <td>{r.weight_oz ?? ''}</td><td>{r.dims_in || ''}</td><td>{r.declared_value != null ? `$${Number(r.declared_value).toFixed(2)}` : ''}</td>
                   <td>{PACKAGING.find((p) => p[0] === (r.packaging || ''))?.[1] || ''}</td><td>{r.low_stock_threshold ?? ''}</td>
+                  {listed && <><td className="sm">{(r.asins || []).join(' / ')}</td><td>{r.supplier || ''}</td><td title={r.expected_qty != null ? `FBA ${r.expected_fba || 0} · FBM ${r.expected_fbm || 0}` : ''}>{r.expected_qty != null ? Number(r.expected_qty).toLocaleString() : ''}</td></>}
                   <td className="r">
                     {r.active ? <><button className="edit" onClick={() => startEdit(r)}>edit</button> · <button className="edit" onClick={() => setActive(r, false)}>remove</button></> : <button className="edit" onClick={() => setActive(r, true)}>restore</button>}
                   </td>

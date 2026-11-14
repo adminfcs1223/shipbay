@@ -5,7 +5,7 @@ export const STORAGE_KEY = 'shipbay-wms-auth';
 export const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_KEY, {
   auth: { storageKey: STORAGE_KEY },
 });
-export const WMS_ROLES = ['shipbay_admin', 'shipbay_staff'];
+export const WMS_ROLES = ['shipbay_admin', 'shipbay_staff', 'wms_employee'];
 export const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 export const fmtTime = (d) => new Date(d).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 export const fmtDay = (d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });

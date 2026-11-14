@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase, fn } from '../lib';
 import { useBrands } from '../shared';
+import Employees from './Employees';
 
 const ROLES = [['shipbay_admin', 'ShipBay admin', 'Everything, including this page'], ['shipbay_staff', 'ShipBay staff', 'Warehouse screens and client accounts'], ['shipbay_sales', 'Sales', 'Appt. Setting and CRM only: their leads, calls booked for them, quotes, their setters'], ['shipbay_setter', 'Appointment setter', 'Appt. Setting only: the call queue, the script, booking calls for a closer'], ['client_admin', 'Client admin', 'A brand’s portal: orders, documents, settings'], ['client_user', 'Client user', 'A brand’s portal, read-only']];
 const roleLabel = (r) => ROLES.find((x) => x[0] === r)?.[1] || r;
@@ -19,7 +20,7 @@ export default function AdminSettings({ me }) {
   const load = async () => { const { data } = await supabase.from('profiles').select('*').order('role').order('full_name'); setUsers(data || []); };
   useEffect(() => { load(); }, []);
   const orgName = (id) => (orgs || []).find((o) => o.id === id)?.name || '';
-  const list = useMemo(() => (users || []).filter((u) => !q || [u.full_name, u.email, roleLabel(u.role), orgName(u.org_id)].filter(Boolean).some((s) => s.toLowerCase().includes(q.toLowerCase()))), [users, q, orgs]);
+  const list = useMemo(() => (users || []).filter((u) => u.role !== 'wms_employee').filter((u) => !q || [u.full_name, u.email, roleLabel(u.role), orgName(u.org_id)].filter(Boolean).some((s) => s.toLowerCase().includes(q.toLowerCase()))), [users, q, orgs]);
 
   const reset = async (u) => {
     if (!window.confirm(`Reset ${u.email}’s password? Their current one stops working immediately.`)) return;
@@ -45,6 +46,7 @@ export default function AdminSettings({ me }) {
         <div><h1>Admin settings<span className="dot">.</span></h1><p className="sub">Every login to shipbay.dashboard — staff and clients. Add a user, reset a password, switch someone off.</p></div>
         <div className="glance">
           <div><small>Staff</small><b>{(users || []).filter((u) => u.role.startsWith('shipbay') && u.active !== false).length}</b></div>
+          <div><small>WMS employees</small><b>{(users || []).filter((u) => u.employee_no != null && u.active !== false).length}</b></div>
           <div><small>Client users</small><b>{(users || []).filter((u) => u.role.startsWith('client') && u.active !== false).length}</b></div>
           <div><small>Inactive</small><b>{(users || []).filter((u) => u.active === false).length}</b></div>
         </div>
@@ -77,6 +79,8 @@ export default function AdminSettings({ me }) {
           </table></div>
         )}
       </div>
+
+      <Employees me={me} users={users} reload={load} say={setMsg} />
 
       {adding && <UserModal orgs={orgs || []} onClose={() => setAdding(false)} onDone={(r) => { setAdding(false); setCred(r); load(); }} onErr={(t) => setMsg({ kind: 'err', text: t })} />}
       {editing && <UserModal user={editing} orgs={orgs || []} onClose={() => setEditing(null)} onDone={() => { setEditing(null); load(); setMsg({ kind: 'ok', text: 'Saved.' }); }} onErr={(t) => setMsg({ kind: 'err', text: t })} />}
