@@ -586,3 +586,63 @@ label input.bignum { height: 59px; font-size: 26px; font-weight: 800; font-varia
 .dlgbtns .btn.big { flex: 2; margin: 0; }
 @media (max-width: 820px) { .pprob { right: 58px; } .dialog.probdlg { padding: 20px 18px; } }
 .dlgbtns .btn { height: auto; min-height: 56px; }
+
+/* ---------- 11-14 evening: a more formal, warehouse-floor look ----------
+   A status strip across the top of every screen, ink table heads, squarer corners, ruled panels. */
+:root { --r: 3px; --r-sm: 2px; }
+.topbar { display: flex; align-items: center; gap: 22px; margin: -30px -36px 0; padding: 0 36px; height: 44px; background: var(--ink); color: #C9D1DC; font-size: 13px; font-variant-numeric: tabular-nums; border-bottom: 3px solid var(--orange); }
+.topbar b { color: #fff; font-weight: 700; }
+.topbar .site { display: flex; gap: 12px; align-items: baseline; margin-right: auto; min-width: 0; white-space: nowrap; }
+.topbar .site b { letter-spacing: .01em; }
+.topbar .site i { font-style: normal; color: #8FA0B5; overflow: hidden; text-overflow: ellipsis; }
+.topbar .tbclock, .topbar .tbwho { white-space: nowrap; }
+.topbar .tblink { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; color: #fff; white-space: nowrap; }
+.topbar .tblink i { width: 9px; height: 9px; border-radius: 50%; background: #2FBF85; }
+.topbar .tblink.down i { background: var(--orange); }
+.rail { border-right: 1px solid var(--ink-line); }
+.pagehead { border-bottom-width: 3px; }
+.pagehead .when { font-size: 15px; font-weight: 600; color: var(--muted); margin-top: 6px; }
+.panel { border-color: var(--ink); border-width: 1.5px; }
+.panelhead { background: var(--ink); color: #fff; border-bottom: 0; padding: 10px 16px; }
+.panelhead h3 { color: #fff; font-size: 15px; letter-spacing: .01em; }
+.panelhead span { color: #B9C2CF; }
+.grid th { background: var(--ink); color: #fff; border-bottom: 0; font-weight: 700; }
+.phead { background: var(--ink); color: #fff; padding: 8px 10px; margin-bottom: -18px; border-radius: var(--r) var(--r) 0 0; font-weight: 700; }
+.prows { border-color: var(--ink); border-radius: 0 0 var(--r) var(--r); }
+.prows.done, .prows.probs { border-radius: var(--r); border-color: var(--line-2); }
+.brandlist button { border-color: var(--ink); border-left: 6px solid var(--ink); }
+.brandlist .demo button { border-left-style: dashed; }
+
+/* shipment calendar */
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-bottom: 1.5px solid var(--ink); }
+.calhead { padding: 7px 10px; font-size: 12.5px; font-weight: 700; color: var(--muted); background: var(--paper-2); border-bottom: 1px solid var(--line-2); }
+.calday { min-height: 84px; background: #fff; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 7px 9px; text-align: left; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.calday:nth-child(7n) { border-right: 0; }
+.calday.past { background: var(--bg); color: var(--muted-2); }
+.calday .dnum { font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.calday.today .dnum { background: var(--ink); color: #fff; align-self: flex-start; padding: 1px 7px; border-radius: var(--r-sm); font-weight: 800; }
+.calday b { font-size: 22px; font-weight: 800; letter-spacing: -.02em; line-height: 1.05; font-variant-numeric: tabular-nums; color: var(--ink); }
+.calday b i { font-style: normal; font-size: 12px; font-weight: 600; letter-spacing: 0; color: var(--muted); }
+.calday em { font-style: normal; font-size: 12px; font-weight: 600; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.calday.has { background: var(--orange-tint); }
+.calday.sel { box-shadow: inset 0 0 0 2.5px var(--ink); }
+.calday-detail h4 { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; padding: 12px 18px; font-size: 16px; font-weight: 800; border-bottom: 1px solid var(--line); }
+.calday-detail h4 span { font-size: 13.5px; font-weight: 600; color: var(--muted); }
+.calday-detail .rows li:last-child { border-bottom: 0; }
+
+/* scan to pick */
+.pcheck.scan { display: grid; place-items: center; background: var(--ink); color: #fff; border-color: var(--ink); }
+.pcheck.scan svg { width: 26px; height: 26px; }
+.camview { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #000; border-radius: var(--r); }
+.probdlg .swap { align-self: center; }
+
+@media (max-width: 820px) {
+  .topbar { margin: calc(-16px - env(safe-area-inset-top)) -14px 0; padding: env(safe-area-inset-top) 14px 0; height: calc(38px + env(safe-area-inset-top)); gap: 12px; font-size: 12px; }
+  .topbar .site i, .topbar .tbclock { display: none; }
+  .topbar .site { overflow: hidden; } .topbar .site b { overflow: hidden; text-overflow: ellipsis; }
+  .calday { min-height: 58px; padding: 5px 4px; align-items: center; text-align: center; }
+  .calday em, .calday b i { display: none; }
+  .calday b { font-size: 18px; }
+  .calhead { padding: 6px 2px; text-align: center; font-size: 11.5px; }
+  .phead { margin-bottom: -14px; padding: 7px 8px; }
+}

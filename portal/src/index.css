@@ -1679,3 +1679,22 @@ tr.voided td:last-child { text-decoration: none; }
 .viewasbar { position: sticky; top: 0; z-index: 60; display: flex; align-items: center; justify-content: center; gap: 16px; padding: 9px 16px; background: var(--ink); color: #fff; font-size: 13.5px; }
 .viewasbar button { background: #fff; color: var(--ink); border: 0; border-radius: 8px; padding: 6px 12px; font: 600 13px var(--font-body); cursor: pointer; }
 .viewas { margin-top: 10px; width: 100%; padding: 7px 8px; border: 1.5px solid var(--line-2); border-radius: 8px; background: var(--surface); font: 500 13px var(--font-body); color: var(--ink); }
+
+/* WMS tab: brand tabs and the shipment calendar */
+.hubtabs { display: flex; gap: 4px; flex-wrap: wrap; border: 0; }
+.cardhead { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.cardhead h3 { margin: 0; }
+.shipcal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.shipcal .sch { padding: 8px 12px; font: 600 12px var(--font-body); color: var(--muted); background: var(--paper-2); border-bottom: 1px solid var(--line); }
+.shipcal .scd { min-height: 86px; background: var(--surface); border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; display: flex; flex-direction: column; gap: 2px; min-width: 0; cursor: pointer; font: inherit; color: inherit; }
+.shipcal .scd:nth-child(7n) { border-right: 0; }
+.shipcal .scd.past { background: var(--paper-2); color: var(--muted-2); }
+.shipcal .scd span { font-size: 12.5px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.shipcal .scd.today span { background: var(--ink); color: #fff; align-self: flex-start; padding: 1px 7px; border-radius: 6px; }
+.shipcal .scd b { font-size: 22px; font-weight: 800; letter-spacing: -.02em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.shipcal .scd b i { font-style: normal; font-size: 12px; font-weight: 600; letter-spacing: 0; color: var(--muted); }
+.shipcal .scd em { font-style: normal; font-size: 12px; font-weight: 600; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shipcal .scd.has { background: var(--orange-tint); }
+.shipcal .scd.wait { background: repeating-linear-gradient(135deg, var(--orange-tint) 0 8px, var(--surface) 8px 16px); }
+.shipcal .scd.sel { box-shadow: inset 0 0 0 2px var(--ink); }
+.scdetail { padding: 12px 20px; }

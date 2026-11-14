@@ -12,7 +12,7 @@ const PALLET = { open: ['Being counted in', 'warn'], counted: ['Counted, going t
 const PROBLEM = { missing: 'Not at the location', short: 'Short', other: 'Other' };
 const TABS = [['orders', 'Orders'], ['stock', 'Stock'], ['pallets', 'Pallets'], ['problems', 'Problems'], ['deliveries', 'Deliveries'], ['connection', 'Connection']];
 
-export default function ClientWarehouse({ me }) {
+export default function ClientWarehouse({ me, title, onChanged }) {
   const org = me?.org_id;
   const [tab, setTab] = useState('orders'); const [d, setD] = useState(null); const [err, setErr] = useState(null); const [msg, setMsg] = useState(null);
   const load = async () => {
@@ -22,7 +22,7 @@ export default function ClientWarehouse({ me }) {
       supabase.from('inventory_levels').select('sku_id, sku, name, on_hand, reserved, active').eq('org_id', org).order('name'),
       supabase.from('wms_pallets').select('id, psku, status, item_no, item_name, cartons, units_per_carton, units_total, mixed, fba, cle, received_at, stored_at').eq('org_id', org).neq('status', 'void').order('received_at', { ascending: false }).limit(300),
       supabase.from('wms_pick_problems').select('id, line_id, order_id, kind, found, note, reported_at, resolved_at, resolved_how, order_lines(sku, name, qty)').eq('org_id', org).order('reported_at', { ascending: false }).limit(100),
-      supabase.from('inbound_shipments').select('id, reference, status, carrier, tracking, expected_at, received_at, pallets, cartons, notes, created_at').eq('org_id', org).order('created_at', { ascending: false }).limit(100),
+      supabase.from('inbound_shipments').select('id, reference, status, carrier, tracking, expected_at, received_at, pallets, cartons, notes, created_at, approved_at').eq('org_id', org).order('created_at', { ascending: false }).limit(100),
       supabase.rpc('wms_org_connector', { p_org: org }),
     ]);
     const e = o.error || s.error || p.error || pr.error || i.error || c.error;
@@ -44,7 +44,7 @@ export default function ClientWarehouse({ me }) {
   return (
     <>
       <div className="pagehead">
-        <div><h1>Warehouse<span className="dot">.</span></h1></div>
+        <div><h1>{title || 'Warehouse'}<span className="dot">.</span></h1></div>
         <div className="glance">
           <div><small>Open orders</small><b>{num(open.length)}</b></div>
           <div><small>Ready to pack</small><b>{num(open.filter((o) => o.status === 'picked').length)}</b></div>
@@ -104,7 +104,7 @@ export default function ClientWarehouse({ me }) {
                   </tr>))}</tbody>
               </table></div>))}
 
-            {tab === 'deliveries' && <Deliveries me={me} rows={d.inbound} reload={load} say={setMsg} />}
+            {tab === 'deliveries' && <Deliveries me={me} rows={d.inbound} reload={() => { load(); onChanged?.(); }} say={setMsg} />}
             {tab === 'connection' && <Connection me={me} conn={d.conn} reload={load} say={setMsg} />}
           </>
         )}
@@ -123,11 +123,19 @@ function Deliveries({ me, rows, reload, say }) {
     if (!Number(f.pallets) && !Number(f.cartons)) return say({ kind: 'err', text: 'Enter how many pallets or cartons are coming.' });
     setBusy(true);
     const { error } = await supabase.from('inbound_shipments').insert({ org_id: me.org_id, status: 'expected', expected_at: f.expected_at, pallets: Number(f.pallets) || null, cartons: Number(f.cartons) || null,
-      carrier: f.carrier.trim() || null, tracking: f.tracking.trim() || null, reference: f.reference.trim() || null, notes: f.notes.trim() || null, created_by: me.id });
+      carrier: f.carrier.trim() || null, tracking: f.tracking.trim() || null, reference: f.reference.trim() || `Delivery ${f.expected_at}`, notes: f.notes.trim() || null, created_by: me.id });
     setBusy(false); if (error) return say({ kind: 'err', text: error.message });
-    setF(blank); say({ kind: 'ok', text: 'Booked. The warehouse sees it on its schedule.' }); reload();
+    setF(blank); say({ kind: 'ok', text: me.isStaff ? 'Booked and approved. It is on the warehouse schedule.' : 'Sent. ShipBay confirms it, then it goes on the warehouse schedule.' }); reload();
   };
-  const ST = { expected: ['Booked', 'navy'], in_transit: ['On its way', 'warn'], received: ['Received', 'ok'], discrepancy: ['Received with a difference', 'bad'], cancelled: ['Cancelled', 'muted'] };
+  const approve = async (r) => {
+    const { error } = await supabase.from('inbound_shipments').update({ approved_at: new Date().toISOString(), approved_by: me.id, approved_by_name: me.full_name || me.email }).eq('id', r.id);
+    if (error) return say({ kind: 'err', text: error.message }); say({ kind: 'ok', text: 'Approved. It is on the warehouse schedule.' }); reload();
+  };
+  const decline = async (r) => {
+    if (!window.confirm('Decline this shipment? It is marked cancelled and the brand sees that.')) return;
+    const { error } = await supabase.from('inbound_shipments').update({ status: 'cancelled' }).eq('id', r.id); if (error) return say({ kind: 'err', text: error.message }); reload();
+  };
+  const ST = { expected: ['Confirmed', 'navy'], in_transit: ['On its way', 'warn'], received: ['Received', 'ok'], discrepancy: ['Received with a difference', 'bad'], cancelled: ['Cancelled', 'muted'] };
   return (
     <>
       <form onSubmit={book} style={{ padding: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 14, alignItems: 'end', borderBottom: '1px solid var(--line)' }}>
@@ -142,11 +150,12 @@ function Deliveries({ me, rows, reload, say }) {
       </form>
       {rows.length === 0 ? <div className="empty">No deliveries booked.</div> : (
         <div className="tablewrap"><table className="ordertable">
-          <thead><tr><th>Arrives</th><th>Reference</th><th>Carrier</th><th className="n">Pallets</th><th className="n">Cartons</th><th>Status</th></tr></thead>
-          <tbody>{rows.map((r) => { const st = ST[r.status] || [r.status, 'muted']; return (
+          <thead><tr><th>Arrives</th><th>Reference</th><th>Carrier</th><th className="n">Pallets</th><th className="n">Cartons</th><th>Status</th>{me.isStaff && <th />}</tr></thead>
+          <tbody>{rows.map((r) => { const waiting = !r.approved_at && ['expected', 'in_transit'].includes(r.status); const st = waiting ? ['Waiting for ShipBay to confirm', 'warn'] : ST[r.status] || [r.status, 'muted']; return (
             <tr key={r.id} className={['received', 'cancelled'].includes(r.status) ? 'muted' : ''}>
               <td><b>{day(r.expected_at)}</b></td><td>{r.reference || '—'}{r.notes ? <span className="sm"> · {r.notes}</span> : null}</td><td>{[r.carrier, r.tracking].filter(Boolean).join(' · ') || '—'}</td>
               <td className="n">{r.pallets ?? '—'}</td><td className="n">{r.cartons ?? '—'}</td><td><span className={`statuspill ${st[1]}`}>{st[0]}</span></td>
+              {me.isStaff && <td className="n" style={{ whiteSpace: 'nowrap' }}>{waiting && <><button className="btn-xs" onClick={() => approve(r)}>Approve</button>{' '}<button className="btn-xs" onClick={() => decline(r)}>Decline</button></>}</td>}
             </tr>); })}</tbody>
         </table></div>)}
     </>

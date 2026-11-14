@@ -1,45 +1,49 @@
-// Today: what is scheduled in and what has to go out, on one screen. Inbound comes from the shipments the brands (or
-// the office) booked in the dashboard; orders come from each brand's connector. Read fresh every minute.
-import { useEffect, useState } from 'react';
+// The WMS home screen: a greeting, the shipment calendar (what is expected in, on which day, how much), and what has
+// to go out. Shipments are the deliveries brands book in their portal; they appear here once ShipBay has approved them.
+// Orders come from each brand's connector. Read fresh every minute.
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from './lib';
 
 const num = (n) => Number(n || 0).toLocaleString('en-US');
-const dayName = (iso, today) => {
-  if (!iso) return 'No date';
-  if (iso === today) return 'Today';
-  const d = new Date(`${iso}T12:00:00`); const t = new Date(`${today}T12:00:00`); const diff = Math.round((d - t) / 86400000);
-  if (diff === 1) return 'Tomorrow';
-  if (diff < 0) return `${-diff} day${diff === -1 ? '' : 's'} late`;
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-};
-const plural = (n, w) => `${num(n)} ${w}${Number(n) === 1 ? '' : 's'}`;
+const plural = (n, w, ws) => `${num(n)} ${Number(n) === 1 ? w : ws || `${w}s`}`;
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const at = (s) => new Date(`${s}T12:00:00`);
+const longDay = (s) => at(s).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+const amount = (rows) => { const p = rows.reduce((t, r) => t + Number(r.pallets || 0), 0); const c = rows.reduce((t, r) => t + Number(r.cartons || 0), 0); return [p ? plural(p, 'pallet') : null, c ? plural(c, 'carton') : null].filter(Boolean).join(' · ') || plural(rows.length, 'shipment'); };
 
-export default function Today({ go, openBrand }) {
-  const [d, setD] = useState(null); const [err, setErr] = useState(null);
+export default function Today({ me, go, openBrand }) {
+  const [d, setD] = useState(null); const [err, setErr] = useState(null); const [sel, setSel] = useState(null);
   const load = async () => { const { data, error } = await supabase.rpc('wms_today'); if (error) setErr(error.message); else { setErr(null); setD(data); } };
   useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t); }, []);
+  const first = (me?.full_name || '').trim().split(/\s+/)[0] || 'there';
 
-  if (!d) return (<><header className="pagehead"><h1>Today<span className="dot">.</span></h1></header>{err ? <div className="strip bad"><b>Can’t load today.</b><span>{err}</span><button onClick={load}>Try again</button></div> : <div className="empty">Loading…</div>}</>);
+  const today = d?.today;
+  // five weeks, starting on the Sunday of this week
+  const days = useMemo(() => {
+    if (!today) return [];
+    const start = at(today); start.setDate(start.getDate() - start.getDay());
+    return Array.from({ length: 35 }, (_, i) => { const x = new Date(start); x.setDate(start.getDate() + i); return iso(x); });
+  }, [today]);
+  // a shipment that is overdue shows on today
+  const byDay = useMemo(() => { const m = new Map(); for (const i of d?.inbound || []) { const k = i.expected_at && i.expected_at < today ? today : i.expected_at; if (!k) continue; if (!m.has(k)) m.set(k, []); m.get(k).push(i); } return m; }, [d, today]);
 
-  const today = d.today;
+  if (!d) return (<><header className="pagehead"><h1>Hello, {first}<span className="dot">.</span></h1></header>{err ? <div className="strip bad"><b>Can’t load the schedule.</b><span>{err}</span><button onClick={load}>Try again</button></div> : <div className="empty">Loading…</div>}</>);
+
   const due = (o) => !o.ship_by || o.ship_by <= today;
-  const inToday = d.inbound.filter((i) => i.expected_at && i.expected_at <= today);
-  const inLater = d.inbound.filter((i) => !i.expected_at || i.expected_at > today);
-  const outToday = d.orders.filter(due); const outLater = d.orders.filter((o) => !due(o));
+  const outToday = d.orders.filter(due);
   const sum = (rows, k) => rows.reduce((s, r) => s + Number(r[k] || 0), 0);
-  const palletsIn = sum(inToday, 'pallets');
+  const inToday = byDay.get(today) || [];
   const ordersOut = sum(outToday, 'orders'); const unitsLeft = sum(outToday, 'units') - sum(outToday, 'picked_units'); const ready = sum(d.orders, 'ready');
-  // one row per brand for today's outbound
   const brands = [...outToday.reduce((m, o) => { const r = m.get(o.org_id) || { org_id: o.org_id, brand: o.brand, orders: 0, units: 0, picked_units: 0, ready: 0, late: 0 }; r.orders += o.orders; r.units += o.units; r.picked_units += o.picked_units; r.ready += o.ready; if (o.ship_by && o.ship_by < today) r.late += o.orders - o.ready; m.set(o.org_id, r); return m; }, new Map()).values()];
-  // the week: one row per day that has anything on it
-  const days = [...new Set([...inLater.map((i) => i.expected_at), ...outLater.map((o) => o.ship_by)].filter(Boolean))].sort();
+  const undated = d.inbound.filter((i) => !i.expected_at);
+  const shown = sel || today; const list = byDay.get(shown) || [];
 
   return (
     <>
       <header className="pagehead">
-        <h1>Today<span className="dot">.</span></h1>
+        <div><h1>Hello, {first}<span className="dot">.</span></h1><p className="when">{longDay(today)}</p></div>
         <div className="glance">
-          <div><b>{num(inToday.length)}</b><small>{inToday.length === 1 ? 'Delivery due' : 'Deliveries due'}{palletsIn ? ` · ${plural(palletsIn, 'pallet')}` : ''}</small></div>
+          <div><b>{num(inToday.length)}</b><small>{inToday.length === 1 ? 'Shipment today' : 'Shipments today'}</small></div>
           <div><b>{num(ordersOut)}</b><small>Orders to ship</small></div>
           <div><b className={unitsLeft ? 'hot' : ''}>{num(unitsLeft)}</b><small>Units to pick</small></div>
           <div><b>{num(ready)}</b><small>Ready to pack</small></div>
@@ -47,24 +51,34 @@ export default function Today({ go, openBrand }) {
       </header>
       {err && <div className="strip bad"><b>Not refreshed.</b><span>{err}</span><button onClick={load}>Try again</button></div>}
 
+      <section className="panel">
+        <header className="panelhead"><h3>Shipments expected</h3><span>{d.inbound.length ? `${plural(d.inbound.length, 'shipment')} in the next 5 weeks` : 'Nothing booked in the next 5 weeks'}</span></header>
+        <div className="cal" role="grid" aria-label="Shipments expected by day">
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((w) => <div key={w} className="calhead">{w}</div>)}
+          {days.map((day) => {
+            const rows = byDay.get(day) || []; const dt = at(day); const pallets = rows.reduce((t, r) => t + Number(r.pallets || 0), 0);
+            return (
+              <button key={day} role="gridcell" className={`calday ${day === today ? 'today' : ''} ${day < today ? 'past' : ''} ${rows.length ? 'has' : ''} ${day === shown ? 'sel' : ''}`} onClick={() => setSel(day)} aria-label={`${longDay(day)}: ${rows.length ? amount(rows) : 'nothing expected'}`}>
+                <span className="dnum">{dt.getDate() === 1 || day === days[0] ? dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : dt.getDate()}</span>
+                {rows.length > 0 && <b>{pallets || rows.length}<i>{pallets ? (pallets === 1 ? ' pallet' : ' pallets') : rows.length === 1 ? ' shipment' : ' shipments'}</i></b>}
+                {rows.length > 0 && <em>{[...new Set(rows.map((r) => r.brand))].join(', ')}</em>}
+              </button>);
+          })}
+        </div>
+        <div className="calday-detail">
+          <h4>{shown === today ? 'Today' : longDay(shown)}<span>{list.length ? amount(list) : 'Nothing expected'}</span></h4>
+          {list.length > 0 && <ul className="rows">{list.map((i) => (
+            <li key={i.id}>
+              <div><b>{i.brand}</b><span>{[i.reference, i.carrier, i.notes].filter(Boolean).join(' · ') || 'No details given'}</span></div>
+              <div className="r"><b>{i.pallets ? plural(i.pallets, 'pallet') : i.cartons ? plural(i.cartons, 'carton') : '—'}</b><span className={i.expected_at < today ? 'late' : ''}>{i.expected_at < today ? `Was due ${at(i.expected_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : i.status === 'in_transit' ? 'On its way' : 'Booked'}</span></div>
+            </li>))}</ul>}
+          {undated.length > 0 && <p className="hint">{undated.length === 1 ? '1 approved shipment has' : `${undated.length} approved shipments have`} no date yet.</p>}
+        </div>
+      </section>
+
       <div className="today">
         <section className="panel">
-          <header className="panelhead"><h3>Coming in</h3><span>{inToday.length ? `${num(inToday.length)} ${inToday.length === 1 ? 'delivery' : 'deliveries'} due` : 'Nothing booked for today'}</span></header>
-          {inToday.length > 0 && <ul className="rows">{inToday.map((i) => (
-            <li key={i.id}>
-              <div><b>{i.brand}</b><span>{[i.reference, i.carrier].filter(Boolean).join(' · ') || 'No reference'}</span></div>
-              <div className="r"><b>{i.pallets ? plural(i.pallets, 'pallet') : i.cartons ? plural(i.cartons, 'carton') : '—'}</b><span className={i.expected_at < today ? 'late' : ''}>{dayName(i.expected_at, today)}</span></div>
-            </li>))}</ul>}
-          <div className="floor">
-            <button onClick={() => go('receive')}><b>{num(d.pallets.received_today)}</b><small>Pallets received today</small></button>
-            <button onClick={() => go('pallets')}><b className={d.pallets.to_scan ? 'hot' : ''}>{num(d.pallets.to_scan)}</b><small>Cartons to scan in</small></button>
-            <button onClick={() => go('pallets')}><b className={d.pallets.to_put_away ? 'hot' : ''}>{num(d.pallets.to_put_away)}</b><small>To put away</small></button>
-          </div>
-          <button className="btn big go" onClick={() => go('receive')}>Receive a pallet</button>
-        </section>
-
-        <section className="panel">
-          <header className="panelhead"><h3>Going out</h3><span>{ordersOut ? `${plural(ordersOut, 'order')} · ${plural(sum(outToday, 'units'), 'unit')}` : 'No orders due today'}</span></header>
+          <header className="panelhead"><h3>Going out today</h3><span>{ordersOut ? `${plural(ordersOut, 'order')} · ${plural(sum(outToday, 'units'), 'unit')}` : 'No orders due today'}</span></header>
           {brands.length > 0 && <ul className="rows">{brands.map((b) => {
             const pct = b.units ? Math.round((b.picked_units / b.units) * 100) : 0;
             return (
@@ -75,31 +89,22 @@ export default function Today({ go, openBrand }) {
           })}</ul>}
           <div className="floor">
             <div><b>{num(d.picked_today)}</b><small>Units picked today</small></div>
-            <div><b>{num(ready)}</b><small>Orders ready to pack</small></div>
-            <div><b>{num(d.closed_today)}</b><small>Orders closed today</small></div>
+            <div><b>{num(ready)}</b><small>Ready to pack</small></div>
+            <div><b className={d.problems ? 'hot' : ''}>{num(d.problems)}</b><small>Problems open</small></div>
           </div>
           <button className="btn big" onClick={() => go('orders')}>Open the pick lists</button>
         </section>
-      </div>
 
-      <section className="panel">
-        <header className="panelhead"><h3>Next 7 days</h3><span>{days.length ? '' : 'Nothing on the schedule yet'}</span></header>
-        {days.length > 0 && (
-          <div className="weekwrap"><table className="grid week">
-            <thead><tr><th>Day</th><th>Coming in</th><th>Going out</th></tr></thead>
-            <tbody>{days.map((day) => {
-              const ins = inLater.filter((i) => i.expected_at === day); const outs = outLater.filter((o) => o.ship_by === day);
-              return (
-                <tr key={day}>
-                  <td className="code">{dayName(day, today)}</td>
-                  <td>{ins.length ? ins.map((i) => `${i.brand}${i.pallets ? ` · ${plural(i.pallets, 'pallet')}` : ''}`).join(', ') : <span className="muted">—</span>}</td>
-                  <td>{outs.length ? outs.map((o) => `${o.brand} · ${plural(o.orders, 'order')}`).join(', ') : <span className="muted">—</span>}</td>
-                </tr>);
-            })}</tbody>
-          </table></div>
-        )}
-        {inLater.some((i) => !i.expected_at) && <p className="hint">{(() => { const k = inLater.filter((i) => !i.expected_at).length; return `${k} booked ${k === 1 ? 'delivery has' : 'deliveries have'} no date yet.`; })()}</p>}
-      </section>
+        <section className="panel">
+          <header className="panelhead"><h3>On the floor</h3><span>Pallets</span></header>
+          <div className="floor">
+            <button onClick={() => go('receive')}><b>{num(d.pallets.received_today)}</b><small>Received today</small></button>
+            <button onClick={() => go('pallets')}><b className={d.pallets.to_scan ? 'hot' : ''}>{num(d.pallets.to_scan)}</b><small>Cartons to scan in</small></button>
+            <button onClick={() => go('pallets')}><b className={d.pallets.to_put_away ? 'hot' : ''}>{num(d.pallets.to_put_away)}</b><small>To put away</small></button>
+          </div>
+          <button className="btn big go" onClick={() => go('receive')}>Receive a pallet</button>
+        </section>
+      </div>
     </>
   );
 }

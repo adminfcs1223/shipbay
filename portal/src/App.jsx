@@ -15,6 +15,7 @@ import Quotes from './pages/Quotes';
 import ClientOrders from './pages/ClientOrders';
 import AdminSettings from './pages/AdminSettings';
 import ClientWarehouse from './pages/ClientWarehouse';
+import WmsHub from './pages/WmsHub';
 import Owner from './pages/owner/Owner';
 import SalesDesk from './pages/SalesDesk';
 import ApptSetting from './pages/ApptSetting';
@@ -227,9 +228,7 @@ const Ico = {
 // Grouped so the station screens sit together, client admin together, and setup at the bottom.
 const STAFF_NAV = [
   { group: 'Warehouse' },
-  { key: 'orders', label: 'Orders', icon: Ico.orders, page: Orders, brandFirst: true },
-  { key: 'receiving', label: 'Receiving', icon: Ico.receiving, page: Receiving, brandFirst: true },
-  { key: 'pack', label: 'Pack & Ship', icon: Ico.pack, page: PackShip, brandFirst: true },
+  { key: 'wms', label: 'WMS', icon: Ico.receiving, page: WmsHub },
   { group: 'Sales', salesOnly: true },
   { key: 'apptsetting', label: 'Appt. Setting', icon: Ico.appt, page: ApptSetting, salesOnly: true },
   { key: 'salesdesk', label: 'CRM', icon: Ico.sales, page: SalesDesk, salesOnly: true },
@@ -249,7 +248,8 @@ const SALES_NAV = [
   { key: 'apptsetting', label: 'Appt. Setting', icon: Ico.appt, page: ApptSetting },
   { key: 'salesdesk', label: 'CRM', icon: Ico.sales, page: SalesDesk },
 ];
-const HIDDEN_PAGES = { onboarding: Onboarding, quotes: Quotes, compliance: Compliance, settings: ClientSettings, markets: Marketplaces, admin: AdminSettings };
+// Orders, Receiving and Pack & Ship left the menu on 2026-11-14 (the WMS tab replaces them); links to them still open.
+const HIDDEN_PAGES = { orders: Orders, receiving: Receiving, pack: PackShip, onboarding: Onboarding, quotes: Quotes, compliance: Compliance, settings: ClientSettings, markets: Marketplaces, admin: AdminSettings };
 const CLIENT_NAV = [
   { group: 'Your account' },
   { key: 'home', label: 'Overview', icon: Ico.home, page: ClientHome },

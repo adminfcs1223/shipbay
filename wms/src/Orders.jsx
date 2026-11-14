@@ -3,7 +3,7 @@
 // The list is re-read every time it is shown, so a product that moved shows where it is now. The same product across
 // orders is one row with the total, rows run in walking order (location code), and anything that can't be picked
 // (no location, or not enough on hand) sits at the top so it gets reported instead of searched for.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from './lib';
 import { beep } from './parts';
 import { demoOrders } from './demo';
@@ -73,11 +73,13 @@ function Picklist({ me, brand, back }) {
   const [all, setAll] = useState(false);
   const [openRow, setOpenRow] = useState(null); const [zoom, setZoom] = useState(null); const [busy, setBusy] = useState(null);
   const [showPicked, setShowPicked] = useState(false); const [showProbs, setShowProbs] = useState(false);
-  const [report, setReport] = useState(null);   // the row a problem is being reported on
+  const [report, setReport] = useState(null);
+  const [scanSkus, setScanSkus] = useState(() => new Set());   // products that have a barcode on file: picking them takes a scan
+  const [scanRow, setScanRow] = useState(null);   // the row a problem is being reported on
 
   const load = async () => {
-    const { data: d, error } = await supabase.rpc('wms_picklist', { p_org: brand.id, p_day: day, p_all: all });
-    if (error) setErr(error.message); else { setErr(null); setData(d); }
+    const [{ data: d, error }, sc] = await Promise.all([supabase.rpc('wms_picklist', { p_org: brand.id, p_day: day, p_all: all }), supabase.rpc('wms_scan_needed', { p_org: brand.id })]);
+    if (error) setErr(error.message); else { setErr(null); setData(d); setScanSkus(new Set(sc.data || [])); }
   };
   useEffect(() => { load(); const t = setInterval(load, 45000); const vis = () => { if (!document.hidden) load(); }; document.addEventListener('visibilitychange', vis); return () => { clearInterval(t); document.removeEventListener('visibilitychange', vis); }; }, [brand.id, day, all]);
 
@@ -110,8 +112,10 @@ function Picklist({ me, brand, back }) {
   }, [data]);
 
   const pick = async (g) => {
-    if (busy) return; setBusy(g.key); setNote(null);
-    const { data: r, error } = await supabase.rpc('wms_pick', { p_lines: g.lines.map((l) => l.id) });
+    if (busy) return;
+    if (g.sku_id && scanSkus.has(g.sku_id)) return setScanRow(g);
+    setBusy(g.key); setNote(null);
+    const { data: r, error } = await supabase.rpc('wms_pick_scan', { p_lines: g.lines.map((l) => l.id), p_scan: null });
     setBusy(null);
     if (error) { beep('bad'); return setNote({ kind: 'bad', text: error.message }); }
     beep('ok'); if (navigator.vibrate) navigator.vibrate(30);
@@ -156,7 +160,7 @@ function Picklist({ me, brand, back }) {
       )}
 
       <h2 className="sect">To pick <span>{todo.length ? `${viewing} · ${num(unitsLeft)} unit${unitsLeft === 1 ? '' : 's'}` : viewing}</span></h2>
-      {data && todo.length > 0 && <div className="phead"><span /><span>Item</span><span>Qty</span><span>Location</span><span>Done</span></div>}
+      {data && todo.length > 0 && <div className="phead"><span /><span>Item</span><span>Qty</span><span>Location</span><span>Pick</span></div>}
       {!data ? <div className="empty">Loading…</div> : todo.length === 0 ? <div className="empty panel">{done.length ? 'Everything in this view is picked.' : 'Nothing to pick in this view.'}</div> : (
         <ul className="prows">{todo.map((g) => (
           <li key={g.key}>
@@ -175,7 +179,9 @@ function Picklist({ me, brand, back }) {
                 {g.locs.length > 0 && g.onHand < g.qty && <span>{num(g.onHand)} on file</span>}
                 {g.locs.length > 1 && g.onHand >= g.qty && <span>also {g.locs.slice(1).map((x) => x.code).join(', ')}</span>}
               </div>
-              <button className="pcheck" onClick={() => pick(g)} disabled={!!busy} aria-label={`Picked ${g.qty} ${g.name}`}>{busy === g.key ? '…' : ''}</button>
+              {g.sku_id && scanSkus.has(g.sku_id)
+                ? <button className="pcheck scan" onClick={() => setScanRow(g)} disabled={!!busy} aria-label={`Scan ${g.name} to pick it`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6v12M7 6v12M10 6v12M14 6v12M17 6v12M20 6v12" stroke="currentColor" strokeWidth="1.6" fill="none" /></svg></button>
+                : <button className="pcheck" onClick={() => pick(g)} disabled={!!busy} aria-label={`Picked ${g.qty} ${g.name}`}>{busy === g.key ? '…' : ''}</button>}
             </div>
             <button className="pprob" onClick={() => setReport(g)}>Problem?</button>
             {openRow === g.key && <ul className="breakdown">{g.lines.map((l) => <li key={l.id}><span className="code">{l.order_number}</span><span>{l.ship_by ? (l.ship_by < today ? 'Late · ' : '') + fmtDate(l.ship_by) : 'No date'}</span><b>{num(l.qty)}</b></li>)}</ul>}
@@ -217,6 +223,7 @@ function Picklist({ me, brand, back }) {
 
       {brand.client_code === 'DEMO' && <button className="btn reset" onClick={reset} disabled={busy === 'reset'}>{busy === 'reset' ? 'Resetting…' : 'Reset demo data'}</button>}
 
+      {scanRow && <ScanToPick row={scanRow} onClose={() => setScanRow(null)} onProblem={() => { setReport(scanRow); setScanRow(null); }} onDone={() => { setScanRow(null); beep('ok'); if (navigator.vibrate) navigator.vibrate(30); load(); }} />}
       {report && <ReportProblem row={report} onClose={() => setReport(null)} onDone={() => { setReport(null); setShowProbs(true); load(); }} />}
       {zoom && (
         <div className="overlay" onClick={() => setZoom(null)}>
@@ -250,6 +257,60 @@ function ReportProblem({ row, onClose, onDone }) {
         {kind && <label className="pf">{kind === 'other' ? 'What is the problem?' : <>Note <em>optional</em></>}<textarea rows="2" maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} autoFocus={kind === 'other'} /></label>}
         {err && <div className="strip bad"><span>{err}</span></div>}
         <div className="dlgbtns"><button className="btn" onClick={onClose}>Cancel</button><button className="btn big" disabled={!ok || busy} onClick={send}>{busy ? 'Sending…' : 'Report it'}</button></div>
+      </div>
+    </div>
+  );
+}
+
+// Picking a product that has a barcode on file takes a scan of it: the product's own barcode, the label on one of its
+// cartons, or an open-box unit label. A hand scanner types into the box; on a phone the camera reads it where the
+// browser can (otherwise the numbers under the barcode can be typed). The database checks the code, not this screen.
+function ScanToPick({ row, onClose, onProblem, onDone }) {
+  const [code, setCode] = useState(''); const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
+  const [cam, setCam] = useState(false); const video = useRef(null); const input = useRef(null);
+  const canCam = typeof window !== 'undefined' && 'BarcodeDetector' in window && !!navigator.mediaDevices?.getUserMedia;
+  const send = async (value) => {
+    const v = String(value ?? code).trim(); if (!v || busy) return;
+    setBusy(true); setErr(null);
+    const { error } = await supabase.rpc('wms_pick_scan', { p_lines: row.lines.map((l) => l.id), p_scan: v });
+    setBusy(false);
+    if (error) { beep('bad'); setErr(error.message); setCode(''); input.current?.focus(); return; }
+    onDone();
+  };
+  useEffect(() => {
+    if (!cam) return undefined;
+    let stream; let stop = false; let timer;
+    (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        if (stop) { stream.getTracks().forEach((t) => t.stop()); return; }
+        video.current.srcObject = stream; await video.current.play();
+        const det = new window.BarcodeDetector();
+        const tick = async () => {
+          if (stop) return;
+          try { const found = await det.detect(video.current); if (found[0]?.rawValue) { stop = true; setCam(false); send(found[0].rawValue); return; } } catch { /* frame not ready */ }
+          timer = setTimeout(tick, 250);
+        };
+        tick();
+      } catch { setCam(false); setErr('The camera could not be opened. Type the numbers under the barcode instead.'); }
+    })();
+    return () => { stop = true; clearTimeout(timer); stream?.getTracks().forEach((t) => t.stop()); };
+  }, [cam]);
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="dialog probdlg" role="dialog" aria-label="Scan to pick" onClick={(e) => e.stopPropagation()}>
+        <h2>Scan it<span className="dot">.</span></h2>
+        <p className="lead">{row.name} · pick {num(row.qty)}{row.locs[0] ? ` · ${row.locs[0].code}` : ''}</p>
+        {cam && <video ref={video} className="camview" playsInline muted />}
+        <form onSubmit={(e) => { e.preventDefault(); send(); }}>
+          <label className="pf">Barcode<input ref={input} value={code} onChange={(e) => setCode(e.target.value)} autoFocus autoComplete="off" autoCapitalize="characters" inputMode="text" placeholder="Scan, or type the numbers" /></label>
+        </form>
+        {err && <div className="strip bad"><span>{err}</span></div>}
+        <div className="dlgbtns">
+          {canCam && <button className="btn" onClick={() => setCam((v) => !v)}>{cam ? 'Stop camera' : 'Use camera'}</button>}
+          <button className="btn big" disabled={!code.trim() || busy} onClick={() => send()}>{busy ? 'Checking…' : `Picked ${num(row.qty)}`}</button>
+        </div>
+        <button className="swap" onClick={onProblem}>Can’t scan it? Report a problem</button>
       </div>
     </div>
   );

@@ -11,7 +11,7 @@ import Locations from './Locations.jsx';
 import VersionWatch from './VersionWatch.jsx';
 
 const NAV = [
-  ['today', 'Today', 'M4 5h16v15H4zM4 10h16M8 3v4M16 3v4'],
+  ['today', 'Dashboard', 'M4 5h16v15H4zM4 10h16M8 3v4M16 3v4'],
   ['receive', 'Receiving', 'M3 7h13l5 5v7H3zM16 7v5h5M7 19v-5h6v5'],
   ['pallets', 'Pallets', 'M3 6h18v5H3zM5 11v7M19 11v7M12 11v7M3 18h18'],
   ['orders', 'Orders', 'M6 4h12v17l-3-2-3 2-3-2-3 2zM9 9h6M9 13h6'],
@@ -81,9 +81,10 @@ function Shell({ me }) {
         </div>
       </aside>
       <main className="work">
+        <TopBar me={me} />
         <VersionWatch />
         {err && <div className="strip bad"><b>Can’t reach the database.</b><span>{err}</span><button onClick={load}>Try again</button></div>}
-        {page === 'today' && <Today key={navTick} go={(k) => { setFind(''); setPage(k); }} openBrand={(id) => { setStartBrand(id); setPage('orders'); }} />}
+        {page === 'today' && <Today key={navTick} me={me} go={(k) => { setFind(''); setPage(k); }} openBrand={(id) => { setStartBrand(id); setPage('orders'); }} />}
         {page === 'orders' && <Orders key={navTick} me={me} startBrand={startBrand} clearStart={() => setStartBrand(null)} />}
         {page === 'receive' && <Receive me={me} orgs={orgs} pallets={pallets} brandName={brandName} merge={merge} open={open} />}
         {page === 'pallets' && <Pallets key={navTick} me={me} orgs={orgs} pallets={pallets} locations={locations} brandName={brandName} merge={merge} find={find} setFind={setFind} />}
@@ -162,6 +163,25 @@ function NoAccess({ me }) {
       <h2>This login isn’t set up for the WMS<span className="dot">.</span></h2>
       <p>{me.email} is signed in, but the WMS is for warehouse staff.</p>
       <button className="btn" onClick={() => supabase.auth.signOut()}>Sign out</button>
+    </div>
+  );
+}
+
+// The strip across the top of every screen: which building this is, the date and time, who is signed in, and whether
+// the station is online. It is what makes a station identifiable from across the floor.
+function TopBar({ me }) {
+  const [now, setNow] = useState(() => new Date()); const [online, setOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 20000); const on = () => setOnline(true); const off = () => setOnline(false);
+    window.addEventListener('online', on); window.addEventListener('offline', off);
+    return () => { clearInterval(t); window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
+  return (
+    <div className="topbar">
+      <span className="site"><b>ShipBay Warehouse Management</b><i>Hillsborough, NJ · Building 4</i></span>
+      <span className="tbclock">{now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · <b>{now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</b></span>
+      <span className="tbwho">{me.employee_no ? <>Employee <b>{me.employee_no}</b> · </> : null}{me.full_name || me.email}</span>
+      <span className={`tblink ${online ? 'up' : 'down'}`}><i />{online ? 'Online' : 'Offline'}</span>
     </div>
   );
 }

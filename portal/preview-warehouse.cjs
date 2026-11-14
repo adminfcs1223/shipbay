@@ -25,7 +25,11 @@ const data = {
     { id: 'b1', org_id: 'od', line_id: 'e', order_id: 'r5', kind: 'short', found: 2, note: 'Shelf only has two', reported_at: ago(1), resolved_at: null, resolved_how: null, order_lines: { sku: 'DEMO-BTL-20', name: 'Steel Bottle, 20 oz', qty: 4 } },
     { id: 'b2', org_id: 'od', line_id: 'd', order_id: 'r2', kind: 'missing', found: null, note: null, reported_at: ago(6), resolved_at: ago(5), resolved_how: 'picked', order_lines: { sku: 'DEMO-MUG-11', name: 'Ceramic Mug, 11 oz', qty: 2 } },
   ],
-  inbound_shipments: [{ id: 'i1', org_id: 'od', reference: 'PO 5512', status: 'expected', carrier: 'Estes', tracking: '0412-889', expected_at: T, received_at: null, pallets: 2, cartons: null, notes: 'Holiday restock', created_at: ago(40) }],
+  inbound_shipments: [
+    { id: 'i1', org_id: 'od', reference: 'PO 5512', status: 'expected', carrier: 'Estes', tracking: '0412-889', expected_at: T, received_at: null, pallets: 2, cartons: null, notes: 'Holiday restock', created_at: ago(40), approved_at: ago(30) },
+    { id: 'i2', org_id: 'o1', reference: 'Container 7', status: 'expected', carrier: 'XPO', tracking: null, expected_at: new Date(now + 3 * 864e5).toISOString().slice(0, 10), received_at: null, pallets: 6, cartons: null, notes: null, created_at: ago(5), approved_at: null },
+    { id: 'i3', org_id: 'od', reference: 'Delivery', status: 'expected', carrier: 'UPS Freight', tracking: null, expected_at: new Date(now + 9 * 864e5).toISOString().slice(0, 10), received_at: null, pallets: 3, cartons: null, notes: 'Winter drop', created_at: ago(2), approved_at: null },
+  ],
 };
 (async () => {
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1243/chrome-linux64/chrome' }).catch(() => chromium.launch());
@@ -38,7 +42,7 @@ const data = {
     const req = route.request(); const u = new URL(req.url()); const m = /\/rest\/v1\/(rpc\/)?([a-z_]+)/.exec(u.pathname); const fn = m[2];
     const j = (x) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(x) });
     const single = (req.headers().accept || '').includes('vnd.pgrst.object'); const org = (u.searchParams.get('org_id') || '').replace('eq.', '');
-    if (req.method() !== 'GET' && !m[1]) writes++;
+    if (req.method() !== 'GET' && !m[1]) { writes++; if (req.method() === 'PATCH' && data[fn]) { const id = (u.searchParams.get('id') || '').replace('eq.', ''); const row = data[fn].find((r) => r.id === id); if (row) Object.assign(row, JSON.parse(req.postData() || '{}')); return j([]); } }
     if (m[1]) return j(fn === 'wms_org_connector' ? { client_code: 'DEMO', keys: [{ id: 'k1', label: 'Veeqo program', hint: '9f2c', created_at: ago(90), last_used_at: ago(1), revoked_at: null }, { id: 'k0', label: 'First try', hint: '11ab', created_at: ago(200), last_used_at: null, revoked_at: ago(90) }] } : []);
     if (fn === 'profiles') { const me = { id: UID, email: 'admin@shipbay3pl.com', full_name: 'Derek Harrison', role: 'shipbay_admin', active: true, is_owner: true, org_id: null }; return j(single ? me : [me]); }
     if (fn === 'orgs') return j(single ? orgs[0] : orgs);
@@ -48,7 +52,13 @@ const data = {
   const page = await ctx.newPage(); page.on('pageerror', (e) => console.log('PAGE ERROR', e.message));
   await page.goto(`http://localhost:${PORT}/`); await page.evaluate((s) => localStorage.setItem('shipbay-auth', JSON.stringify(s)), sess);
   await page.goto(`http://localhost:${PORT}/`); await page.waitForTimeout(1500);
-  await page.screenshot({ path: path.join(OUT, '00-admin.png') });
+  await page.screenshot({ path: path.join(OUT, '00-hub.png'), fullPage: true });
+  console.log('staff menu:', await page.locator('.sidenav .navitem').allInnerTexts(), '| to approve:', await page.locator('.glance > div').first().innerText());
+  await page.locator('table .btn-sm.primary', { hasText: 'Approve' }).first().click(); await page.waitForTimeout(700);
+  console.log('after approving one, to approve:', (await page.locator('.glance > div').first().innerText()).replace(/\n/g, ' '));
+  await page.locator('.hubtabs button', { hasText: 'Demo Brand' }).click(); await page.waitForTimeout(900);
+  await page.locator('.card .tabs button', { hasText: 'Deliveries' }).click(); await page.waitForTimeout(300); await page.screenshot({ path: path.join(OUT, '01-hub-brand-deliveries.png'), fullPage: true });
+  await page.locator('.hubtabs button', { hasText: 'All brands' }).click(); await page.waitForTimeout(400);
   await page.locator('select.viewas').selectOption('od'); await page.waitForTimeout(1200);
   console.log('nav as client:', await page.locator('.sidenav .navitem').allInnerTexts(), '| bar:', await page.locator('.viewasbar span').innerText());
   await page.locator('.navitem', { hasText: 'Warehouse' }).click(); await page.waitForTimeout(900);
