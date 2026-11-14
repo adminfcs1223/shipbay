@@ -1,15 +1,17 @@
 // ShipBay WMS (wms.shipbay3pl.com). Same database as the dashboard. The floor signs in with an employee number + PIN
 // (created in the dashboard's Admin settings); admins can also use their dashboard email login.
-// Step 1: the receiving station (a pallet comes in for a brand → PSKU# → 4x6 label) and the pallet register.
+// Receiving (product → pallets + cartons → labels), Pallets (carton scan → put-away → received), Locations (the map).
 import { useEffect, useRef, useState } from 'react';
 import { supabase, WMS_ROLES } from './lib';
 import Receive from './Receive.jsx';
 import Pallets from './Pallets.jsx';
+import Locations from './Locations.jsx';
 import VersionWatch from './VersionWatch.jsx';
 
 const NAV = [
   ['receive', 'Receiving', 'M3 7h13l5 5v7H3zM16 7v5h5M7 19v-5h6v5'],
   ['pallets', 'Pallets', 'M3 6h18v5H3zM5 11v7M19 11v7M12 11v7M3 18h18'],
+  ['locations', 'Locations', 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z'],
 ];
 
 export default function App() {
@@ -35,22 +37,25 @@ export default function App() {
 }
 
 function Shell({ me }) {
-  const [page, setPage] = useState(() => (window.location.hash === '#pallets' ? 'pallets' : 'receive'));
+  const [page, setPage] = useState(() => (['#pallets', '#locations'].includes(window.location.hash) ? window.location.hash.slice(1) : 'receive'));
   const [orgs, setOrgs] = useState(null);
   const [pallets, setPallets] = useState(null);
+  const [locations, setLocations] = useState(null);
   const [err, setErr] = useState(null);
-  const [find, setFind] = useState('');   // a PSKU handed from one screen to the register
+  const [find, setFind] = useState('');
+  const [navTick, setNavTick] = useState(0);   // tapping a nav item always lands on that screen's front page   // a PSKU handed from one screen to the register
 
   const load = async () => {
-    const [o, p] = await Promise.all([
+    const [o, p, l] = await Promise.all([
       supabase.rpc('wms_brands'),
       supabase.from('wms_pallets').select('*').order('received_at', { ascending: false }).order('batch_pos', { ascending: false }).limit(1000),
+      supabase.from('locations').select('*').order('code'),
     ]);
     if (o.error || p.error) setErr((o.error || p.error).message); else setErr(null);
-    setOrgs(o.data || []); setPallets(p.data || []);
+    setOrgs(o.data || []); setPallets(p.data || []); setLocations(l.data || []);
   };
   useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t); }, []);
-  useEffect(() => { history.replaceState(null, '', page === 'pallets' ? '#pallets' : '#'); }, [page]);
+  useEffect(() => { history.replaceState(null, '', page === 'receive' ? '#' : `#${page}`); }, [page]);
 
   const brandName = (id) => (orgs || []).find((o) => o.id === id)?.name || 'Unknown brand';
   const merge = (rows) => setPallets((cur) => { const m = new Map((cur || []).map((r) => [r.id, r])); rows.forEach((r) => m.set(r.id, { ...m.get(r.id), ...r })); return [...m.values()].sort((a, b) => (b.received_at > a.received_at ? 1 : b.received_at < a.received_at ? -1 : b.batch_pos - a.batch_pos)); });
@@ -61,7 +66,7 @@ function Shell({ me }) {
       <aside className="rail">
         <div className="mark"><img src="/brand/13-mono-horizontal-white.svg" alt="shipbay." /><span>WMS</span></div>
         <nav>{NAV.map(([k, label, d]) => (
-          <button key={k} className={page === k ? 'on' : ''} onClick={() => setPage(k)}>
+          <button key={k} className={page === k ? 'on' : ''} onClick={() => { setFind(''); setPage(k); setNavTick((t) => t + 1); }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>{label}
           </button>
         ))}</nav>
@@ -73,9 +78,9 @@ function Shell({ me }) {
       <main className="work">
         <VersionWatch />
         {err && <div className="strip bad"><b>Can’t reach the database.</b><span>{err}</span><button onClick={load}>Try again</button></div>}
-        {page === 'receive'
-          ? <Receive me={me} orgs={orgs} pallets={pallets} brandName={brandName} merge={merge} open={open} />
-          : <Pallets me={me} orgs={orgs} pallets={pallets} brandName={brandName} merge={merge} find={find} setFind={setFind} />}
+        {page === 'receive' && <Receive me={me} orgs={orgs} pallets={pallets} brandName={brandName} merge={merge} open={open} />}
+        {page === 'pallets' && <Pallets key={navTick} me={me} orgs={orgs} pallets={pallets} locations={locations} brandName={brandName} merge={merge} find={find} setFind={setFind} />}
+        {page === 'locations' && <Locations me={me} locations={locations} pallets={pallets} brandName={brandName} reload={load} open={open} />}
       </main>
     </div>
   );

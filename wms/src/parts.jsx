@@ -1,10 +1,45 @@
 // Pieces both WMS screens share: the on-screen 4x6 label (same markup that prints), the scanner box and the beeps.
 import { useEffect, useRef, useState } from 'react';
-import { labelHtml } from './label';
+import { labelHtml, cartonLabelHtml } from './label';
 
 /** The label at screen size. `inch` = how many CSS pixels one label inch gets. */
 export function LabelPreview({ pallet, brand, inch = 62, ghost }) {
   return <div className={`labelview ${ghost ? 'ghost' : ''}`} style={{ '--u': `${inch}px`, width: inch * 4, height: inch * 6 }} dangerouslySetInnerHTML={{ __html: labelHtml(pallet, brand) }} />;
+}
+
+/** A 3x1 carton label at screen size. */
+export function CartonPreview({ pallet, brand, carton, inch = 82 }) {
+  return <div className="labelview carton" style={{ '--u': `${inch}px`, width: inch * 3, height: inch }} dangerouslySetInnerHTML={{ __html: cartonLabelHtml(pallet, brand, carton) }} />;
+}
+
+export const STATUS = { open: ['Scan cartons', 'warn'], counted: ['Put away', 'go'], stored: ['Received', 'ok'], received: ['Received', 'ok'], void: ['Void', 'bad'] };
+export const StatusTag = ({ s }) => <span className={`tag ${STATUS[s]?.[1] || ''}`}>{STATUS[s]?.[0] || s}</span>;
+/** A position is taken by a pallet that is counted or stored there. */
+export const occupantOf = (pallets, locId) => (pallets || []).find((p) => p.location_id === locId && (p.status === 'counted' || p.status === 'stored')) || null;
+
+/** The floor by section: every pallet position as a cell. `target` is where the open pallet goes; a free cell can be picked. */
+export function FloorMap({ locations, pallets, brandName, target, onPick, onOpen }) {
+  const spots = (locations || []).filter((l) => l.active !== false && (l.kind === 'pallet' || l.kind === 'floor'));
+  const zones = [...new Set(spots.map((l) => l.zone || 'Other'))].sort((a, b) => (a === (spots.find((l) => l.id === target)?.zone || '') ? -1 : b === (spots.find((l) => l.id === target)?.zone || '') ? 1 : a.localeCompare(b)));
+  if (!spots.length) return <div className="empty">No pallet positions set up yet.</div>;
+  return (
+    <div className="floormap">{zones.map((z) => (
+      <div className="zone" key={z}>
+        <div className="zhead"><b>{z}</b>{spots.some((l) => (l.zone || 'Other') === z && l.kind === 'pallet') && <span>{spots.filter((l) => (l.zone || 'Other') === z && l.kind === 'pallet' && !occupantOf(pallets, l.id)).length} free</span>}</div>
+        <div className="cells">{spots.filter((l) => (l.zone || 'Other') === z).sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })).map((l) => {
+          const occ = l.kind === 'pallet' ? occupantOf(pallets, l.id) : null; const here = l.id === target;
+          const many = l.kind === 'floor' ? (pallets || []).filter((p) => p.location_id === l.id && (p.status === 'counted' || p.status === 'stored')).length : 0;
+          const can = !here && ((!occ && onPick) || (occ && onOpen));
+          return (
+            <button type="button" key={l.id} disabled={!can} className={`cell ${here ? 'here' : occ ? 'full' : ''} ${l.kind}`} onClick={() => (occ ? onOpen?.(occ) : onPick?.(l))} title={occ ? `${occ.psku} · ${brandName(occ.org_id)}` : here ? 'This pallet goes here' : 'Free'}>
+              <b>{l.code}</b>
+              <small>{here ? 'Goes here' : occ ? <>{occ.psku.replace('PSKU-', '')}<br />{brandName(occ.org_id)}</> : l.kind === 'floor' ? (many ? `${many} pallet${many > 1 ? 's' : ''}` : 'Floor area') : 'Free'}</small>
+            </button>
+          );
+        })}</div>
+      </div>
+    ))}</div>
+  );
 }
 
 let ctx;
