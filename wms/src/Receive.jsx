@@ -188,7 +188,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
             {doneCartons > 0 && (
               <div className={`printrow ${printed.cartons ? 'done' : ''}`}>
                 <div className="picks"><CartonSizePicker size={csize} onChange={(v) => { setCsize(v); setPrinted((x) => ({ ...x, cartons: false })); }} /><CartonTurnPicker turn={cturn} onChange={(v) => { setCturn(v); setPrinted((x) => ({ ...x, cartons: false })); }} /></div>
-                <div><b>{num(doneCartons)} carton label{doneCartons > 1 ? 's' : ''}</b><span>Printer paper {cturn === 'left' || cturn === 'right' ? sizeLabel(csize).split(' × ').reverse().join(' × ') : sizeLabel(csize)} in (width × height) · margins none · headers and footers off · scale 100%</span></div>
+                <div><b>{num(doneCartons)} carton label{doneCartons > 1 ? 's' : ''}</b><span>In the print window: Paper size {cturn === 'left' || cturn === 'right' ? sizeLabel(csize).split(' × ').reverse().join(' × ') : sizeLabel(csize)} in (width × height) · Layout Portrait · Margins None · Headers and footers off · Scale 100</span></div>
                 <div className="twobtn"><button className={`btn ${printed.cartons ? '' : 'go'}`} onClick={printCartons}>{printed.cartons ? 'Print again' : `Print ${num(doneCartons)}`}</button><button className="btn sm" onClick={testCarton}>Test with 1 label</button></div>
               </div>
             )}

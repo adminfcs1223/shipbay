@@ -69,7 +69,7 @@ export function cartonPageHtml(p, brand, c, size, turn = '0') {
   const z = parseSize(size); const side = turn === 'left' || turn === 'right';
   const W = `calc(var(--u) * ${z.w})`; const H = `calc(var(--u) * ${z.h})`;
   const t = turn === 'left' ? `translateY(${W}) rotate(-90deg)` : turn === 'right' ? `translateX(${H}) rotate(90deg)` : turn === '180' ? `translate(${W}, ${H}) rotate(180deg)` : 'none';
-  return `<div class="cpage" style="width: ${side ? H : W}; height: ${side ? W : H}"><div class="cturn" style="width: ${W}; height: ${H}; transform: ${t}">${cartonLabelHtml(p, brand, c, z.key)}</div></div>`;
+  return `<div class="cpage" style="width: ${side ? H : W}; height: calc(${side ? W : H} - var(--u) * .02)"><div class="cturn" style="width: ${W}; height: ${H}; transform: ${t}">${cartonLabelHtml(p, brand, c, z.key)}</div></div>`;
 }
 
 /** One carton label: brand and "Carton 5 of 27", the product, the carton's own barcode, then carton / item / pallet numbers. */
@@ -134,13 +134,16 @@ export const LABEL_CSS = `
   .plabel footer { margin-top: auto; display: flex; justify-content: space-between; font-size: calc(var(--u) * .1); font-weight: 600; padding-top: calc(var(--u) * .06); }
 `;
 
-/** Print label pages through a hidden frame (no pop-up for the browser to block). `size` is the CSS page size. */
-function printPages(pages, cls, size, title) {
+/** Print label pages through a hidden frame (no pop-up for the browser to block).
+ *  `size` is the CSS page size. `fixed: false` leaves the page size to the paper chosen in the print window: a label
+ *  printer whose paper is wider than it is tall gets a declared wide page turned a quarter by the print system (seen at
+ *  the station 2026-11-14: a 2 x 1 label printed 1 in wide and 2 in long), and does not when the page takes the paper's size. */
+function printPages(pages, cls, size, title, fixed = true) {
   return new Promise((resolve) => {
     const styles = [...document.querySelectorAll('style, link[rel="stylesheet"]')].map((n) => n.outerHTML).join('');
     const doc = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>${styles}
-      <style>@page { size: ${size}; margin: 0; } html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; min-height: 0 !important; height: auto !important; }
-      .${cls} { page-break-after: always; break-after: page; } .${cls}:last-child { page-break-after: auto; break-after: auto; }
+      <style>@page { ${fixed ? `size: ${size}; ` : ''}margin: 0; } html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; min-height: 0 !important; height: auto !important; }
+      .${cls} { page-break-after: always; break-after: page; page-break-inside: avoid; break-inside: avoid; } .${cls}:last-child { page-break-after: auto; break-after: auto; }
       ${LABEL_CSS}</style></head><body>${pages.join('')}</body></html>`;
     document.getElementById('wms-print')?.remove();
     const f = document.createElement('iframe');
@@ -160,7 +163,7 @@ export const printPalletLabels = (pallets, brandOf) => printPages(pallets.map((p
 /** One page per carton at the size and turn of the roll in the printer, for every carton of the pallets given (or only the cartons listed). */
 export const printCartonLabels = (pallets, brandOf, only, size = getCartonSize(), turn = getCartonTurn()) => {
   const z = parseSize(size); const side = turn === 'left' || turn === 'right';
-  return printPages(pallets.flatMap((p) => cartonCodes(p).filter((c) => !only || only.includes(c.seq)).map((c) => cartonPageHtml(p, brandOf(p), c, z.key, turn))), 'cpage', side ? `${z.h}in ${z.w}in` : `${z.w}in ${z.h}in`, 'Carton labels');
+  return printPages(pallets.flatMap((p) => cartonCodes(p).filter((c) => !only || only.includes(c.seq)).map((c) => cartonPageHtml(p, brandOf(p), c, z.key, turn))), 'cpage', side ? `${z.h}in ${z.w}in` : `${z.w}in ${z.h}in`, 'Carton labels', false);
 };
 /** 4x6: one page per position. */
 export const printLocationLabels = (locs) => printPages(locs.map(locationLabelHtml), 'plabel', '4in 6in', 'Position labels');
