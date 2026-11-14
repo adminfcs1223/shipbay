@@ -52,7 +52,7 @@ export default function ClientHome({ me }) {
   const [tour, setTour] = useState(false);
   const [listOpen, setListOpen] = useState(false);
   const invLists = useInventoryLists(me?.org_id);
-  useEffect(() => { if (me?.id && !tourSeen(me.id)) setTour(true); }, [me?.id]);
+  useEffect(() => { if (me?.id && !me.viewOnly && !tourSeen(me.id)) setTour(true); }, [me?.id]);
 
   const load = async () => {
     if (!me?.org_id) return;

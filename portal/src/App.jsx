@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase, forgetLocalSession, RECOVERY_LANDING, RESET_TOKEN } from './lib';
+import { supabase, forgetLocalSession, RECOVERY_LANDING, RESET_TOKEN, setViewAsOrg } from './lib';
 import { isAuthHost, isAppHost, splitMode, authUrl, handoffToApp, takeHandoff } from './hosts';
 import Onboarding from './pages/Onboarding';
 import Compliance from './pages/Compliance';
@@ -14,6 +14,7 @@ import PackShip from './pages/PackShip';
 import Quotes from './pages/Quotes';
 import ClientOrders from './pages/ClientOrders';
 import AdminSettings from './pages/AdminSettings';
+import ClientWarehouse from './pages/ClientWarehouse';
 import Owner from './pages/owner/Owner';
 import SalesDesk from './pages/SalesDesk';
 import ApptSetting from './pages/ApptSetting';
@@ -77,7 +78,7 @@ export default function App() {
     }
     return <SignIn />;
   }
-  return <Shell me={me} />;
+  return <ViewAs me={me} />;
 }
 
 function AuthHandoff({ session, onInvalid }) {
@@ -254,10 +255,37 @@ const CLIENT_NAV = [
   { key: 'home', label: 'Overview', icon: Ico.home, page: ClientHome },
   { key: 'corders', label: 'Orders', icon: Ico.orders, page: ClientOrders },
   { key: 'products', label: 'Products', icon: Ico.skus, page: ClientProducts },
+  { key: 'warehouse', label: 'Warehouse', icon: Ico.home, page: ClientWarehouse },
   { key: 'documents', label: 'Documents', icon: Ico.documents, page: ClientDocuments },
 ];
 
-function Shell({ me }) {
+// An admin can open any brand's portal as the brand sees it (read-only). The switch sits under the admin's name; a bar
+// across the top says whose portal is showing and takes them back.
+function ViewAs({ me }) {
+  const [as, setAs] = useState(null);   // { id, name }
+  const pick = (o) => { setViewAsOrg(o?.id || null); setAs(o || null); };
+  useEffect(() => () => setViewAsOrg(null), []);
+  if (!as) return <Shell me={me} viewAs={me?.role === 'shipbay_admin' ? pick : null} />;
+  const client = { ...me, role: 'client_admin', isStaff: false, isSetter: false, isSalesOnly: false, is_owner: false, is_sales: false, org_id: as.id, orgName: as.name, viewOnly: true };
+  return (
+    <>
+      <div className="viewasbar"><span>Viewing <b>{as.name}</b> as the client. Read-only.</span><button onClick={() => pick(null)}>Back to admin</button></div>
+      <Shell key={as.id} me={client} />
+    </>
+  );
+}
+function ViewAsPicker({ onPick }) {
+  const [orgs, setOrgs] = useState(null);
+  useEffect(() => { supabase.from('orgs').select('id, name').neq('status', 'churned').order('name').then(({ data }) => setOrgs(data || [])); }, []);
+  return (
+    <select className="viewas" value="" onChange={(e) => { const o = (orgs || []).find((x) => x.id === e.target.value); if (o) onPick(o); }} aria-label="View a brand's portal as the client">
+      <option value="">View as client…</option>
+      {(orgs || []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+    </select>
+  );
+}
+
+function Shell({ me, viewAs }) {
   const nav = (!me ? [] : me.isStaff ? STAFF_NAV : me.isSetter ? SETTER_NAV : me.isSalesOnly ? SALES_NAV : CLIENT_NAV).filter((n) => (!n.adminOnly || me?.role === 'shipbay_admin') && (!n.ownerOnly || me?.is_owner) && (!n.salesOnly || me?.is_sales));
   const items = nav.filter((n) => n.key);
   const [page, setPage] = useState(null);
@@ -284,6 +312,7 @@ function Shell({ me }) {
         <div className="me">
           {me && <><b>{me.full_name || me.email}</b>{me.orgName || me.email}<br /><span className="role">{me.isStaff ? 'ShipBay staff' : me.isSetter ? 'Appointment setter' : me.isSalesOnly ? 'Sales' : 'Client'}</span></>}
           <br /><button onClick={signOut}>Sign out</button>
+          {viewAs && <ViewAsPicker onPick={viewAs} />}
         </div>
       </aside>
       <main className="content">

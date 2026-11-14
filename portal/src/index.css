@@ -1674,3 +1674,8 @@ tr.voided td:last-child { text-decoration: none; }
 .listitems th { position: sticky; top: 0; background: #fff; }
 .listitems td.n, .listitems th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .listitems td.mono { font-size: 12px; white-space: nowrap; }
+
+/* View as client: the bar across the top while an admin is looking at a brand's portal, and the switch under their name */
+.viewasbar { position: sticky; top: 0; z-index: 60; display: flex; align-items: center; justify-content: center; gap: 16px; padding: 9px 16px; background: var(--ink); color: #fff; font-size: 13.5px; }
+.viewasbar button { background: #fff; color: var(--ink); border: 0; border-radius: 8px; padding: 6px 12px; font: 600 13px var(--font-body); cursor: pointer; }
+.viewas { margin-top: 10px; width: 100%; padding: 7px 8px; border: 1.5px solid var(--line-2); border-radius: 8px; background: var(--surface); font: 500 13px var(--font-body); color: var(--ink); }
