@@ -2,9 +2,11 @@
 // pallet. A pallet can hold one product or several (a mixed pallet: one line per product), and any line can be marked
 // FBA. The database hands back a PSKU# per pallet and a number per carton; the station is then asked to print the 4x6
 // pallet label and one small label per carton (sized to the roll at the station), and the pallet opens for the carton scan.
+// The carton labels can also be printed before Receive is pressed: the PSKU# is taken then (wms_hold_pskus) so the
+// barcodes are the real ones, and Receive uses that number. What was printed is kept on the station until it is received.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, fmtTime, sameDay } from './lib';
-import { printPalletLabels, printCartonLabels, cartonCodes, sizeLabel } from './label';
+import { printPalletLabels, printCartonLabels, cartonCodes, linesOf, sizeLabel } from './label';
 import { LabelPreview, CartonPreview, CartonSizePicker, CartonTurnPicker, useCartonSize, StatusTag, beep } from './parts.jsx';
 
 const num = (n) => Number(n || 0).toLocaleString();
@@ -12,29 +14,38 @@ let lineId = 0;
 const newLine = () => ({ id: ++lineId, prod: null, off: false, what: '', q: '', cartons: '', upc: '', fba: false });
 const lineReady = (l) => !!(l.prod || (l.off && l.what.trim()));
 const lineCartons = (l) => (l.cartons === '' ? 0 : Math.max(0, Math.min(500, Math.round(Number(l.cartons) || 0))));
+// labels printed before Receive: the form and the PSKU numbers it took, kept on this station until the pallet is received
+const loadHold = () => { try { const h = JSON.parse(localStorage.getItem('wms-hold') || 'null'); return h && h.key && h.org && Array.isArray(h.lines) && h.lines.length && h.pskus?.length ? h : null; } catch { return null; } };
+const range = (a, b) => (a === b ? `Carton ${a}` : `Cartons ${a} to ${b}`);
 
 export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
-  const [org, setOrg] = useState(() => { try { return localStorage.getItem('wms-brand') || ''; } catch { return ''; } });
+  const [saved] = useState(loadHold);
+  const [org, setOrg] = useState(() => { if (saved) return saved.org; try { return localStorage.getItem('wms-brand') || ''; } catch { return ''; } });
   const [products, setProducts] = useState(null);
-  const [lines, setLines] = useState(() => [newLine()]);
-  const [count, setCount] = useState(1);
+  const [lines, setLines] = useState(() => (saved ? saved.lines.map((l) => ({ ...newLine(), ...l, id: ++lineId })) : [newLine()]));
+  const [count, setCount] = useState(saved?.count || 1);
+  const [hold, setHold] = useState(saved ? { pskus: saved.pskus, sig: saved.sig, full: !!saved.full } : null);   // carton labels printed before Receive
+  const [holding, setHolding] = useState(false);
+  const lastOrg = useRef(saved ? saved.org : null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);         // pallets just made (with their cartons) → the print prompt
   const [printed, setPrinted] = useState({});
   const [err, setErr] = useState(null);
-  const key = useRef(crypto.randomUUID());
+  const key = useRef(saved?.key || crypto.randomUUID());
   const [csize, setCsize, cturn, setCturn] = useCartonSize();
 
   useEffect(() => { if (orgs && org && !orgs.some((o) => o.id === org)) setOrg(''); }, [orgs]);
   useEffect(() => {
     try { org ? localStorage.setItem('wms-brand', org) : localStorage.removeItem('wms-brand'); } catch { /* storage off */ }
-    setLines([newLine()]); setProducts(null);
+    if (lastOrg.current !== org) setLines([newLine()]);   // a form restored with its printed labels keeps its lines
+    lastOrg.current = org; setProducts(null);
     if (!org) return;
     let live = true;
     supabase.rpc('wms_products', { p_org: org }).then(({ data, error }) => { if (live) { setProducts(data || []); if (error) setErr(error.message); } });
     return () => { live = false; };
   }, [org]);
 
+  const cur = orgs?.find((o) => o.id === org);
   const setLine = (id, patch) => setLines((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)));
   const mixed = lines.length > 1;
   const today = useMemo(() => (pallets || []).filter((p) => sameDay(p.received_at)), [pallets]);
@@ -42,6 +53,33 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const n = Math.max(1, Math.min(60, Number(count) || 1));
   const total = lines.reduce((s, l) => s + lineCartons(l), 0);
   const problem = !org ? 'Pick a brand' : !lines.every(lineReady) ? (mixed ? 'Pick every product' : 'Pick the product') : mixed && lines.some((l) => !lineCartons(l)) ? 'Every product needs its carton count' : total > 500 ? 'Up to 500 cartons on a pallet' : null;
+
+  const sig = JSON.stringify([org, n, lines.map((l) => [l.prod?.id || l.what.trim(), lineCartons(l), l.upc, l.fba])]);
+  const stale = !!hold && hold.sig !== sig;   // the form changed after the labels were printed
+  useEffect(() => {
+    try { hold ? localStorage.setItem('wms-hold', JSON.stringify({ key: key.current, org, lines, count: n, pskus: hold.pskus, sig: hold.sig, full: hold.full })) : localStorage.removeItem('wms-hold'); } catch { /* storage off */ }
+  }, [hold, org, lines, n]);
+  // the pallets as they will be received, cartons numbered the way the database numbers them
+  const draft = (pskus) => {
+    const w = Math.max(2, String(total).length); const one = lines[0];
+    return pskus.map((psku, i) => {
+      const num = psku.replace(/\D/g, '') || '000000'; let seq = 0; const cs = [];
+      lines.forEach((l) => { for (let g = 0; g < lineCartons(l); g++) { seq += 1; cs.push({ seq, code: `C${num}${String(seq).padStart(w, '0')}`, item_no: l.prod?.sku || null, item_name: l.prod?.name || l.what.trim(), units_per_carton: l.upc === '' ? null : Number(l.upc), fba: l.fba }); } });
+      return { psku, org_id: org, batch_pos: i + 1, batch_size: pskus.length, received_at: new Date().toISOString(), mixed, fba: lines.every((l) => l.fba), cartons: total || null, units_per_carton: !mixed && one.upc !== '' ? Number(one.upc) : null, item_no: mixed ? null : one.prod?.sku, item_name: mixed ? `Mixed pallet · ${lines.length} products` : one.prod?.name || (one.off ? one.what : ''), received_by_name: me.full_name || me.email, _cartons: cs };
+    });
+  };
+  // Print carton labels before Receive: take the PSKU numbers for this form, then print with the real barcodes.
+  const printFirst = async (only) => {
+    if (problem || !total || holding) return;
+    setHolding(true); setErr(null);
+    const { data, error } = await supabase.rpc('wms_hold_pskus', { p_key: key.current, p_pallets: n });
+    setHolding(false);
+    if (error || !data?.length) { beep('bad'); return setErr(error?.message || 'No pallet number came back. Check the connection and try again.'); }
+    setHold((h) => ({ pskus: data, sig, full: !only || !!(h?.full && h.sig === sig) }));   // full = every carton label has been printed for the form as it stands
+    await printCartonLabels(draft(data), () => cur?.name || '', only || null, csize, cturn);
+  };
+  const heldName = hold ? (hold.pskus.length === 1 ? hold.pskus[0] : `${hold.pskus[0]} → ${hold.pskus[hold.pskus.length - 1]}`) : '';
+  const dropHold = () => { setHold(null); key.current = crypto.randomUUID(); };
 
   const receive = async (e) => {
     e?.preventDefault();
@@ -56,8 +94,9 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
     const { data: cs } = await supabase.from('wms_cartons').select('*').in('pallet_id', data.map((p) => p.id)).order('seq');
     setBusy(false);
     key.current = crypto.randomUUID();
-    beep('ok'); merge(data); setDone(data.map((p) => ({ ...p, _cartons: (cs || []).filter((c) => c.pallet_id === p.id) }))); setPrinted({});
-    setLines([newLine()]); setCount(1);
+    beep('ok'); merge(data); setDone(data.map((p) => ({ ...p, _cartons: (cs || []).filter((c) => c.pallet_id === p.id) })));
+    setPrinted(hold?.full && !stale && hold.pskus.join() === data.map((p) => p.psku).join() ? { cartons: true, early: true } : {});
+    setHold(null); setLines([newLine()]); setCount(1);
   };
   const printPallet = async () => {
     await printPalletLabels(done, (p) => brandName(p.org_id)); setPrinted((x) => ({ ...x, pallet: true }));
@@ -68,14 +107,10 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const printCartons = async () => { await printCartonLabels(done, (p) => brandName(p.org_id), null, csize, cturn); setPrinted((x) => ({ ...x, cartons: true })); };
   const toPallet = () => { const first = done[0]; setDone(null); open(first.psku); };
 
-  const cur = orgs?.find((o) => o.id === org);
   // what the labels will look like, from what is typed so far
-  const sample = useMemo(() => {
-    let seq = 0; const cs = [];
-    lines.forEach((l) => { for (let i = 0; i < lineCartons(l); i++) cs.push({ seq: ++seq, code: `C000000${String(seq).padStart(2, '0')}`, item_no: l.prod?.sku || null, item_name: l.prod?.name || l.what, units_per_carton: l.upc === '' ? null : Number(l.upc), fba: l.fba }); });
-    const one = lines[0];
-    return { psku: 'PSKU-______', batch_pos: 1, batch_size: n, received_at: new Date().toISOString(), mixed, fba: lines.every((l) => l.fba), cartons: total || null, units_per_carton: !mixed && one.upc !== '' ? Number(one.upc) : null, item_no: mixed ? null : one.prod?.sku, item_name: mixed ? `Mixed pallet · ${lines.length} products` : one.prod?.name || (one.off ? one.what : ''), received_by_name: me.full_name || me.email, _cartons: cs };
-  }, [lines, n, mixed, total, me]);
+  const sample = useMemo(() => draft([hold?.pskus[0] || 'PSKU-______'])[0], [lines, n, mixed, total, me, hold, org]);
+  const sampleLines = useMemo(() => (total ? linesOf(sample) : []), [sample]);
+  const doneLines = done?.[0]?.mixed ? linesOf(done[0]) : [];
   const doneCartons = done ? done.reduce((s, p) => s + (p.cartons || 0), 0) : 0;
 
   return (
@@ -128,7 +163,22 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
         <div className="panel preview">
           <div className="panelhead"><h3>Labels</h3><span>4 × 6 and {sizeLabel(csize)} in</span></div>
           <LabelPreview pallet={sample} brand={cur?.name || 'Brand'} ghost />
-          {total > 0 && <CartonPreview pallet={sample} brand={cur?.name || 'Brand'} carton={cartonCodes(sample)[0]} size={csize} />}
+          {sampleLines.map((ln) => (
+            <div className="flav" key={ln.from}>
+              <CartonPreview pallet={sample} brand={cur?.name || 'Brand'} carton={cartonCodes(sample)[ln.from - 1]} size={csize} />
+              {mixed && <small>{range(ln.from, ln.to)} · one label each<button type="button" className="swap" disabled={holding || !!problem} onClick={() => printFirst(Array.from({ length: ln.cartons }, (_, i) => ln.from + i))}>Print {num(ln.cartons * n)}</button></small>}
+            </div>
+          ))}
+          {total > 0 && !problem && (
+            <div className="early">
+              {stale && <div className="strip bad"><span>The form changed after labels were printed for {heldName}. Print them again, or put the form back.</span></div>}
+              {hold && !stale && <div className="strip ok"><span>{hold.full ? <>Carton labels printed for <b>{heldName}</b>. Press Receive when they are on.</> : <><b>{heldName}</b> is held for this pallet. Not every carton label is printed yet.</>}</span></div>}
+              <div className="picks row"><CartonSizePicker size={csize} onChange={setCsize} /><CartonTurnPicker turn={cturn} onChange={setCturn} /></div>
+              <button type="button" className="btn" disabled={holding} onClick={() => printFirst()}>{holding ? 'Getting the pallet number…' : `${hold?.full && !stale ? 'Print again' : 'Print now'} · ${num(total * n)} carton label${total * n > 1 ? 's' : ''}`}</button>
+              <button type="button" className="btn sm" disabled={holding} onClick={() => printFirst([1])}>Test with 1 label</button>
+              {hold && <button type="button" className="swap" onClick={dropHold}>Throw those labels away and start over</button>}
+            </div>
+          )}
         </div>
       </div>
 
@@ -162,11 +212,20 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
             {doneCartons > 0 && (
               <div className={`printrow ${printed.cartons ? 'done' : ''}`}>
                 <div className="picks"><CartonSizePicker size={csize} onChange={(v) => { setCsize(v); setPrinted((x) => ({ ...x, cartons: false })); }} /><CartonTurnPicker turn={cturn} onChange={(v) => { setCturn(v); setPrinted((x) => ({ ...x, cartons: false })); }} /></div>
-                <div><b>{num(doneCartons)} carton label{doneCartons > 1 ? 's' : ''}</b><span>In the print window: Paper size {cturn === 'left' || cturn === 'right' ? sizeLabel(csize).split(' × ').reverse().join(' × ') : sizeLabel(csize)} in (width × height) · Layout Portrait · Margins None · Headers and footers off · Scale 100</span></div>
+                <div><b>{num(doneCartons)} carton label{doneCartons > 1 ? 's' : ''}{printed.early ? ' · printed before receiving' : ''}</b><span>In the print window: Paper size {cturn === 'left' || cturn === 'right' ? sizeLabel(csize).split(' × ').reverse().join(' × ') : sizeLabel(csize)} in (width × height) · Layout Portrait · Margins None · Headers and footers off · Scale 100</span></div>
                 <div className="twobtn"><button className={`btn ${printed.cartons ? '' : 'go'}`} onClick={printCartons}>{printed.cartons ? 'Print again' : `Print ${num(doneCartons)}`}</button><button className="btn sm" onClick={testCarton}>Test with 1 label</button></div>
               </div>
             )}
-            {doneCartons > 0 && <div className="proof"><CartonPreview pallet={done[0]} brand={brandName(done[0].org_id)} carton={cartonCodes(done[0])[0]} size={csize} turn={cturn} width={300} /><small>How it leaves the printer</small></div>}
+            {doneLines.length > 1 && (
+              <div className="flavs">{doneLines.map((ln) => (
+                <div className="flavrow" key={ln.from}>
+                  <CartonPreview pallet={done[0]} brand={brandName(done[0].org_id)} carton={cartonCodes(done[0])[ln.from - 1]} size={csize} width={150} />
+                  <div><b>{ln.fba && <span className="tag fba">FBA</span>} {ln.item_name}</b><span>{range(ln.from, ln.to)}{ln.item_no ? ` · ${ln.item_no}` : ''}</span></div>
+                  <button className="btn sm" onClick={() => printCartonLabels(done, (p) => brandName(p.org_id), Array.from({ length: ln.cartons }, (_, i) => ln.from + i), csize, cturn)}>Print {num(ln.cartons * done.length)}</button>
+                </div>
+              ))}</div>
+            )}
+            {doneCartons > 0 && doneLines.length <= 1 && <div className="proof"><CartonPreview pallet={done[0]} brand={brandName(done[0].org_id)} carton={cartonCodes(done[0])[0]} size={csize} turn={cturn} width={300} /><small>How it leaves the printer</small></div>}
             <button className={`btn big ${printed.pallet && (printed.cartons || !doneCartons) ? 'go' : ''}`} onClick={toPallet}>{doneCartons ? 'Labels are on · scan the cartons' : 'Label is on · put it away'}</button>
           </div>
         </div>

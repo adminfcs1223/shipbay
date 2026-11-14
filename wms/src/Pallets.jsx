@@ -208,7 +208,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
               {cartons === null ? <div className="empty">Loading cartons…</div> : (
                 (plines.length > 1 ? plines : [null]).map((ln, i) => (
                   <div key={i} className="cgroup">
-                    {ln && <div className="cgname">{ln.fba && <span className="tag fba">FBA</span>} <b>{ln.item_name}</b><span>{ln.item_no ? `${ln.item_no} · ` : ''}{ln.cartons} carton{ln.cartons === 1 ? '' : 's'}</span></div>}
+                    {ln && <div className="cgname">{ln.fba && <span className="tag fba">FBA</span>} <b>{ln.item_name}</b><span>{ln.item_no ? `${ln.item_no} · ` : ''}{ln.cartons} carton{ln.cartons === 1 ? '' : 's'}</span><button className="swap" onClick={() => printCartonLabels([pp], () => brand, Array.from({ length: ln.cartons }, (_, k) => ln.from + k), csize, cturn)}>Print these {ln.cartons} label{ln.cartons === 1 ? '' : 's'}</button></div>}
                     <div className="ctiles">{cartons.filter((c) => !ln || (c.seq >= ln.from && c.seq <= ln.to)).map((c) => <span key={c.id} className={`${c.scanned_at ? 'in' : ''} ${c.open_box_at ? 'ob' : ''}`} title={c.open_box_at ? `${c.code} · open box, ${c.open_units} units` : c.code}>{c.seq}</span>)}</div>
                   </div>
                 ))
@@ -252,7 +252,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
 
         <aside className="panel detail">
           <LabelPreview pallet={pp} brand={brand} inch={52} />
-          {total > 0 && <CartonPreview pallet={pp} brand={brand} carton={cartons[0]} size={csize} width={208} />}
+          {total > 0 && (plines.length > 1 ? plines : [{ from: 1 }]).map((ln) => <CartonPreview key={ln.from} pallet={pp} brand={brand} carton={cartons[ln.from - 1]} size={csize} width={208} />)}
           <dl>
             <div><dt>Brand</dt><dd>{brand}</dd></div>
             <div><dt>{p.mixed ? 'Mixed pallet' : 'Product'}</dt><dd>{p.mixed && plines.length ? <ul className="plines">{plines.map((ln, i) => <li key={i}><b>{ln.cartons}</b> {ln.fba && <span className="tag fba">FBA</span>} {ln.item_name}{ln.item_no ? ` · ${ln.item_no}` : ''}</li>)}</ul> : <>{p.fba && <span className="tag fba">FBA</span>} {p.item_name || p.notes || 'Not recorded'}{p.item_no ? ` · ${p.item_no}` : ''}</>}</dd></div>

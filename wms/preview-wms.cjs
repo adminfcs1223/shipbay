@@ -34,6 +34,7 @@ const pickLoc = (p) => { const l = locations.find((x) => x.kind === 'pallet' && 
       case 'wms_units': { const u = new URL(req.url()).searchParams; const pid = u.get('pallet_id')?.replace('eq.', ''); const cid = u.get('carton_id')?.replace('eq.', ''); return j(units.filter((x) => (pid ? x.pallet_id === pid : x.carton_id === cid))); }
       case 'wms_open_box': { const c = cartons.find((x) => x.code === b.p_carton_code); const p = pallets.find((x) => x.id === c.pallet_id); c.open_box_at = new Date().toISOString(); c.open_units = b.p_units; c.scanned_at = c.scanned_at || c.open_box_at; c.open_by_name = WHO; for (let i = 0; i < b.p_units; i++) units.push({ id: `u${++useq}`, code: `U${String(useq).padStart(7, '0')}`, org_id: c.org_id, carton_id: c.id, pallet_id: p.id, item_no: c.item_no, item_name: c.item_name, fba: c.fba, location_id: 'lob', status: 'shelved' }); return j({ pallet_id: p.id, psku: p.psku, seq: c.seq, units: b.p_units, location: 'OB-01' }); }
       case 'wms_receive': { const out = mkLines(b.p_org, b.p_lines.map((l) => ({ sku: products.find((s) => s.id === l.sku), name: l.name, cartons: l.cartons, upc: l.units_per_carton, fba: l.fba })), b.p_pallets); out.filter((p) => p.status === 'counted').forEach(pickLoc); return j(out); }
+      case 'wms_hold_pskus': return j(Array.from({ length: b.p_pallets }, (_, i) => `PSKU-${String(seq + 1 + i).padStart(6, '0')}`));
       case 'wms_mark_printed': return j(1);
       case 'wms_scan_carton': { const c = cartons.find((x) => x.code === b.p_code); if (!c) return fail(`${b.p_code} is not a carton label on file.`); const already = !!c.scanned_at; c.scanned_at = c.scanned_at || new Date().toISOString(); const all = cartons.filter((x) => x.pallet_id === c.pallet_id); return j({ pallet_id: c.pallet_id, psku: pallets.find((p) => p.id === c.pallet_id).psku, seq: c.seq, already, scanned: all.filter((x) => x.scanned_at).length, total: all.length }); }
       case 'wms_complete_count': { const p = pallets.find((x) => x.id === b.p_pallet); p.status = 'counted'; p.counted_at = new Date().toISOString(); p.counted_by_name = WHO; pickLoc(p); return j(p); }
@@ -58,7 +59,15 @@ const pickLoc = (p) => { const l = locations.find((x) => x.kind === 'pallet' && 
   await page.locator('.addline').click(); await pickProduct(1, 'sabrett onions 16 oz', 9, false);
   await page.locator('.addline').click(); await pickProduct(2, 'tenax ager pen', 5, false);
   await page.waitForTimeout(250); await shot('01-mixed-pallet');
-  await page.locator('.btn.big').click(); await page.waitForTimeout(700);
+  // print the carton labels before Receive, reload the station, and the form with its held number is still there
+  await page.locator('.early .sizepick').nth(0).selectOption('2x1'); await page.locator('.early .sizepick').nth(1).selectOption('0');
+  await page.locator('.early .btn').first().click(); await page.waitForTimeout(700); await pdf('carton-labels-before-receive');
+  await page.reload(); await page.waitForTimeout(900); await shot('01b-printed-before-receive');
+  console.log('held', await page.locator('.early .strip').innerText());
+  await page.locator('.line').nth(1).getByLabel(/^Cartons/).fill('8'); await page.waitForTimeout(150); console.log('changed', await page.locator('.early .strip').innerText());
+  await page.locator('.line').nth(1).getByLabel(/^Cartons/).fill('9'); await page.waitForTimeout(150);
+  await page.locator('form .btn.big').click(); await page.waitForTimeout(700);
+  console.log('after receive', await page.locator('.printrow').nth(1).innerText(), '| hold kept:', await page.evaluate(() => localStorage.getItem('wms-hold')));
   await page.locator('.printrow .btn').nth(0).click(); await page.waitForTimeout(500); await pdf('pallet-label-mixed');
   await page.locator('.printrow .sizepick').nth(0).selectOption('2x1'); await page.locator('.printrow .sizepick').nth(1).selectOption('0'); await page.waitForTimeout(150);
   await page.locator('.printrow .twobtn .btn').nth(0).click(); await page.waitForTimeout(700); await pdf('carton-labels-mixed');
