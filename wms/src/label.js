@@ -21,7 +21,7 @@ const brandSize = (name) => { const n = (name || '').length; return n <= 9 ? 0.7
 /** The cartons of a pallet. With the database rows attached (p._cartons) each carries its own product; otherwise the
  *  codes are derived by the same rule as the database: C + the pallet's six digits + the carton number. */
 export function cartonCodes(p) {
-  if (p._cartons?.length) return p._cartons.map((c) => ({ seq: c.seq, code: c.code, item_no: c.item_no, item_name: c.item_name, units_per_carton: c.units_per_carton, fba: c.fba }));
+  if (p._cartons?.length) return p._cartons.map((c) => ({ seq: c.seq, code: c.code, item_no: c.item_no, item_name: c.item_name, units_per_carton: c.units_per_carton, fba: c.fba, cle: !!c.cle }));
   const n = p.cartons || 0; const w = Math.max(2, String(n).length); const num = p.psku.replace(/\D/g, '');
   return Array.from({ length: n }, (_, i) => ({ seq: i + 1, code: `C${num}${String(i + 1).padStart(w, '0')}` }));
 }
@@ -29,10 +29,10 @@ export function cartonCodes(p) {
 export function linesOf(p) {
   const out = [];
   for (const c of cartonCodes(p)) {
-    const name = c.item_name || (p.mixed ? '' : p.item_name) || p.notes || ''; const no = c.item_no ?? (p.mixed ? null : p.item_no) ?? null; const fba = c.fba ?? p.fba ?? false; const upc = c.units_per_carton ?? (p.mixed ? null : p.units_per_carton) ?? null;
+    const name = c.item_name || (p.mixed ? '' : p.item_name) || p.notes || ''; const no = c.item_no ?? (p.mixed ? null : p.item_no) ?? null; const fba = c.fba ?? p.fba ?? false; const cle = c.cle ?? p.cle ?? false; const upc = c.units_per_carton ?? (p.mixed ? null : p.units_per_carton) ?? null;
     const last = out[out.length - 1];
-    if (last && last.item_name === name && last.item_no === no && last.fba === fba && last.units_per_carton === upc) { last.cartons += 1; last.to = c.seq; }
-    else out.push({ item_name: name, item_no: no, fba, units_per_carton: upc, cartons: 1, from: c.seq, to: c.seq });
+    if (last && last.item_name === name && last.item_no === no && last.fba === fba && last.cle === cle && last.units_per_carton === upc) { last.cartons += 1; last.to = c.seq; }
+    else out.push({ item_name: name, item_no: no, fba, cle, units_per_carton: upc, cartons: 1, from: c.seq, to: c.seq });
   }
   return out;
 }
@@ -40,7 +40,7 @@ export function linesOf(p) {
 /** One 4x6 pallet label's markup. The on-screen preview scales the same markup (CSS var --u = one inch). */
 export function labelHtml(p, brand) {
   const meta = [
-    p.cartons != null ? ['Cartons', String(p.cartons)] : null,
+    p.cartons != null ? ['Cartons', p.cle ? `${p.cartons} · logging exempt` : String(p.cartons)] : null,
     p.units_per_carton ? ['Units per carton', String(p.units_per_carton)] : null,
     ['Received', fmtStamp(p.received_at)],
     p.received_by_name ? ['By', p.received_by_name] : null,
@@ -55,10 +55,10 @@ export function labelHtml(p, brand) {
     </header>
     <div class="pskurow">
       <div><small>PSKU#</small><div class="psku">${esc(p.psku)}</div></div>
-      <div class="of">${p.fba ? '<em class="fba">FBA</em>' : `<small>Pallet</small><b>${p.batch_pos}<i>of</i>${p.batch_size}</b>`}</div>
+      <div class="of">${p.fba || p.cle ? `${p.fba && p.cle ? '<em class="fba sm">FBA</em><em class="fba sm">CLE</em>' : p.fba ? '<em class="fba">FBA</em>' : '<em class="fba">CLE</em>'}` : `<small>Pallet</small><b>${p.batch_pos}<i>of</i>${p.batch_size}</b>`}</div>
     </div>
     <div class="bc">${barcodeSvg(p.psku)}</div>
-    ${p.mixed ? (() => { const ls = linesOf(p); return `<div class="prod mix"><small>Mixed pallet · ${ls.length || '?'} products</small>${ls.slice(0, 6).map((l) => `<p><b>${l.cartons}</b> ${l.fba ? '<em>FBA</em> ' : ''}${esc(l.item_no ? `${l.item_no} ` : '')}${esc(l.item_name)}</p>`).join('')}${ls.length > 6 ? `<p>+ ${ls.length - 6} more</p>` : ''}</div>`; })()
+    ${p.mixed ? (() => { const ls = linesOf(p); return `<div class="prod mix"><small>Mixed pallet · ${ls.length || '?'} products</small>${ls.slice(0, 6).map((l) => `<p><b>${l.cartons}</b> ${l.fba ? '<em>FBA</em> ' : ''}${l.cle ? '<em>CLE</em> ' : ''}${esc(l.item_no ? `${l.item_no} ` : '')}${esc(l.item_name)}</p>`).join('')}${ls.length > 6 ? `<p>+ ${ls.length - 6} more</p>` : ''}</div>`; })()
       : p.item_name ? `<div class="prod"><small>Product${p.item_no ? ` · ${esc(p.item_no)}` : ''}</small><div>${esc(p.item_name)}</div></div>` : ''}
     <div class="meta">${meta.map(([k, v]) => `<div><small>${k}</small><span>${esc(v)}</span></div>`).join('')}</div>
     ${p.notes ? `<div class="notes">${esc(p.notes)}</div>` : ''}
@@ -156,7 +156,9 @@ export const LABEL_CSS = `
   .plabel .bc { height: calc(var(--u) * 1.3); }
   .plabel .prod { margin-top: calc(var(--u) * .12); }
   .plabel .prod div { font-size: calc(var(--u) * .2); font-weight: 800; line-height: 1.12; letter-spacing: -.01em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .plabel .fba { display: inline-block; font-style: normal; font-size: calc(var(--u) * .3); font-weight: 800; line-height: 1; padding: calc(var(--u) * .05) calc(var(--u) * .1); background: #000; color: #fff; }
+  .plabel .fba { display: inline-block; font-style: normal; font-size: calc(var(--u) * .23); font-weight: 800; line-height: 1; padding: calc(var(--u) * .05) calc(var(--u) * .07); background: #000; color: #fff; }
+  .plabel .fba.sm { display: block; font-size: calc(var(--u) * .16); padding: calc(var(--u) * .03) calc(var(--u) * .07); text-align: center; }
+  .plabel .fba.sm + .fba.sm { margin-top: calc(var(--u) * .03); }
   .plabel .prod.mix p { font-size: calc(var(--u) * .125); font-weight: 600; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .plabel .prod.mix p b { display: inline-block; min-width: calc(var(--u) * .28); font-weight: 800; font-variant-numeric: tabular-nums; }
   .plabel .prod.mix em { font-style: normal; font-weight: 800; background: #000; color: #fff; padding: 0 calc(var(--u) * .03); }
@@ -209,12 +211,14 @@ function printPages(pages, cls, size, title, fixed = true) {
     f.srcdoc = doc;
   });
 }
+/** The first carton of a pallet that gets a label (CLE cartons do not), for test prints and previews. */
+export const firstLabelled = (p) => cartonCodes(p).find((c) => !c.cle) || null;
 /** 4x6: one page per pallet. */
 export const printPalletLabels = (pallets, brandOf) => printPages(pallets.map((p) => labelHtml(p, brandOf(p))), 'plabel', '4in 6in', 'Pallet labels');
 /** One page per carton at the size and turn of the roll in the printer, for every carton of the pallets given (or only the cartons listed). */
 export const printCartonLabels = (pallets, brandOf, only, size = getCartonSize(), turn = getCartonTurn()) => {
   const z = parseSize(size); const side = turn === 'left' || turn === 'right';
-  return printPages(pallets.flatMap((p) => cartonCodes(p).filter((c) => !only || only.includes(c.seq)).map((c) => cartonPageHtml(p, brandOf(p), c, z.key, turn))), 'cpage', side ? `${z.h}in ${z.w}in` : `${z.w}in ${z.h}in`, 'Carton labels', false);
+  return printPages(pallets.flatMap((p) => cartonCodes(p).filter((c) => !c.cle && (!only || only.includes(c.seq))).map((c) => cartonPageHtml(p, brandOf(p), c, z.key, turn))), 'cpage', side ? `${z.h}in ${z.w}in` : `${z.w}in ${z.h}in`, 'Carton labels', false);
 };
 /** One page per position: 4x6 (declared), or the small roll at the station (page size left to the printer paper, same turn as carton labels). */
 export const printLocationLabels = (locs, size = '4x6', turn = getCartonTurn()) => {

@@ -3,7 +3,7 @@
 //   the PSKU label there · Received. A pallet entered by mistake is voided with a reason, never deleted.
 import { useEffect, useMemo, useState } from 'react';
 import { supabase, fmtStamp, sameDay } from './lib';
-import { printPalletLabels, printCartonLabels, printUnitLabels, linesOf } from './label';
+import { printPalletLabels, printCartonLabels, printUnitLabels, linesOf, firstLabelled } from './label';
 import { LabelPreview, CartonPreview, CartonSizePicker, CartonTurnPicker, useCartonSize, ScanBox, StatusTag, FloorMap, beep, normPsku } from './parts.jsx';
 
 const WHEN = [['open', 'Not finished'], ['today', 'Today'], ['week', '7 days'], ['all', 'All']];
@@ -75,7 +75,7 @@ export default function Pallets({ orgs, pallets, locations, brandName, merge, fi
             <tbody>{list.map((p) => (
               <tr key={p.id} className={p.status === 'void' ? 'void' : ''} onClick={() => setSel(p.id)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setSel(p.id)}>
                 <td className="code">{p.psku}</td><td><b>{brandName(p.org_id)}</b></td>
-                <td className="clip">{p.fba && <span className="tag fba">FBA</span>} {p.item_name || p.notes || '—'}</td>
+                <td className="clip">{p.fba && <span className="tag fba">FBA</span>} {p.cle && <span className="tag fba">CLE</span>} {p.item_name || p.notes || '—'}</td>
                 <td className="n num">{p.cartons ?? '—'}</td><td className="code">{p.status === 'stored' ? locName(p.location_id) : p.status === 'counted' && p.location_id ? `→ ${locName(p.location_id)}` : '—'}</td>
                 <td className="num">{fmtStamp(p.received_at)}</td><td>{p.received_by_name || '—'}</td>
                 <td><StatusTag s={p.status} /></td>
@@ -114,6 +114,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
   const plines = useMemo(() => (cartons?.length ? linesOf(pp) : []), [pp]);
   // how a carton is named on screen: as its label reads. On a mixed pallet that is its number within its own product.
   const cname = (seq) => { const ln = plines.length > 1 ? plines.find((l) => seq >= l.from && seq <= l.to) : null; return ln ? `${ln.item_name}, carton ${seq - ln.from + 1} of ${ln.cartons},` : `Carton ${seq}`; };
+  const labelled = (cartons || []).filter((c) => !c.cle).length;   // cartons that carry a label: CLE (carton logging exempt) cartons do not
   const shelfOf = (id) => (locations || []).find((l) => l.id === id)?.code || '';
   const say = (kind, text) => { beep(kind === 'ok' ? 'ok' : 'bad'); setFeed({ kind, text }); };
 
@@ -187,7 +188,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
           <h1 className="code">{p.psku}<span className="dot">.</span></h1>
         </div>
         <div className="glance">
-          <div><b>{total ? `${scanned}/${total}` : '—'}</b><small>Cartons scanned</small></div>
+          <div><b>{p.cle ? 'CLE' : total ? `${scanned}/${total}` : '—'}</b><small>{p.cle ? `${total} cartons, not logged` : 'Cartons scanned'}</small></div>
           <div><b className="code">{loc && p.status !== 'open' ? loc.code : '—'}</b><small>{p.status === 'stored' ? 'Position' : 'Goes to'}</small></div>
         </div>
       </header>
@@ -210,7 +211,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
               {cartons === null ? <div className="empty">Loading cartons…</div> : (
                 (plines.length > 1 ? plines : [null]).map((ln, i) => (
                   <div key={i} className="cgroup">
-                    {ln && <div className="cgname">{ln.fba && <span className="tag fba">FBA</span>} <b>{ln.item_name}</b><span>{ln.item_no ? `${ln.item_no} · ` : ''}{ln.cartons} carton{ln.cartons === 1 ? '' : 's'}</span><button className="swap" onClick={() => printCartonLabels([pp], () => brand, Array.from({ length: ln.cartons }, (_, k) => ln.from + k), csize, cturn)}>Print these {ln.cartons} label{ln.cartons === 1 ? '' : 's'}</button></div>}
+                    {ln && <div className="cgname">{ln.fba && <span className="tag fba">FBA</span>} {ln.cle && <span className="tag fba">CLE</span>} <b>{ln.item_name}</b><span>{ln.item_no ? `${ln.item_no} · ` : ''}{ln.cartons} carton{ln.cartons === 1 ? '' : 's'}</span>{!ln.cle && <button className="swap" onClick={() => printCartonLabels([pp], () => brand, Array.from({ length: ln.cartons }, (_, k) => ln.from + k), csize, cturn)}>Print these {ln.cartons} label{ln.cartons === 1 ? '' : 's'}</button>}</div>}
                     <div className="ctiles">{cartons.filter((c) => !ln || (c.seq >= ln.from && c.seq <= ln.to)).map((c) => <span key={c.id} className={`${c.scanned_at ? 'in' : ''} ${c.open_box_at ? 'ob' : ''}`} title={c.open_box_at ? `${c.code} · open box, ${c.open_units} units` : c.code}>{ln ? c.seq - ln.from + 1 : c.seq}</span>)}</div>
                   </div>
                 ))
@@ -254,20 +255,20 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
 
         <aside className="panel detail">
           <LabelPreview pallet={pp} brand={brand} inch={52} />
-          {total > 0 && (plines.length > 1 ? plines : [{ from: 1 }]).map((ln) => <CartonPreview key={ln.from} pallet={pp} brand={brand} carton={cartons[ln.from - 1]} size={csize} width={208} />)}
+          {labelled > 0 && (plines.length > 1 ? plines : [{ from: firstLabelled(pp).seq }]).filter((ln) => !ln.cle).map((ln) => <CartonPreview key={ln.from} pallet={pp} brand={brand} carton={cartons[ln.from - 1]} size={csize} width={208} />)}
           <dl>
             <div><dt>Brand</dt><dd>{brand}</dd></div>
-            <div><dt>{p.mixed ? 'Mixed pallet' : 'Product'}</dt><dd>{p.mixed && plines.length ? <ul className="plines">{plines.map((ln, i) => <li key={i}><b>{ln.cartons}</b> {ln.fba && <span className="tag fba">FBA</span>} {ln.item_name}{ln.item_no ? ` · ${ln.item_no}` : ''}</li>)}</ul> : <>{p.fba && <span className="tag fba">FBA</span>} {p.item_name || p.notes || 'Not recorded'}{p.item_no ? ` · ${p.item_no}` : ''}</>}</dd></div>
-            <div><dt>Cartons</dt><dd>{p.cartons ?? 'None recorded'}{p.units_per_carton ? ` · ${p.units_per_carton} units each = ${(p.cartons * p.units_per_carton).toLocaleString()}` : ''}</dd></div>
+            <div><dt>{p.mixed ? 'Mixed pallet' : 'Product'}</dt><dd>{p.mixed && plines.length ? <ul className="plines">{plines.map((ln, i) => <li key={i}><b>{ln.cartons}</b> {ln.fba && <span className="tag fba">FBA</span>} {ln.cle && <span className="tag fba">CLE</span>} {ln.item_name}{ln.item_no ? ` · ${ln.item_no}` : ''}</li>)}</ul> : <>{p.fba && <span className="tag fba">FBA</span>} {p.cle && <span className="tag fba">CLE</span>} {p.item_name || p.notes || 'Not recorded'}{p.item_no ? ` · ${p.item_no}` : ''}</>}</dd></div>
+            <div><dt>Cartons</dt><dd>{p.cartons ?? 'None recorded'}{p.cle ? ' · carton logging exempt' : ''}{p.units_per_carton ? ` · ${p.units_per_carton} units each = ${(p.cartons * p.units_per_carton).toLocaleString()}` : ''}</dd></div>
             <div><dt>Entered</dt><dd>{fmtStamp(p.received_at)}{p.received_by_name ? ` · ${p.received_by_name}` : ''}</dd></div>
             {p.counted_at && total > 0 && <div><dt>Cartons checked</dt><dd>{fmtStamp(p.counted_at)}{p.counted_by_name ? ` · ${p.counted_by_name}` : ''}</dd></div>}
           </dl>
           {p.status !== 'void' && !voiding && <div className="acts">
             <button className="btn" onClick={reprint}>Reprint pallet label</button>
-            {total > 0 && <button className="btn" onClick={() => printCartonLabels([pp], () => brand, null, csize, cturn)}>Reprint {total} carton labels</button>}
-            {total > 0 && <button className="btn sm" onClick={() => printCartonLabels([pp], () => brand, [1], csize, cturn)}>Test with 1 carton label</button>}
-            {total > 0 && <label className="sizerow">Carton label roll<CartonSizePicker size={csize} onChange={setCsize} /></label>}
-            {total > 0 && <label className="sizerow">Label direction<CartonTurnPicker turn={cturn} onChange={setCturn} /></label>}
+            {labelled > 0 && <button className="btn" onClick={() => printCartonLabels([pp], () => brand, null, csize, cturn)}>Reprint {labelled} carton labels</button>}
+            {labelled > 0 && <button className="btn sm" onClick={() => printCartonLabels([pp], () => brand, [firstLabelled(pp)?.seq], csize, cturn)}>Test with 1 carton label</button>}
+            {labelled > 0 && <label className="sizerow">Carton label roll<CartonSizePicker size={csize} onChange={setCsize} /></label>}
+            {labelled > 0 && <label className="sizerow">Label direction<CartonTurnPicker turn={cturn} onChange={setCturn} /></label>}
             <button className="btn" onClick={() => setVoiding(true)}>Void pallet</button>
           </div>}
           {voiding && (

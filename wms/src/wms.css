@@ -283,7 +283,7 @@ label input.bignum { height: 59px; font-size: 26px; font-weight: 800; font-varia
 .line.mixed { padding: 14px 16px 16px; border: 1.5px solid var(--line-2); border-radius: var(--r); background: var(--bg); }
 .linehead { display: flex; justify-content: space-between; align-items: center; }
 .linehead b { font-size: 14px; font-weight: 800; }
-.line .qtyrow { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; margin-bottom: 0; }
+.line .qtyrow { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; margin-bottom: 0; }
 .addline { height: 52px; border: 1.5px dashed var(--line-2); border-radius: var(--r); background: none; font-weight: 700; font-size: 15px; color: var(--muted); }
 .addline:hover { border-color: var(--ink); color: var(--ink); }
 .fbatoggle { height: 59px; padding: 0 18px 0 14px; display: flex; align-items: center; gap: 10px; border: 1.5px solid var(--line-2); border-radius: var(--r); background: #fff; font-weight: 800; font-size: 17px; }
