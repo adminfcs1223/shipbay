@@ -558,3 +558,31 @@ label input.bignum { height: 59px; font-size: 26px; font-weight: 800; font-varia
   .prows .breakdown { margin-left: 60px; }
 }
 .pq span { display: block; font-size: 10.5px; color: var(--muted); white-space: nowrap; margin-top: 2px; }
+
+/* ---------- pick list: problems ---------- */
+.prows > li { position: relative; }
+.pprob { position: absolute; right: 66px; bottom: 2px; background: none; border: 0; padding: 4px 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
+.prow { padding-bottom: 20px; }
+.prows.done .prow, .prows.probs .prow { padding-bottom: 8px; }
+.pl.none b { font-size: 13.5px; font-weight: 700; color: var(--muted); }
+.sect span.hot { color: var(--orange-text); font-weight: 800; }
+.prows.probs { background: none; }
+.prows.probs .prow { grid-template-columns: 44px minmax(0, 1fr) 34px 64px 72px; }
+.prows.probs .pthumb { width: 44px; height: 44px; }
+.prows.probs .pwhat b { font-size: 15px; }
+.prows.probs .pq b { font-size: 20px; }
+.prows.probs .pl b { font-size: 16px; }
+.prows.probs .undo { min-width: 0; width: 72px; font-size: 13px; line-height: 1.15; padding: 4px; }
+.probdlg { gap: 14px; }
+.kinds { display: flex; flex-direction: column; gap: 8px; }
+.kinds button { min-height: 56px; border: 2px solid var(--line-2); border-radius: var(--r); background: #fff; font-size: 18px; font-weight: 700; text-align: left; padding: 0 16px; }
+.kinds button.on { border-color: var(--ink); background: var(--ink); color: #fff; }
+.pf { display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600; }
+.pf em { font-style: normal; font-weight: 500; color: var(--muted); }
+.pf input, .pf textarea { border: 1.5px solid var(--line-2); border-radius: var(--r-sm); padding: 10px 12px; font: inherit; font-size: 18px; font-weight: 600; background: #fff; width: 100%; }
+.pf input { height: 52px; font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.dlgbtns { display: flex; gap: 10px; }
+.dlgbtns .btn { flex: 1; }
+.dlgbtns .btn.big { flex: 2; margin: 0; }
+@media (max-width: 820px) { .pprob { right: 58px; } .dialog.probdlg { padding: 20px 18px; } }
+.dlgbtns .btn { height: auto; min-height: 56px; }
