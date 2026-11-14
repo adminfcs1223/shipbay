@@ -2,8 +2,9 @@
 -- "just because there is no assigned location does not mean the item doesn't need to be picked": a line with no
 -- location, or with less on file than ordered, is picked like any other. wms_pick takes what the system has on file
 -- and records the rest on the line (order_lines.pick_short) instead of refusing.
--- Applied live with execute_sql on 11-14; the function bodies (wms_report_problem, wms_resolve_problem, wms_pick,
--- wms_unpick, wms_picklist) are as applied there and recorded in claude/wms-orders-picklist.md.
+-- Applied live with execute_sql on 11-14. NOT IN THIS FILE YET: the function bodies changed with it (wms_report_problem,
+-- wms_resolve_problem, wms_pick, wms_unpick, wms_picklist). They exist only in the database; copy them here from
+-- pg_get_functiondef before rebuilding a database from these files.
 alter table order_lines add column if not exists pick_short int;   -- units picked that the system had no stock for
 
 create table if not exists wms_pick_problems (
