@@ -588,17 +588,8 @@ label input.bignum { height: 59px; font-size: 26px; font-weight: 800; font-varia
 .dlgbtns .btn { height: auto; min-height: 56px; }
 
 /* ---------- 11-14 evening: a more formal, warehouse-floor look ----------
-   A status strip across the top of every screen, ink table heads, squarer corners, ruled panels. */
+   Ink table and panel heads, squarer corners, ruled panels. */
 :root { --r: 3px; --r-sm: 2px; }
-.topbar { display: flex; align-items: center; gap: 22px; margin: -30px -36px 0; padding: 0 36px; height: 44px; background: var(--ink); color: #C9D1DC; font-size: 13px; font-variant-numeric: tabular-nums; border-bottom: 3px solid var(--orange); }
-.topbar b { color: #fff; font-weight: 700; }
-.topbar .site { display: flex; gap: 12px; align-items: baseline; margin-right: auto; min-width: 0; white-space: nowrap; }
-.topbar .site b { letter-spacing: .01em; }
-.topbar .site i { font-style: normal; color: #8FA0B5; overflow: hidden; text-overflow: ellipsis; }
-.topbar .tbclock, .topbar .tbwho { white-space: nowrap; }
-.topbar .tblink { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; color: #fff; white-space: nowrap; }
-.topbar .tblink i { width: 9px; height: 9px; border-radius: 50%; background: #2FBF85; }
-.topbar .tblink.down i { background: var(--orange); }
 .rail { border-right: 1px solid var(--ink-line); }
 .pagehead { border-bottom-width: 3px; }
 .pagehead .when { font-size: 15px; font-weight: 600; color: var(--muted); margin-top: 6px; }
@@ -637,9 +628,6 @@ label input.bignum { height: 59px; font-size: 26px; font-weight: 800; font-varia
 .probdlg .swap { align-self: center; }
 
 @media (max-width: 820px) {
-  .topbar { margin: calc(-16px - env(safe-area-inset-top)) -14px 0; padding: env(safe-area-inset-top) 14px 0; height: calc(38px + env(safe-area-inset-top)); gap: 12px; font-size: 12px; }
-  .topbar .site i, .topbar .tbclock { display: none; }
-  .topbar .site { overflow: hidden; } .topbar .site b { overflow: hidden; text-overflow: ellipsis; }
   .calday { min-height: 58px; padding: 5px 4px; align-items: center; text-align: center; }
   .calday em, .calday b i { display: none; }
   .calday b { font-size: 18px; }

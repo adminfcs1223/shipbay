@@ -1,5 +1,5 @@
-// The WMS home screen: a greeting, the shipment calendar (what is expected in, on which day, how much), and what has
-// to go out. Shipments are the deliveries brands book in their portal; they appear here once ShipBay has approved them.
+// The WMS home screen: a greeting, what has to go out and what is on the floor, then the shipment calendar (what is
+// expected in, on which day, how much). Shipments are the deliveries brands book in their portal; they appear here once ShipBay has approved them.
 // Orders come from each brand's connector. Read fresh every minute.
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from './lib';
@@ -51,31 +51,6 @@ export default function Today({ me, go, openBrand }) {
       </header>
       {err && <div className="strip bad"><b>Not refreshed.</b><span>{err}</span><button onClick={load}>Try again</button></div>}
 
-      <section className="panel">
-        <header className="panelhead"><h3>Shipments expected</h3><span>{d.inbound.length ? `${plural(d.inbound.length, 'shipment')} in the next 5 weeks` : 'Nothing booked in the next 5 weeks'}</span></header>
-        <div className="cal" role="grid" aria-label="Shipments expected by day">
-          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((w) => <div key={w} className="calhead">{w}</div>)}
-          {days.map((day) => {
-            const rows = byDay.get(day) || []; const dt = at(day); const pallets = rows.reduce((t, r) => t + Number(r.pallets || 0), 0);
-            return (
-              <button key={day} role="gridcell" className={`calday ${day === today ? 'today' : ''} ${day < today ? 'past' : ''} ${rows.length ? 'has' : ''} ${day === shown ? 'sel' : ''}`} onClick={() => setSel(day)} aria-label={`${longDay(day)}: ${rows.length ? amount(rows) : 'nothing expected'}`}>
-                <span className="dnum">{dt.getDate() === 1 || day === days[0] ? dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : dt.getDate()}</span>
-                {rows.length > 0 && <b>{pallets || rows.length}<i>{pallets ? (pallets === 1 ? ' pallet' : ' pallets') : rows.length === 1 ? ' shipment' : ' shipments'}</i></b>}
-                {rows.length > 0 && <em>{[...new Set(rows.map((r) => r.brand))].join(', ')}</em>}
-              </button>);
-          })}
-        </div>
-        <div className="calday-detail">
-          <h4>{shown === today ? 'Today' : longDay(shown)}<span>{list.length ? amount(list) : 'Nothing expected'}</span></h4>
-          {list.length > 0 && <ul className="rows">{list.map((i) => (
-            <li key={i.id}>
-              <div><b>{i.brand}</b><span>{[i.reference, i.carrier, i.notes].filter(Boolean).join(' · ') || 'No details given'}</span></div>
-              <div className="r"><b>{i.pallets ? plural(i.pallets, 'pallet') : i.cartons ? plural(i.cartons, 'carton') : '—'}</b><span className={i.expected_at < today ? 'late' : ''}>{i.expected_at < today ? `Was due ${at(i.expected_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : i.status === 'in_transit' ? 'On its way' : 'Booked'}</span></div>
-            </li>))}</ul>}
-          {undated.length > 0 && <p className="hint">{undated.length === 1 ? '1 approved shipment has' : `${undated.length} approved shipments have`} no date yet.</p>}
-        </div>
-      </section>
-
       <div className="today">
         <section className="panel">
           <header className="panelhead"><h3>Going out today</h3><span>{ordersOut ? `${plural(ordersOut, 'order')} · ${plural(sum(outToday, 'units'), 'unit')}` : 'No orders due today'}</span></header>
@@ -105,6 +80,31 @@ export default function Today({ me, go, openBrand }) {
           <button className="btn big go" onClick={() => go('receive')}>Receive a pallet</button>
         </section>
       </div>
+
+      <section className="panel">
+        <header className="panelhead"><h3>Shipments expected</h3><span>{d.inbound.length ? `${plural(d.inbound.length, 'shipment')} in the next 5 weeks` : 'Nothing booked in the next 5 weeks'}</span></header>
+        <div className="cal" role="grid" aria-label="Shipments expected by day">
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((w) => <div key={w} className="calhead">{w}</div>)}
+          {days.map((day) => {
+            const rows = byDay.get(day) || []; const dt = at(day); const pallets = rows.reduce((t, r) => t + Number(r.pallets || 0), 0);
+            return (
+              <button key={day} role="gridcell" className={`calday ${day === today ? 'today' : ''} ${day < today ? 'past' : ''} ${rows.length ? 'has' : ''} ${day === shown ? 'sel' : ''}`} onClick={() => setSel(day)} aria-label={`${longDay(day)}: ${rows.length ? amount(rows) : 'nothing expected'}`}>
+                <span className="dnum">{dt.getDate() === 1 || day === days[0] ? dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : dt.getDate()}</span>
+                {rows.length > 0 && <b>{pallets || rows.length}<i>{pallets ? (pallets === 1 ? ' pallet' : ' pallets') : rows.length === 1 ? ' shipment' : ' shipments'}</i></b>}
+                {rows.length > 0 && <em>{[...new Set(rows.map((r) => r.brand))].join(', ')}</em>}
+              </button>);
+          })}
+        </div>
+        <div className="calday-detail">
+          <h4>{shown === today ? 'Today' : longDay(shown)}<span>{list.length ? amount(list) : 'Nothing expected'}</span></h4>
+          {list.length > 0 && <ul className="rows">{list.map((i) => (
+            <li key={i.id}>
+              <div><b>{i.brand}</b><span>{[i.reference, i.carrier, i.notes].filter(Boolean).join(' · ') || 'No details given'}</span></div>
+              <div className="r"><b>{i.pallets ? plural(i.pallets, 'pallet') : i.cartons ? plural(i.cartons, 'carton') : '—'}</b><span className={i.expected_at < today ? 'late' : ''}>{i.expected_at < today ? `Was due ${at(i.expected_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : i.status === 'in_transit' ? 'On its way' : 'Booked'}</span></div>
+            </li>))}</ul>}
+          {undated.length > 0 && <p className="hint">{undated.length === 1 ? '1 approved shipment has' : `${undated.length} approved shipments have`} no date yet.</p>}
+        </div>
+      </section>
     </>
   );
 }
