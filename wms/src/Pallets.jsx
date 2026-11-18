@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase, fmtStamp, sameDay } from './lib';
 import { printPalletLabels, printCartonLabels, printUnitLabels, linesOf, firstLabelled } from './label';
+import { fetchCartons, checkCartons } from './cartons.js';
 import { LabelPreview, CartonPreview, CartonSizePicker, CartonTurnPicker, useCartonSize, ScanBox, StatusTag, FloorMap, beep, normPsku } from './parts.jsx';
 
 const WHEN = [['open', 'Not finished'], ['today', 'Today'], ['week', '7 days'], ['all', 'All']];
@@ -103,15 +104,27 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
   const [csize, setCsize, cturn, setCturn] = useCartonSize();
   const loc = (locations || []).find((l) => l.id === p.location_id) || null;
 
+  const [cartonsOk, setCartonsOk] = useState(false);   // the carton rows were read and add up: labels may be printed from them
   const loadCartons = async () => {
-    const [c, u] = await Promise.all([supabase.from('wms_cartons').select('*').eq('pallet_id', p.id).order('seq'), supabase.from('wms_units').select('*').eq('pallet_id', p.id).order('code')]);
-    setCartons(c.data || []); setUnits(u.data || []);
+    let c;
+    try { c = await fetchCartons(supabase, [p.id]); }
+    catch (x) { setCartons([]); setCartonsOk(false); return say('bad', `The cartons of ${p.psku} could not be read (${x.message}). Nothing can be scanned or printed for it until they are: reload to try again.`); }
+    const bad = checkCartons(p, c);
+    setCartons(c); setCartonsOk(bad.length === 0);
+    if (bad.length) say('bad', `The cartons on file for ${p.psku} do not add up (${bad.join(', ')}). Carton labels cannot be printed. Tell an admin.`);
+    const u = await supabase.from('wms_units').select('*').eq('pallet_id', p.id).order('code');
+    if (u.error) say('bad', `The open-box units of ${p.psku} could not be read (${u.error.message}).`);
+    setUnits(u.data || []);
+  };
+  const printCartons = async (only) => {
+    const ok = await printCartonLabels([pp], () => brand, only, csize, cturn);
+    if (!ok) say('bad', `No carton labels were printed: the cartons on file for ${p.psku} are not verified.`);
   };
   useEffect(() => { loadCartons(); }, [p.id]);
   // NCC products (no carton count; cle in the data) have one marker row each: not a carton, never counted here
   const scanned = (cartons || []).filter((c) => !c.cle && c.scanned_at).length; const total = (cartons || []).filter((c) => !c.cle).length;
   const step = p.status === 'open' ? 1 : p.status === 'counted' ? 2 : 3;
-  const pp = useMemo(() => ({ ...p, _cartons: cartons || [] }), [p, cartons]);   // the pallet with its cartons: labels and prints read each carton's own product
+  const pp = useMemo(() => ({ ...p, _cartons: cartons || [], _cartonsOk: cartonsOk }), [p, cartons, cartonsOk]);   // the pallet with its cartons: labels and prints read each carton's own product
   const plines = useMemo(() => (cartons?.length ? linesOf(pp) : []), [pp]);
   // how a carton is named on screen: as its label reads. On a mixed pallet that is its number within its own product.
   const cname = (seq) => { const ln = plines.length > 1 ? plines.find((l) => seq >= l.from && seq <= l.to) : null; return ln ? `${ln.item_name}, carton ${seq - ln.from + 1} of ${ln.cartons},` : `Carton ${seq}`; };
@@ -220,7 +233,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
               <button className="btn go big" disabled={busy || !total || scanned < total} onClick={complete}>
                 {scanned < total ? `${total - scanned} carton${total - scanned === 1 ? '' : 's'} not scanned in yet` : busy ? 'Saving…' : 'All cartons in · show where it goes'}
               </button>
-              {missing.length > 0 && scanned > 0 && <button className="swap" onClick={() => printCartonLabels([pp], () => brand, missing, csize, cturn)}>Reprint the {missing.length} label{missing.length === 1 ? '' : 's'} not scanned yet</button>}
+              {missing.length > 0 && scanned > 0 && <button className="swap" onClick={() => printCartons(missing)}>Reprint the {missing.length} label{missing.length === 1 ? '' : 's'} not scanned yet</button>}
             </section>
           )}
 
@@ -267,8 +280,8 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
           </dl>
           {p.status !== 'void' && !voiding && <div className="acts">
             <button className="btn" onClick={reprint}>Reprint pallet label</button>
-            {labelled > 0 && <button className="btn" onClick={() => printCartonLabels([pp], () => brand, null, csize, cturn)}>Reprint {labelled} carton labels</button>}
-            {labelled > 0 && <button className="btn sm" onClick={() => printCartonLabels([pp], () => brand, [firstLabelled(pp)?.seq], csize, cturn)}>Test with 1 carton label</button>}
+            {labelled > 0 && <button className="btn" onClick={() => printCartons(null)}>Reprint {labelled} carton labels</button>}
+            {labelled > 0 && <button className="btn sm" onClick={() => printCartons([firstLabelled(pp)?.seq])}>Test with 1 carton label</button>}
             {labelled > 0 && <label className="sizerow">Carton label roll<CartonSizePicker size={csize} onChange={setCsize} /></label>}
             {labelled > 0 && <label className="sizerow">Label direction<CartonTurnPicker turn={cturn} onChange={setCturn} /></label>}
             <button className="btn" onClick={() => setVoiding(true)}>Void pallet</button>

@@ -2,6 +2,7 @@
 // (pallet n of m, received when, by whom, reference). One label per page, sized for a 4x6 thermal printer.
 import JsBarcode from 'jsbarcode';
 import { esc, fmtStamp } from './lib';
+import { canPrintCartons } from './cartons.js';
 
 export function barcodeSvg(text, opts = {}) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -18,12 +19,11 @@ export function barcodeSvg(text, opts = {}) {
 // brand name is the biggest thing on the label; step the size down so long names still fit on two lines
 const brandSize = (name) => { const n = (name || '').length; return n <= 9 ? 0.74 : n <= 13 ? 0.58 : n <= 18 ? 0.46 : n <= 28 ? 0.38 : 0.3; };
 
-/** The cartons of a pallet. With the database rows attached (p._cartons) each carries its own product; otherwise the
- *  codes are derived by the same rule as the database: C + the pallet's six digits + the carton number. */
+/** The cartons of a pallet: the rows attached to it (p._cartons), each with its own code and product. They come from
+ *  the database, or from the receiving form's draft when labels are printed before Receive. Nothing is made up here:
+ *  a pallet with no rows attached has no cartons to show or print (see cartons.js for why). */
 export function cartonCodes(p) {
-  if (p._cartons?.length) return p._cartons.map((c) => ({ seq: c.seq, code: c.code, item_no: c.item_no, item_name: c.item_name, units_per_carton: c.units_per_carton, fba: c.fba, cle: !!c.cle }));
-  const n = p.cartons || 0; const w = Math.max(2, String(n).length); const num = p.psku.replace(/\D/g, '');
-  return Array.from({ length: n }, (_, i) => ({ seq: i + 1, code: `C${num}${String(i + 1).padStart(w, '0')}` }));
+  return (p._cartons || []).map((c) => ({ seq: c.seq, code: c.code, item_no: c.item_no, item_name: c.item_name, units_per_carton: c.units_per_carton, fba: c.fba, cle: !!c.cle }));
 }
 /** What is on a pallet, product by product, in carton order. */
 export function linesOf(p) {
@@ -215,10 +215,15 @@ function printPages(pages, cls, size, title, fixed = true) {
 export const firstLabelled = (p) => cartonCodes(p).find((c) => !c.cle) || null;
 /** 4x6: one page per pallet. */
 export const printPalletLabels = (pallets, brandOf) => printPages(pallets.map((p) => labelHtml(p, brandOf(p))), 'plabel', '4in 6in', 'Pallet labels');
-/** One page per carton at the size and turn of the roll in the printer, for every carton of the pallets given (or only the cartons listed). */
+/** One page per carton at the size and turn of the roll in the printer, for every carton of the pallets given (or only the cartons listed).
+ *  Resolves false, printing nothing, unless every pallet carries carton rows that may be printed (checked database rows,
+ *  or the form's draft before Receive) and there is at least one label to print. */
 export const printCartonLabels = (pallets, brandOf, only, size = getCartonSize(), turn = getCartonTurn()) => {
+  if (!pallets?.length || !pallets.every(canPrintCartons)) return Promise.resolve(false);
   const z = parseSize(size); const side = turn === 'left' || turn === 'right';
-  return printPages(pallets.flatMap((p) => cartonCodes(p).filter((c) => !c.cle && (!only || only.includes(c.seq))).map((c) => cartonPageHtml(p, brandOf(p), c, z.key, turn))), 'cpage', side ? `${z.h}in ${z.w}in` : `${z.w}in ${z.h}in`, 'Carton labels', false);
+  const pages = pallets.flatMap((p) => cartonCodes(p).filter((c) => !c.cle && (!only || only.includes(c.seq))).map((c) => cartonPageHtml(p, brandOf(p), c, z.key, turn)));
+  if (!pages.length) return Promise.resolve(false);
+  return printPages(pages, 'cpage', side ? `${z.h}in ${z.w}in` : `${z.w}in ${z.h}in`, 'Carton labels', false);
 };
 /** One page per position: 4x6 (declared), or the small roll at the station (page size left to the printer paper, same turn as carton labels). */
 export const printLocationLabels = (locs, size = '4x6', turn = getCartonTurn()) => {

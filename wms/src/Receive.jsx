@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, fmtTime, sameDay } from './lib';
 import { printPalletLabels, printCartonLabels, cartonCodes, linesOf, firstLabelled, sizeLabel } from './label';
+import { fetchCartons, attachCartons, sameLabels, findReceipt } from './cartons.js';
 import { LabelPreview, CartonPreview, CartonSizePicker, CartonTurnPicker, useCartonSize, StatusTag, beep } from './parts.jsx';
 
 const num = (n) => Number(n || 0).toLocaleString();
@@ -15,10 +16,14 @@ const newLine = () => ({ id: ++lineId, prod: null, off: false, what: '', q: '', 
 const lineReady = (l) => !!(l.prod || (l.off && l.what.trim()));
 const lineCartons = (l) => (l.cle || l.cartons === '' ? 0 : Math.max(0, Math.min(500, Math.round(Number(l.cartons) || 0))));
 // labels printed before Receive: the form and the PSKU numbers it took, kept on this station until the pallet is received
+// a Receive that was sent and not yet answered: kept on this station so a reload cannot hide that it may be on file
+const loadFlight = () => { try { const f = JSON.parse(localStorage.getItem('wms-inflight') || 'null'); return f && f.key ? f : null; } catch { return null; } };
+const saveFlight = (f) => { try { f ? localStorage.setItem('wms-inflight', JSON.stringify(f)) : localStorage.removeItem('wms-inflight'); } catch { /* storage off */ } };
 const loadHold = () => { try { const h = JSON.parse(localStorage.getItem('wms-hold') || 'null'); return h && h.key && h.org && Array.isArray(h.lines) && h.lines.length && h.pskus?.length ? h : null; } catch { return null; } };
 
 export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const [saved] = useState(loadHold);
+  const [flight] = useState(loadFlight);
   const [org, setOrg] = useState(() => { if (saved) return saved.org; try { return localStorage.getItem('wms-brand') || ''; } catch { return ''; } });
   const [products, setProducts] = useState(null);
   const [lines, setLines] = useState(() => (saved ? saved.lines.map((l) => ({ ...newLine(), ...l, id: ++lineId })) : [newLine()]));
@@ -30,7 +35,11 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const [done, setDone] = useState(null);         // pallets just made (with their cartons) → the print prompt
   const [printed, setPrinted] = useState({});
   const [err, setErr] = useState(null);
-  const key = useRef(saved?.key || crypto.randomUUID());
+  const key = useRef(flight?.key || saved?.key || crypto.randomUUID());
+  const [unsure, setUnsure] = useState(!!flight);   // a Receive was sent and no answer came back: it may or may not be on file
+  const lostForm = useRef(!!flight && flight.key !== saved?.key);   // the page was reloaded since: the form that went with that key is gone
+  const [pending, setPending] = useState(null);     // received, cartons not yet read and checked: { pallets, early, reading | why | bad }
+  const sending = useRef(false);
   const [csize, setCsize, cturn, setCturn] = useCartonSize();
 
   useEffect(() => { if (orgs && org && !orgs.some((o) => o.id === org)) setOrg(''); }, [orgs]);
@@ -66,7 +75,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
     return pskus.map((psku, i) => {
       const num = psku.replace(/\D/g, '') || '000000'; let seq = 0; const cs = [];
       lines.forEach((l) => { for (let g = 0; g < (l.cle ? 1 : lineCartons(l)); g++) { seq += 1; cs.push({ seq, code: `C${num}${String(seq).padStart(w, '0')}`, item_no: l.prod?.sku || null, item_name: l.prod?.name || l.what.trim(), units_per_carton: l.upc === '' ? null : Number(l.upc), fba: l.fba, cle: !!l.cle }); } });
-      return { psku, org_id: org, batch_pos: i + 1, batch_size: pskus.length, received_at: new Date().toISOString(), mixed, fba: lines.every((l) => l.fba), cle: lines.every((l) => l.cle), cartons: total || null, units_per_carton: !mixed && one.upc !== '' ? Number(one.upc) : null, item_no: mixed ? null : one.prod?.sku, item_name: mixed ? `Mixed pallet · ${lines.length} products` : one.prod?.name || (one.off ? one.what : ''), received_by_name: me.full_name || me.email, _cartons: cs };
+      return { psku, org_id: org, batch_pos: i + 1, batch_size: pskus.length, received_at: new Date().toISOString(), mixed, fba: lines.every((l) => l.fba), cle: lines.every((l) => l.cle), cartons: total || null, units_per_carton: !mixed && one.upc !== '' ? Number(one.upc) : null, item_no: mixed ? null : one.prod?.sku, item_name: mixed ? `Mixed pallet · ${lines.length} products` : one.prod?.name || (one.off ? one.what : ''), received_by_name: me.full_name || me.email, _cartons: cs, _draft: true };
     });
   };
   // Print carton labels before Receive: take the PSKU numbers for this form, then print with the real barcodes.
@@ -82,22 +91,59 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const heldName = hold ? (hold.pskus.length === 1 ? hold.pskus[0] : `${hold.pskus[0]} → ${hold.pskus[hold.pskus.length - 1]}`) : '';
   const dropHold = () => { setHold(null); key.current = crypto.randomUUID(); };
 
+  // The cartons of pallets just received, read from the database and checked. Labels are offered only when they pass.
+  const verify = async (data, early) => {
+    setPending({ pallets: data, early, reading: true });
+    let rows;
+    try { rows = await fetchCartons(supabase, data.map((p) => p.id)); }
+    catch (x) { beep('bad'); return setPending({ pallets: data, early, why: x.message }); }
+    const got = attachCartons(data, rows);
+    if (!got.ok) { beep('bad'); return setPending({ pallets: data, early, bad: got.problems }); }
+    // labels printed before Receive count as printed only if they are, carton for carton, what the database now holds
+    const same = !!early && early.length === got.pallets.length && early.every((d, i) => d.psku === got.pallets[i].psku && sameLabels(d._cartons, got.pallets[i]._cartons));
+    setPending(null); setDone(got.pallets);
+    setPrinted(same ? { cartons: true, early: true } : early ? { mismatch: true } : {});
+  };
+  // The pallets are on file: this form is finished whatever happens to the carton read that follows.
+  const landed = async (data, early) => {
+    saveFlight(null); key.current = crypto.randomUUID(); lostForm.current = false;
+    beep('ok'); merge(data); setUnsure(false); setErr(null);
+    setHold(null); setLines([newLine()]); setCount(1);
+    await verify(data, early);
+  };
   const receive = async (e) => {
     e?.preventDefault();
-    if (problem || busy) return;
+    if (problem || busy || sending.current || pending || unsure) return;
+    sending.current = true; setBusy(true); setErr(null);
+    const early = hold?.full && !stale ? draft(hold.pskus) : null;
+    saveFlight({ key: key.current, at: Date.now() });
+    let res;
+    try {
+      res = await supabase.rpc('wms_receive', {
+        p_org: org, p_pallets: n, p_notes: null, p_key: key.current,
+        p_lines: lines.map((l) => ({ sku: l.prod?.id || null, name: l.prod ? null : l.what.trim(), cartons: lineCartons(l), units_per_carton: l.upc === '' ? null : Number(l.upc), fba: l.fba, cle: !!l.cle })),
+      });
+    } catch (x) { res = { data: null, error: { message: String(x?.message || x) }, status: 0 }; }
+    sending.current = false; setBusy(false);
+    const { data, error, status } = res;
+    // a 4xx answer is the database refusing the form: nothing was written, the form can be fixed and sent again
+    if (error && status >= 400 && status < 500) { saveFlight(null); beep('bad'); return setErr(error.message); }
+    // anything else without pallets is no answer at all: it may be on file. Stop until that is looked up.
+    if (error || !data?.length) { beep('bad'); return setUnsure(true); }
+    await landed(data, early);
+  };
+  // "Did it go through?" Looked up by the key the Receive was sent with; nothing is sent again.
+  const check = async () => {
+    if (busy) return;
     setBusy(true); setErr(null);
-    const { data, error } = await supabase.rpc('wms_receive', {
-      p_org: org, p_pallets: n, p_notes: null, p_key: key.current,
-      p_lines: lines.map((l) => ({ sku: l.prod?.id || null, name: l.prod ? null : l.what.trim(), cartons: lineCartons(l), units_per_carton: l.upc === '' ? null : Number(l.upc), fba: l.fba, cle: !!l.cle })),
-    });
-    if (error || !data?.length) { setBusy(false); beep('bad'); return setErr(error?.message || 'Nothing came back. Check the connection and press Receive again; it will not make a second pallet.'); }
-    // the carton rows carry each carton's product: the labels are printed from them
-    const { data: cs } = await supabase.from('wms_cartons').select('*').in('pallet_id', data.map((p) => p.id)).order('seq');
+    let found;
+    try { found = await findReceipt(supabase, key.current); }
+    catch (x) { setBusy(false); beep('bad'); return setErr(`It could not be checked (${x.message}). Do not enter it again; try the check again or tell an admin.`); }
     setBusy(false);
-    key.current = crypto.randomUUID();
-    beep('ok'); merge(data); setDone(data.map((p) => ({ ...p, _cartons: (cs || []).filter((c) => c.pallet_id === p.id) })));
-    setPrinted(hold?.full && !stale && hold.pskus.join() === data.map((p) => p.psku).join() ? { cartons: true, early: true } : {});
-    setHold(null); setLines([newLine()]); setCount(1);
+    if (found.length) return landed(found, null);
+    saveFlight(null); setUnsure(false);
+    if (lostForm.current) { key.current = crypto.randomUUID(); lostForm.current = false; }
+    setErr('Nothing is on file for that Receive. It can be entered and received now.');
   };
   const printPallet = async () => {
     await printPalletLabels(done, (p) => brandName(p.org_id)); setPrinted((x) => ({ ...x, pallet: true }));
@@ -125,6 +171,12 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
         </div>
       </header>
 
+      {unsure && <div className="strip bad"><b>Stop.</b><span>No answer came back for the last Receive, so it may or may not be on file. Do not enter it again.</span><button type="button" className="btn sm" disabled={busy} onClick={check}>{busy ? 'Checking…' : 'Check whether it was received'}</button></div>}
+      {pending && <div className="strip bad"><b>Received as {pending.pallets.length === 1 ? pending.pallets[0].psku : `${pending.pallets[0].psku} → ${pending.pallets[pending.pallets.length - 1].psku}`}.</b>
+        <span>{pending.reading ? 'Reading its cartons…' : pending.why ? `Its cartons could not be read (${pending.why}). No carton labels can be printed yet. Do not receive it again.` : `The cartons on file do not add up (${pending.bad.map((b) => `${b.psku || 'other'}: ${b.problems.join(', ')}`).join('; ')}). No carton labels can be printed. Do not receive it again; tell an admin.`}</span>
+        {!pending.reading && <button type="button" className="btn sm" onClick={() => verify(pending.pallets, pending.early)}>Read the cartons again</button>}
+        {!pending.reading && <button type="button" className="swap" onClick={() => setPending(null)}>Leave it for an admin</button>}
+      </div>}
       {err && <div className="strip bad"><b>Not received.</b><span>{err}</span><button className="x" onClick={() => setErr(null)} aria-label="Dismiss">×</button></div>}
 
       <div className="station">
@@ -156,7 +208,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
             </div>
           </div>
 
-          <button className="btn go big" disabled={!!problem || busy}>
+          <button className="btn go big" disabled={!!problem || busy || !!pending || unsure}>
             {busy ? 'Receiving…' : problem || <>Receive {n} {mixed ? 'mixed ' : ''}pallet{n > 1 ? 's' : ''}{total ? ` · ${num(total * n)} carton${total * n > 1 ? 's' : ''}` : ''}<kbd>Enter</kbd></>}
           </button>
         </form>
@@ -207,6 +259,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
           <div className="dialog" role="dialog" aria-label="Print labels">
             <h2>{done.length === 1 ? done[0].psku : `${done[0].psku} → ${done[done.length - 1].psku}`}<span className="dot">.</span></h2>
             <p className="lead">{brandName(done[0].org_id)} · {done[0].item_name || done[0].notes}</p>
+            {printed.mismatch && <div className="strip bad"><span>The carton labels printed before Receive are not what was received. Take them off and print the labels again from here.</span></div>}
             <div className={`printrow ${printed.pallet ? 'done' : ''}`}>
               <i>4 × 6</i><div><b>{done.length} pallet label{done.length > 1 ? 's' : ''}</b><span>Paper 4 × 6 in · margins none · headers and footers off · scale 100%</span></div>
               <button className={`btn ${printed.pallet ? '' : 'go'}`} onClick={printPallet}>{printed.pallet ? 'Print again' : 'Print'}</button>
