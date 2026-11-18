@@ -19,13 +19,30 @@ const lineCartons = (l) => (l.cle || l.cartons === '' ? 0 : Math.max(0, Math.min
 // A Receive that was sent and not yet settled: the exact request (its key and everything it carried), kept on this station
 // before it is sent, so neither a reload nor an edit can lose or change it. It is cleared only when its pallets are found,
 // or when the database refused it outright (nothing was written). An empty lookup does not clear it.
-const loadFlight = () => { try { const f = JSON.parse(localStorage.getItem('wms-inflight') || 'null'); return f && f.key && f.payload && f.payload.p_key === f.key ? f : null; } catch { return null; } };
-const saveFlight = (f) => { try { f ? localStorage.setItem('wms-inflight', JSON.stringify(f)) : localStorage.removeItem('wms-inflight'); } catch { /* storage off */ } };
+// It lives in this browser only: another station, another browser profile or cleared site data will not see it.
+const FLIGHT = 'wms-inflight';
+const validFlight = (f) => !!(f && typeof f.key === 'string' && f.key && f.payload && f.payload.p_key === f.key && Array.isArray(f.payload.p_lines) && f.form && Array.isArray(f.form.lines));
+/** null = nothing saved; { bad: true } = something is saved that cannot be read (the station is held until an admin clears it). */
+const loadFlight = () => {
+  let raw; try { raw = localStorage.getItem(FLIGHT); } catch { return null; }
+  if (raw == null) return null;
+  try { const f = JSON.parse(raw); return validFlight(f) ? f : { bad: true }; } catch { return { bad: true }; }
+};
+/** Saves (or clears) the record and reads it back. false = it is not durably on this station: the caller must not send. */
+const saveFlight = (f) => {
+  try {
+    if (!f) { localStorage.removeItem(FLIGHT); return localStorage.getItem(FLIGHT) == null; }
+    const text = JSON.stringify(f); localStorage.setItem(FLIGHT, text);
+    return localStorage.getItem(FLIGHT) === text;
+  } catch { return false; }
+};
 const loadHold = () => { try { const h = JSON.parse(localStorage.getItem('wms-hold') || 'null'); return h && h.key && h.org && Array.isArray(h.lines) && h.lines.length && h.pskus?.length ? h : null; } catch { return null; } };
 
 export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const [saved] = useState(loadHold);
-  const [flight] = useState(loadFlight);
+  const [loaded] = useState(loadFlight);
+  const flight = loaded?.bad ? null : loaded;
+  const [corrupt, setCorrupt] = useState(!!loaded?.bad);   // a saved Receive record that cannot be read: hold the station
   const [org, setOrg] = useState(() => { if (flight) return flight.form.org; if (saved) return saved.org; try { return localStorage.getItem('wms-brand') || ''; } catch { return ''; } });
   const [products, setProducts] = useState(null);
   const [lines, setLines] = useState(() => (flight ? flight.form.lines.map((l) => ({ ...newLine(), ...l, id: ++lineId })) : saved ? saved.lines.map((l) => ({ ...newLine(), ...l, id: ++lineId })) : [newLine()]));
@@ -41,7 +58,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const [sent, setSent] = useState(flight);        // the unsettled Receive (see loadFlight); while it exists the form is locked
   const [looked, setLooked] = useState(0);          // lookups that found nothing for it, this session
   const unsure = !!sent && !busy;                   // sent, and no answer that settles it
-  const locked = !!sent || busy;                    // nothing that could change or drop what was sent may run
+  const locked = !!sent || busy || corrupt;                    // nothing that could change or drop what was sent may run
   const isAdmin = me?.role === 'shipbay_admin';
   const [pending, setPending] = useState(null);     // received, cartons not yet read and checked: { pallets, early, reading | why | bad }
   const sending = useRef(false);
@@ -134,7 +151,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   };
   const receive = async (e) => {
     e?.preventDefault();
-    if (problem || busy || sending.current || pending || sent) return;
+    if (problem || busy || sending.current || pending || sent || corrupt) return;
     const f = {
       key: key.current, at: Date.now(), early: hold?.full && !stale ? draft(hold.pskus) : null,
       form: { org, count: n, lines: lines.map(({ id, q, ...l }) => l) },
@@ -142,7 +159,11 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
         p_lines: lines.map((l) => ({ sku: l.prod?.id || null, name: l.prod ? null : l.what.trim(), cartons: lineCartons(l), units_per_carton: l.upc === '' ? null : Number(l.upc), fba: l.fba, cle: !!l.cle })) },
     };
     sending.current = true;   // closes the gap before React re-renders the button
-    saveFlight(f); setSent(f);
+    if (!saveFlight(f)) {   // not durably recorded: if the answer were lost, nothing would show it may be on file
+      sending.current = false; beep('bad');
+      return setErr('Nothing was sent. This station could not save the Receive before sending it (browser storage is blocked, full, or in a private window). Use a normal window or another station, or ask an admin.');
+    }
+    setSent(f);
     await send(f);
   };
   // "Did it go through?" Looked up by the key of the request that was sent. Nothing is sent. Finding nothing settles nothing:
@@ -159,6 +180,8 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   };
   // Admin only: send the very same request again, same key. The database returns the pallets already made under that key
   // instead of making new ones (wms_receive; client_key unique). Not exercised against a live database yet (staging gate).
+  // Admin only, after checking today's receipts by hand: drop an unreadable record so the station can work again.
+  const clearCorrupt = () => { if (!isAdmin) return; if (saveFlight(null)) { setCorrupt(false); setErr(null); } else setErr('The record could not be cleared: browser storage is blocked here.'); };
   const resend = async () => { if (!isAdmin || busy || !sent) return; await send(sent); };
   const printFail = (what) => { beep('bad'); setPrinted((x) => ({ ...x, fail: `The print window did not open for the ${what}. Nothing was printed; press Print again.` })); };
   const printPallet = async () => {
@@ -188,6 +211,8 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
         </div>
       </header>
 
+      {corrupt && <div className="strip bad"><b>Stop.</b><span>This station has a saved Receive record it cannot read, so an earlier Receive may or may not be on file. Check today's receipts before receiving here.{isAdmin ? '' : ' An admin must clear this.'}</span>
+        {isAdmin && <button type="button" className="btn sm" onClick={clearCorrupt}>Admin: receipts checked, clear the record</button>}</div>}
       {unsure && <div className="strip bad"><b>Stop.</b>
         <span>{looked ? `Nothing found yet for receipt ${sent.key.slice(0, 8)} (looked ${looked} time${looked === 1 ? '' : 's'}). That does not prove it was not received: it may still be finishing, or this login may not be able to see it. Do not enter it again.${isAdmin ? '' : ' Check again in a minute; if it still shows nothing, an admin must resolve it.'}` : `No answer came back for receipt ${sent.key.slice(0, 8)}, so it may or may not be on file. Do not enter it again.`}</span>
         <button type="button" className="btn sm" disabled={busy} onClick={check}>{busy ? 'Checking…' : 'Check whether it was received'}</button>

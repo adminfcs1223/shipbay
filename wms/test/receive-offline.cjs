@@ -3,8 +3,12 @@
 // Build first with the stub address, then run:
 //   VITE_SUPABASE_URL=https://stub.supabase.co VITE_SUPABASE_KEY=stub npx vite build && node test/receive-offline.cjs
 const { chromium } = require('playwright'); const fs = require('fs'); const path = require('path'); const http = require('http');
-const DIST = path.join(__dirname, '..', 'dist'); const PORT = 4183; const STUB = 'stub.supabase.co';
+const DIST = process.env.WMS_DIST || path.join(__dirname, '..', 'dist');   // WMS_DIST=<dir> to test another build
+const DEV = process.env.WMS_EXPECT_DEV === '1';   // the build must be React's development runtime (StrictMode runs effects twice)
+const PORT = 4183; const STUB = 'stub.supabase.co';
 const bundle = fs.readdirSync(path.join(DIST, 'assets')).filter((f) => f.endsWith('.js')).map((f) => fs.readFileSync(path.join(DIST, 'assets', f), 'utf8')).join('');
+if (DEV !== bundle.includes('Each child in a list')) { console.error(`REFUSED: expected a ${DEV ? 'development' : 'production'} build of React.`); process.exit(2); }
+console.log(`build: ${DEV ? 'development (StrictMode double effects on)' : 'production'} · ${DIST}`);
 if (!bundle.includes(STUB) || /[a-z0-9]{20}\.supabase\.co/.test(bundle)) { console.error('REFUSED: dist is not a stub build (it names a real backend). Rebuild with the stub address.'); process.exit(2); }
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff', '.json': 'application/json' };
 const ROOT = path.resolve(DIST);
@@ -67,6 +71,7 @@ async function scenario(browser, name, run, { role = 'wms_employee' } = {}) {
       case 'wms_products': return j(products);
       case 'locations': return j([{ id: 'l1', code: 'P-01', zone: 'bulk', kind: 'pallet', active: true }]);
       case 'wms_units': return j([]);
+      case 'wms_scan_carton': { const c = st.cartons.find((x) => x.code === b.p_code); if (!c) return j({ message: 'not on file' }, 400); const already = !!c.scanned_at; c.scanned_at = c.scanned_at || new Date().toISOString(); const p = st.pallets.find((x) => x.id === c.pallet_id); const mine = st.cartons.filter((x) => x.pallet_id === p.id && !x.cle); return j({ pallet_id: p.id, psku: p.psku, seq: c.seq, already, scanned: mine.filter((x) => x.scanned_at).length, total: mine.length }); }
       case 'wms_mark_printed': st.marks += 1; return j(1);
       case 'wms_hold_pskus': { st.holds[b.p_key] = st.holds[b.p_key] || Array.from({ length: b.p_pallets }, () => String(++st.seq).padStart(6, '0')); return j(st.holds[b.p_key].map((n) => `PSKU-${n}`)); }
       case 'wms_pallets': { const k = u.searchParams.get('batch_key'); if (k) { st.lookups += 1; if (st.f.lookupFail) return j({ message: 'lookup failed' }, 503); if (st.f.rlsHide) return j([]); return j(st.pallets.filter((p) => `eq.${p.batch_key}` === k)); } return j([...st.pallets].reverse()); }
@@ -110,6 +115,7 @@ async function scenario(browser, name, run, { role = 'wms_employee' } = {}) {
     holdKey: () => page.evaluate(() => JSON.parse(localStorage.getItem('wms-hold') || 'null')?.key || null),
     forceClick: (text) => page.evaluate((t) => { const b = [...document.querySelectorAll('button')].find((x) => x.innerText.includes(t)); if (!b) return 'missing'; const d = b.matches(':disabled'); b.click(); return d ? 'disabled' : 'enabled'; }, text),
     formLocked: () => page.evaluate(() => document.querySelector('fieldset.lockset')?.disabled === true),
+    denyStorage: (how) => page.evaluate((h) => { const orig = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (k === 'wms-inflight') { if (h === 'quota') throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); if (h === 'silent') return; throw new DOMException('Access is denied', 'SecurityError'); } return orig.call(this, k, v); }; }, how),
     checkBtn: () => page.getByRole('button', { name: 'Check whether it was received' }),
     resendBtn: () => page.getByRole('button', { name: /Admin: send the same Receive again/ }),
   };
@@ -335,6 +341,35 @@ const codesIn = (doc) => [...(doc || '').matchAll(/<span>(C\d{8,10})<\/span>/g)]
     const bnum = B.psku.replace(/\D/g, '');
     ok(titles.length === 3 && titles.every((t) => t.startsWith(`C${bnum}`)), `B shows only its own cartons (${titles.join(' ')})`);
     ok(!/could not be read|do not add up/.test(await h.strips()), 'no stale error from A');
+  });
+
+  for (const [n, how] of [['27', 'denied'], ['28', 'quota'], ['29', 'silent']]) {
+    await scenario(browser, `${n}. the Receive record cannot be saved (${how}): nothing is sent, the operator is told`, async (h) => {
+      await h.brand(); await h.line(0, 'alpha', 2); await h.denyStorage(how); await h.press(400);
+      ok(h.st.receives.length === 0 && h.st.pallets.length === 0, 'no Receive sent'); ok(/Nothing was sent.*could not save/.test(await h.strips()), 'operator is told why and what to do');
+      ok(!(await h.formLocked()) && !(await h.receiveBtn().isDisabled()), 'the station is not stuck: the form stays editable');
+    });
+  }
+  for (const [n, bad] of [['30', '{not json'], ['31', JSON.stringify({ key: 'k1', payload: { p_key: 'other' } })]]) {
+    await scenario(browser, `${n}. an unreadable saved Receive record (${bad.slice(0, 18)}…) holds a floor login`, async (h) => {
+      await h.page.evaluate((v) => localStorage.setItem('wms-inflight', v), bad); await h.page.reload(); await h.page.waitForTimeout(800);
+      ok(/cannot read/.test(await h.strips()) && /An admin must clear this/.test(await h.strips()), 'held, admin needed');
+      ok(await h.receiveBtn().isDisabled() && await h.formLocked() && await h.page.locator('.brands button').first().isDisabled(), 'Receive, brand and the form are locked'); ok(await h.page.getByRole('button', { name: /Admin: receipts checked/ }).count() === 0, 'no clear button for a floor login');
+    });
+  }
+  await scenario(browser, '32. admin clears an unreadable record after checking receipts; receiving works again', async (h) => {
+    await h.page.evaluate(() => localStorage.setItem('wms-inflight', '{not json')); await h.page.reload(); await h.page.waitForTimeout(800);
+    await h.page.getByRole('button', { name: /Admin: receipts checked/ }).click(); await h.page.waitForTimeout(200);
+    ok(await h.page.evaluate(() => localStorage.getItem('wms-inflight')) === null && !(await h.formLocked()), 'cleared');
+    await h.brand(); await h.line(0, 'alpha', 2); await h.press(); ok(h.st.pallets.length === 1 && await h.dialog() === 1, 'a Receive goes through');
+  }, { role: 'shipbay_admin' });
+
+  await scenario(browser, '33. Pallets screen: cartons load and a scan refreshes them (catches the StrictMode stale-read bug in a development build)', async (h) => {
+    await h.brand(); await h.line(0, 'alpha', 3); await h.press(); await h.page.locator('.dialog .btn.big').click(); await h.page.waitForTimeout(800);
+    ok(await h.page.locator('.ctiles span').count() === 3, 'the 3 cartons are shown (not stuck on "Loading cartons…")');
+    h.st.f.scanOk = true; const code = h.st.cartons[0].code;
+    await h.page.locator('.scanbox input').first().fill(code); await h.page.keyboard.press('Enter'); await h.page.waitForTimeout(800);
+    ok(await h.page.locator('.ctiles span.in').count() === 1, 'a scan marks the carton scanned');
   });
 
   // 4) the test server: local only, nothing outside dist

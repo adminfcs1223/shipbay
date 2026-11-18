@@ -23,10 +23,15 @@ export function printPages(pages, cls, size, title, fixed = true, css = '', doc 
       const f = doc.createElement('iframe');
       f.id = 'wms-print'; f.setAttribute('aria-hidden', 'true'); f.dataset.size = size;
       f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
-      const timer = setTimeout(() => finish(false), timeoutMs);   // the frame never loaded: nothing was sent
+      // Once this attempt has an answer (timed out, failed, sent) or a newer attempt has replaced its frame, nothing
+      // from it may run: a late load or font callback must never print after the operator was told it did not.
+      const current = () => !settled && doc.getElementById('wms-print') === f;
+      const timer = setTimeout(() => { finish(false); f.onload = null; }, timeoutMs);   // the frame never loaded: nothing was sent
       f.onload = () => {
+        if (!current()) return;
         const w = f.contentWindow;
         const go = () => {
+          if (!current()) return finish(false);
           clearTimeout(timer);
           if (!w || typeof w.print !== 'function') return finish(false);
           try { w.focus?.(); w.print(); finish(true); } catch { finish(false); }   // printing blocked or refused

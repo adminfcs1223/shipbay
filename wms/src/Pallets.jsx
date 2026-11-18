@@ -108,7 +108,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
   // Reads can overlap (a scan or an open box reloads while an earlier read is still out). Only the newest one is used,
   // and only for the pallet it was made for; one that comes back after this screen is gone is dropped.
   const reads = useRef(0); const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);   // StrictMode runs setup, cleanup, setup in development
   const loadCartons = async () => {
     const mine = ++reads.current; const id = p.id; const stale = () => !alive.current || mine !== reads.current || id !== p.id;
     let c;
