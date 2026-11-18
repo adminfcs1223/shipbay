@@ -6,18 +6,31 @@ const { chromium } = require('playwright'); const fs = require('fs'); const path
 const DIST = path.join(__dirname, '..', 'dist'); const PORT = 4183; const STUB = 'stub.supabase.co';
 const bundle = fs.readdirSync(path.join(DIST, 'assets')).filter((f) => f.endsWith('.js')).map((f) => fs.readFileSync(path.join(DIST, 'assets', f), 'utf8')).join('');
 if (!bundle.includes(STUB) || /[a-z0-9]{20}\.supabase\.co/.test(bundle)) { console.error('REFUSED: dist is not a stub build (it names a real backend). Rebuild with the stub address.'); process.exit(2); }
-http.createServer((req, res) => { let p = decodeURIComponent(req.url.split('?')[0]); if (p === '/') p = '/index.html'; let f = path.join(DIST, p); if (!fs.existsSync(f) || fs.statSync(f).isDirectory()) f = path.join(DIST, 'index.html'); res.setHeader('Content-Type', { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff', '.json': 'application/json' }[path.extname(f)] || 'application/octet-stream'); fs.createReadStream(f).pipe(res); }).listen(PORT);
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff', '.json': 'application/json' };
+const ROOT = path.resolve(DIST);
+const server = http.createServer((req, res) => {
+  const deny = (code) => { res.statusCode = code; res.end(); };
+  let p; try { p = decodeURIComponent(String(req.url || '/').split('?')[0]); } catch { return deny(400); }   // malformed %-encoding
+  if (!p.startsWith('/') || p.includes('\0') || p.includes('\\')) return deny(400);
+  if (p === '/') p = '/index.html';
+  const f = path.resolve(ROOT, '.' + p);
+  if (f !== ROOT && !f.startsWith(ROOT + path.sep)) return deny(403);                                       // outside dist
+  const file = fs.existsSync(f) && fs.statSync(f).isFile() ? f : path.join(ROOT, 'index.html');
+  res.setHeader('Content-Type', TYPES[path.extname(file)] || 'application/octet-stream'); fs.createReadStream(file).pipe(res);
+});
+const listening = new Promise((r) => server.listen(PORT, '127.0.0.1', r));
 
 const UID = '00000000-0000-4000-8000-000000000001';
+const raw = (p) => new Promise((resolve) => { const r = http.request({ host: '127.0.0.1', port: PORT, path: p, method: 'GET' }, (res) => { let b = ''; res.on('data', (d) => { b += d; }); res.on('end', () => resolve({ status: res.statusCode, body: b })); }); r.on('error', (e) => resolve({ status: 0, body: String(e) })); r.end(); });
 const orgs = [{ id: 'o1', name: 'Synthetic Records Co', status: 'active' }];
 const products = ['Test Record Alpha', 'Test Record Bravo', 'Test Bulk Sleeves'].map((name, n) => ({ id: `s${n + 1}`, sku: `ITM-9${String(n + 1).padStart(5, '0')}`, name, asins: [], supplier: 'Synthetic', barcode: null, expected_qty: 100, expected_fba: 0, expected_fbm: 100 }));
 const sess = { access_token: 'x.y.z', refresh_token: 'r', token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, user: { id: UID, email: 'emp@example.test', aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: '2026-01-01T00:00:00Z' } };
 let pass = 0; let fail = 0; const outside = [];
 const ok = (cond, what) => { cond ? pass++ : fail++; console.log(`${cond ? 'ok  ' : 'FAIL'} ${what}`); };
 
-async function scenario(browser, name, run) {
+async function scenario(browser, name, run, { role = 'wms_employee' } = {}) {
   console.log(`\n# ${name}`);
-  const st = { seq: 900, pallets: [], cartons: [], holds: {}, receives: [], cartonReads: 0, f: {} };
+  const st = { seq: 900, pallets: [], cartons: [], holds: {}, receives: [], bodies: [], marks: 0, cartonReads: 0, lookups: 0, pend: null, f: {} };
   // the stub's wms_receive: the same rules as the database function (same key = the same pallets; one marker row per NCC line)
   const doReceive = (b) => {
     const had = st.pallets.filter((p) => p.batch_key === b.p_key); if (had.length) return had;
@@ -30,7 +43,18 @@ async function scenario(browser, name, run) {
     }
     return out;
   };
+  st.commitPending = () => { if (st.pend) { doReceive(st.pend); st.pend = null; } };
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 980 } });
+  // print() never opens a real dialog here: it is counted, or made to fail, as window.__printMode says
+  await ctx.addInitScript(() => {
+    window.__printMode = 'ok'; window.__prints = 0;
+    const d = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow');
+    Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', { configurable: true, get() {
+      const w = d.get.call(this); if (!w) return w; if (window.__printMode === 'nowin') return null;
+      try { w.print = () => { window.__prints += 1; if (window.__printMode === 'throw') throw new Error('printing is blocked'); }; } catch { /* cross-origin */ }
+      return w;
+    } });
+  });
   await ctx.route('**/*', (r) => { const h = new URL(r.request().url()).host; if (h === `localhost:${PORT}` || h === STUB) return r.fallback(); outside.push(r.request().url()); return r.abort(); });
   await ctx.route(new RegExp(`${STUB.replace(/\./g, '\\.')}/(?!rest/v1/|auth/v1/)`), (r) => r.fulfill({ status: 404, body: '' }));
   await ctx.route(/\/auth\/v1\//, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(sess.user) }));
@@ -38,26 +62,29 @@ async function scenario(browser, name, run) {
     const req = route.request(); const u = new URL(req.url()); const m = u.pathname.match(/\/rest\/v1\/(rpc\/)?([a-z_]+)/); const single = (req.headers()['accept'] || '').includes('object'); const b = req.method() === 'POST' ? (req.postDataJSON() || {}) : {};
     const j = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
     switch (m[2]) {
-      case 'profiles': return j(single ? { id: UID, full_name: 'Test Operator', email: 'emp@example.test', role: 'shipbay_admin', employee_no: 9001 } : []);
+      case 'profiles': return j(single ? { id: UID, full_name: 'Test Operator', email: 'emp@example.test', role, employee_no: 9001 } : []);
       case 'wms_brands': return j(orgs);
       case 'wms_products': return j(products);
       case 'locations': return j([{ id: 'l1', code: 'P-01', zone: 'bulk', kind: 'pallet', active: true }]);
       case 'wms_units': return j([]);
-      case 'wms_mark_printed': return j(1);
+      case 'wms_mark_printed': st.marks += 1; return j(1);
       case 'wms_hold_pskus': { st.holds[b.p_key] = st.holds[b.p_key] || Array.from({ length: b.p_pallets }, () => String(++st.seq).padStart(6, '0')); return j(st.holds[b.p_key].map((n) => `PSKU-${n}`)); }
-      case 'wms_pallets': { const k = u.searchParams.get('batch_key'); if (k) { if (st.f.lookupFail) return j({ message: 'lookup failed' }, 503); return j(st.pallets.filter((p) => `eq.${p.batch_key}` === k)); } return j([...st.pallets].reverse()); }
+      case 'wms_pallets': { const k = u.searchParams.get('batch_key'); if (k) { st.lookups += 1; if (st.f.lookupFail) return j({ message: 'lookup failed' }, 503); if (st.f.rlsHide) return j([]); return j(st.pallets.filter((p) => `eq.${p.batch_key}` === k)); } return j([...st.pallets].reverse()); }
       case 'wms_cartons': {
-        st.cartonReads += 1; if (st.f.cartonsFail) return j({ message: 'upstream timeout' }, 503); if (st.f.cartonsEmpty) return j([]);
+        st.cartonReads += 1; if (st.f.slowFor && (u.searchParams.get('pallet_id') || '').includes(st.f.slowFor)) await new Promise((r) => setTimeout(r, 2500));
+        if (st.f.cartonsFail) return j({ message: 'upstream timeout' }, 503); if (st.f.cartonsEmpty) return j([]);
         const q = u.searchParams.get('pallet_id') || ''; const ids = q.startsWith('in.') ? q.slice(4, -1).split(',').map((x) => x.replace(/"/g, '')) : [q.replace('eq.', '')];
         let rows = st.cartons.filter((c) => ids.includes(c.pallet_id)); if (st.f.cartonsShort) rows = rows.slice(0, -1);
         const off = Number(u.searchParams.get('offset') || 0); const lim = Number(u.searchParams.get('limit') || 1000); return j(rows.slice(off, off + lim));
       }
       case 'wms_receive': {
-        st.receives.push(b.p_key);
+        st.receives.push(b.p_key); st.bodies.push(JSON.stringify(b));
+        if (st.f.conflict) return j({ code: '23505', message: 'duplicate key value violates unique constraint' }, 409);
         if (st.f.reject) return j({ code: 'P0001', message: 'Units per carton is needed: it is what puts the stock on the shelf.' }, 400);
         if (st.f.delay) await new Promise((r) => setTimeout(r, st.f.delay));
         if (st.f.drop === 'committed') { doReceive(b); return route.abort('connectionreset'); }
         if (st.f.drop === 'lost') return route.abort('connectionreset');
+        if (st.f.drop === 'pending') { st.pend = b; return route.abort('connectionreset'); }   // the request is still in the database, not yet committed
         return j(doReceive(b));
       }
       default: return j([]);
@@ -77,6 +104,14 @@ async function scenario(browser, name, run) {
     strips: async () => (await page.locator('.strip.bad').allInnerTexts()).join(' | '),
     printDoc: () => page.evaluate(() => document.getElementById('wms-print')?.srcdoc || null),
     clearPrint: () => page.evaluate(() => document.getElementById('wms-print')?.remove()),
+    printMode: (m) => page.evaluate((x) => { window.__printMode = x; }, m),
+    prints: () => page.evaluate(() => window.__prints),
+    flightKey: () => page.evaluate(() => JSON.parse(localStorage.getItem('wms-inflight') || 'null')?.key || null),
+    holdKey: () => page.evaluate(() => JSON.parse(localStorage.getItem('wms-hold') || 'null')?.key || null),
+    forceClick: (text) => page.evaluate((t) => { const b = [...document.querySelectorAll('button')].find((x) => x.innerText.includes(t)); if (!b) return 'missing'; const d = b.matches(':disabled'); b.click(); return d ? 'disabled' : 'enabled'; }, text),
+    formLocked: () => page.evaluate(() => document.querySelector('fieldset.lockset')?.disabled === true),
+    checkBtn: () => page.getByRole('button', { name: 'Check whether it was received' }),
+    resendBtn: () => page.getByRole('button', { name: /Admin: send the same Receive again/ }),
   };
   try { await run(h); } catch (e) { fail++; console.log('FAIL scenario threw:', e.message.split('\n')[0]); }
   await ctx.close();
@@ -84,6 +119,7 @@ async function scenario(browser, name, run) {
 const codesIn = (doc) => [...(doc || '').matchAll(/<span>(C\d{8,10})<\/span>/g)].map((m) => m[1]);
 
 (async () => {
+  await listening;
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1243/chrome-linux64/chrome' }).catch(() => chromium.launch());
 
   await scenario(browser, '1. mixed pallet with an NCC line: labels come from the database rows', async (h) => {
@@ -120,18 +156,21 @@ const codesIn = (doc) => [...(doc || '').matchAll(/<span>(C\d{8,10})<\/span>/g)]
     ok(await h.dialog() === 1, 'the receipt is found and its print prompt opens'); ok(h.st.receives.length === 1, 'one Receive sent'); ok(h.st.pallets.length === 1, 'one pallet on file');
   });
 
-  await scenario(browser, '5. Receive never arrived: the check says so and the same request can be sent again', async (h) => {
-    h.st.f.drop = 'lost'; await h.brand(); await h.line(0, 'alpha', 5); await h.press();
-    h.st.f.drop = null; await h.page.getByRole('button', { name: 'Check whether it was received' }).click(); await h.page.waitForTimeout(500);
-    ok(/Nothing is on file/.test(await h.strips()), 'operator is told nothing is on file'); ok(h.st.pallets.length === 0, 'no pallet on file');
-    await h.press(); ok(h.st.receives.length === 2 && h.st.receives[0] === h.st.receives[1], 'the second Receive carries the same key'); ok(h.st.pallets.length === 1 && await h.dialog() === 1, 'one pallet, print prompt opens');
+  await scenario(browser, '5. Receive never arrived: an empty lookup does NOT release the station or change the receipt', async (h) => {
+    h.st.f.drop = 'lost'; await h.brand(); await h.line(0, 'alpha', 5); await h.press(); const k0 = await h.flightKey();
+    h.st.f.drop = null; await h.checkBtn().click(); await h.until(/Nothing found yet/);
+    ok(/does not prove it was not received/.test(await h.strips()), 'operator is told an empty lookup proves nothing');
+    ok(await h.receiveBtn().isDisabled(), 'Receive stays held'); ok(await h.flightKey() === k0, 'the receipt key is unchanged');
+    ok(await h.resendBtn().count() === 0, 'a floor login is not offered a re-send'); ok(/an admin must resolve it/.test(await h.strips()), 'floor login is sent to an admin');
+    await h.checkBtn().click(); await h.until(/looked 2 times/); ok(await h.flightKey() === k0 && h.st.receives.length === 1, 'a second empty lookup changes nothing; nothing re-sent');
   });
 
   await scenario(browser, '6. page reloaded while the answer was outstanding', async (h) => {
     h.st.f.drop = 'committed'; await h.brand(); await h.line(0, 'alpha', 5); await h.press();
     h.st.f.drop = null; await h.page.reload(); await h.page.waitForTimeout(800);
     ok(/Stop\./.test(await h.strips()), 'after the reload the stop notice is still there');
-    await h.brand(); await h.line(0, 'alpha', 5); ok(await h.receiveBtn().isDisabled(), 'Receive stays held even with the form filled in again');
+    ok(await h.receiveBtn().isDisabled() && await h.formLocked(), 'Receive and the form stay locked');
+    ok(await h.page.locator('.line').first().getByLabel(/^Cartons/).inputValue() === '5', 'the form shows what was sent');
     await h.page.getByRole('button', { name: 'Check whether it was received' }).click(); await h.page.waitForTimeout(600);
     ok(await h.dialog() === 1 && h.st.receives.length === 1 && h.st.pallets.length === 1, 'receipt found; still one Receive and one pallet');
   });
@@ -188,7 +227,124 @@ const codesIn = (doc) => [...(doc || '').matchAll(/<span>(C\d{8,10})<\/span>/g)]
     ok(JSON.stringify(codesIn(await h.printDoc())) === JSON.stringify(h.st.cartons.map((c) => c.code)), 'reprint carries the database codes');
   });
 
+  await scenario(browser, '15. labels printed first -> answer lost (committed) -> discard-hold -> check: same receipt', async (h) => {
+    await h.brand(); await h.line(0, 'alpha', 3); await h.line(1, 'bravo', 2);
+    await h.page.locator('.early .btn').first().click(); await h.page.waitForTimeout(600); const holdKey = await h.holdKey();
+    h.st.f.drop = 'committed'; await h.press();
+    ok(await h.flightKey() === holdKey, 'the receipt is the key the labels were held under');
+    ok(await h.forceClick('Throw those labels away') === 'disabled', 'discard-hold is disabled'); await h.page.waitForTimeout(200);
+    ok(await h.flightKey() === holdKey && await h.holdKey() === holdKey, 'clicking it changed neither key');
+    ok(await h.page.locator('.early .btn').first().isDisabled(), 'print-first is disabled');
+    h.st.f.drop = null; await h.checkBtn().click(); await h.page.waitForTimeout(700);
+    ok(await h.dialog() === 1 && h.st.pallets.length === 1 && h.st.lookups === 1, 'found under that key; one pallet');
+    ok(/printed before receiving/.test(await h.page.locator('.printrow').nth(1).innerText()), 'the early labels are still matched to it');
+  });
+
+  await scenario(browser, '16. labels printed first -> answer lost (never arrived) -> discard-hold -> check: still held, same key', async (h) => {
+    await h.brand(); await h.line(0, 'alpha', 3);
+    await h.page.locator('.early .btn').first().click(); await h.page.waitForTimeout(600); const holdKey = await h.holdKey();
+    h.st.f.drop = 'lost'; await h.press(); await h.forceClick('Throw those labels away');
+    h.st.f.drop = null; await h.checkBtn().click(); await h.until(/Nothing found yet/);
+    ok(await h.flightKey() === holdKey && await h.receiveBtn().isDisabled(), 'still held under the same key');
+  });
+
+  await scenario(browser, '17. form edits while the answer is delayed are blocked; the request sent is the one recorded', async (h) => {
+    h.st.f.delay = 1500; await h.brand(); await h.line(0, 'alpha', 4);
+    await h.page.locator('form.entry .btn.big').click(); await h.page.waitForTimeout(200);
+    ok(await h.formLocked(), 'the form is locked while waiting');
+    ok(await h.page.locator('.line').first().getByLabel(/^Cartons/).isDisabled(), 'carton count cannot be changed');
+    ok(await h.page.locator('.brands button').first().isDisabled(), 'brand cannot be changed');
+    ok(await h.forceClick('+ Another product') === 'disabled' && await h.page.locator('.line').count() === 1, 'no product can be added');
+    const sentBody = h.st.bodies[0]; await h.page.waitForTimeout(1800);
+    ok(h.st.receives.length === 1 && h.st.pallets.length === 1 && h.st.pallets[0].cartons === 4, 'one pallet, 4 cartons as sent');
+    ok(JSON.parse(sentBody).p_lines[0].cartons === 4, 'the request carried the form as it was when Receive was pressed');
+  });
+
+  await scenario(browser, '18. original commits AFTER an empty lookup: the next check finds it, nothing re-sent', async (h) => {
+    h.st.f.drop = 'pending'; await h.brand(); await h.line(0, 'alpha', 2); await h.press(); const k0 = await h.flightKey();
+    h.st.f.drop = null; await h.checkBtn().click(); await h.until(/Nothing found yet/); ok(h.st.pallets.length === 0, 'nothing on file yet');
+    h.st.commitPending(); await h.checkBtn().click(); await h.page.waitForTimeout(700);
+    ok(await h.dialog() === 1 && h.st.pallets.length === 1 && h.st.pallets[0].batch_key === k0, 'found under the original key');
+    ok(h.st.receives.length === 1, 'one Receive ever sent');
+  });
+
+  await scenario(browser, '19. pallets on file but hidden from this login (RLS-style empty answer): stays held', async (h) => {
+    h.st.f.drop = 'committed'; h.st.f.rlsHide = true; await h.brand(); await h.line(0, 'alpha', 2); await h.press(); const k0 = await h.flightKey();
+    h.st.f.drop = null; await h.checkBtn().click(); await h.until(/Nothing found yet/); await h.checkBtn().click(); await h.until(/looked 2 times/);
+    ok(h.st.pallets.length === 1, '(the pallet really is on file)'); ok(await h.receiveBtn().isDisabled() && await h.flightKey() === k0, 'still held, same key');
+    ok(await h.resendBtn().count() === 0 && h.st.receives.length === 1, 'no re-send offered or made');
+  });
+
+  await scenario(browser, '20. admin re-sends the same pinned request after an empty lookup: same key, no second pallet', async (h) => {
+    h.st.f.drop = 'committed'; h.st.f.rlsHide = true; await h.brand(); await h.line(0, 'alpha', 2); await h.press(); const k0 = await h.flightKey();
+    h.st.f.drop = null; await h.checkBtn().click(); await h.until(/Nothing found yet/);
+    ok(await h.resendBtn().count() === 1, 'admin is offered the re-send'); await h.resendBtn().click(); await h.page.waitForTimeout(800);
+    ok(h.st.receives.length === 2 && h.st.receives[1] === k0 && h.st.bodies[0] === h.st.bodies[1], 'the re-send is byte-for-byte the original request');
+    ok(h.st.pallets.length === 1 && await h.dialog() === 1, 'one pallet; its print prompt opens');
+  }, { role: 'shipbay_admin' });
+
+  await scenario(browser, '21. admin re-send answered 409 (key already taken): stays held, not treated as refused', async (h) => {
+    h.st.f.drop = 'lost'; await h.brand(); await h.line(0, 'alpha', 2); await h.press(); const k0 = await h.flightKey();
+    h.st.f.drop = null; await h.checkBtn().click(); await h.until(/Nothing found yet/);
+    h.st.f.conflict = true; await h.resendBtn().click(); await h.page.waitForTimeout(500);
+    ok(/Stop\./.test(await h.strips()) && !/Not received/.test(await h.strips()), 'still the stop notice'); ok(await h.flightKey() === k0, 'same key kept');
+  }, { role: 'shipbay_admin' });
+
+  await scenario(browser, '22. reload with no labels held: the pinned form and key survive; an empty lookup makes no new key', async (h) => {
+    h.st.f.drop = 'lost'; await h.brand(); await h.line(0, 'bravo', 6); await h.press(); const k0 = await h.flightKey();
+    ok(await h.holdKey() === null, '(no labels were held)');
+    h.st.f.drop = null; await h.page.reload(); await h.page.waitForTimeout(800);
+    await h.checkBtn().click(); await h.until(/Nothing found yet/);
+    ok(await h.flightKey() === k0 && await h.receiveBtn().isDisabled(), 'same key; still held');
+  });
+
+  await scenario(browser, '23. print window refused (throws) for the pallet label: not marked printed; retry works', async (h) => {
+    await h.brand(); await h.line(0, 'alpha', 2); await h.press(); await h.printMode('throw');
+    await h.page.locator('.printrow').first().locator('.btn').click(); await h.page.waitForTimeout(500);
+    ok(/did not open for the pallet label/.test(await h.page.locator('.dialog').innerText()), 'operator is told it did not print');
+    ok(h.st.marks === 0, 'not recorded as printed'); ok(!(await h.page.locator('.printrow').first().getAttribute('class')).includes('done'), 'row not ticked');
+    await h.printMode('ok'); await h.page.locator('.printrow').first().locator('.btn').click(); await h.page.waitForTimeout(500);
+    ok(h.st.marks === 1 && (await h.page.locator('.printrow').first().getAttribute('class')).includes('done'), 'retry sent and recorded once');
+  });
+
+  await scenario(browser, '24. no print window (frame has no window) for carton labels: not ticked; retry works', async (h) => {
+    await h.brand(); await h.line(0, 'alpha', 2); await h.press(); await h.printMode('nowin');
+    await h.page.locator('.printrow .twobtn .btn').first().click(); await h.page.waitForTimeout(500);
+    ok(/did not open for the carton labels/.test(await h.page.locator('.dialog').innerText()), 'operator is told');
+    ok(!(await h.page.locator('.printrow').nth(1).getAttribute('class')).includes('done'), 'carton row not ticked');
+    await h.printMode('ok'); await h.page.locator('.printrow .twobtn .btn').first().click(); await h.page.waitForTimeout(500);
+    ok((await h.page.locator('.printrow').nth(1).getAttribute('class')).includes('done') && await h.prints() >= 1, 'retry ticks it');
+  });
+
+  await scenario(browser, '25. print-first refused: the number stays held but the labels are not counted as printed', async (h) => {
+    await h.brand(); await h.line(0, 'alpha', 2); await h.printMode('throw');
+    await h.page.locator('.early .btn').first().click(); await h.page.waitForTimeout(600);
+    ok(/print window did not open/.test(await h.strips()), 'operator is told'); ok(/Not every carton label is printed/.test(await h.page.locator('.early').innerText()), 'hold kept, not counted as printed');
+    await h.printMode('ok'); await h.page.locator('.early .btn').first().click(); await h.page.waitForTimeout(600);
+    ok(/Carton labels printed for/.test(await h.page.locator('.early').innerText()), 'retry counts');
+    await h.press(); ok(/printed before receiving/.test(await h.page.locator('.printrow').nth(1).innerText()), 'and is matched after Receive');
+  });
+
+  await scenario(browser, '26. Pallets screen: a slow read for pallet A cannot overwrite pallet B after switching', async (h) => {
+    await h.brand(); await h.line(0, 'alpha', 3); await h.page.locator('form.entry input[aria-label="Pallets"]').fill('2'); await h.page.locator('form.entry input[aria-label="Pallets"]').blur(); await h.press();
+    const [A, B] = h.st.pallets; await h.page.locator('.dialog .btn.big').click(); await h.page.waitForTimeout(600);
+    await h.page.locator('button.back').click(); await h.page.waitForTimeout(300);
+    h.st.f.slowFor = A.id; await h.page.locator('tr', { hasText: A.psku }).click(); await h.page.waitForTimeout(150);
+    await h.page.locator('button.back').click(); await h.page.locator('tr', { hasText: B.psku }).click(); h.st.f.slowFor = null; await h.page.waitForTimeout(3200);
+    const titles = await h.page.locator('.ctiles span').evaluateAll((els) => els.map((e) => e.getAttribute('title')));
+    const bnum = B.psku.replace(/\D/g, '');
+    ok(titles.length === 3 && titles.every((t) => t.startsWith(`C${bnum}`)), `B shows only its own cartons (${titles.join(' ')})`);
+    ok(!/could not be read|do not add up/.test(await h.strips()), 'no stale error from A');
+  });
+
+  // 4) the test server: local only, nothing outside dist
+  ok(server.address().address === '127.0.0.1', 'test server listens on 127.0.0.1 only');
+  for (const [p, want] of [['/../package.json', 403], ['/%2e%2e/%2e%2e/package.json', 403], ['/assets/..%2f..%2fpackage.json', 403], ['/%E0%A4%A', 400], ['/..%5c..%5cpackage.json', 400]]) {
+    const r = await raw(p); ok(r.status === want && !r.body.includes('shipbay-wms'), `server refuses ${p} (${r.status})`);
+  }
+  ok((await raw('/index.html')).status === 200, 'server still serves dist');
+
   await browser.close();
   ok(outside.length === 0, `no request left this machine (${outside.length} refused${outside.length ? ': ' + [...new Set(outside.map((u) => new URL(u).host))].join(', ') : ''})`);
-  console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
+  console.log(`\n${pass} passed, ${fail} failed`); server.close(); process.exit(fail ? 1 : 0);
 })();

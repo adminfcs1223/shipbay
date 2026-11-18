@@ -130,3 +130,16 @@ test('findReceipt: finds the pallets a key made; no key or no match is an empty 
   assert.deepEqual(await findReceipt(fakeClient(pallets, { table: 'wms_pallets' }), ''), []);
   await assert.rejects(findReceipt(fakeClient(pallets, { table: 'wms_pallets', failAt: 0 }), 'k1'), /upstream timeout/);
 });
+
+test('KNOWN GAP (documented in checkCartons): a missing trailing NCC marker on a mixed pallet is NOT detected', () => {
+  const { pallet, rows } = receive('PSKU-000801', [{ name: 'A', cartons: 3 }, { name: 'B', cle: true }]);
+  assert.equal(rows.length, 4); assert.deepEqual(checkCartons(pallet, rows), []);
+  const missingLast = rows.slice(0, 3);
+  assert.deepEqual(checkCartons(pallet, missingLast), [], 'passes: this case is not provable from the pallet row; labels are unaffected, NCC stock would be');
+});
+test('a missing NCC marker at the start or middle IS detected (numbering gap)', () => {
+  const a = receive('PSKU-000802', [{ name: 'A', cle: true }, { name: 'B', cartons: 3 }]);
+  assert.match(checkCartons(a.pallet, a.rows.slice(1)).join(), /not 1 to/);
+  const b = receive('PSKU-000803', [{ name: 'A', cartons: 2 }, { name: 'B', cle: true }, { name: 'C', cartons: 2 }]);
+  assert.match(checkCartons(b.pallet, b.rows.filter((c) => !c.cle)).join(), /not 1 to/);
+});

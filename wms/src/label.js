@@ -3,6 +3,7 @@
 import JsBarcode from 'jsbarcode';
 import { esc, fmtStamp } from './lib';
 import { canPrintCartons } from './cartons.js';
+import { printPages as sendToPrint } from './print.js';
 
 export function barcodeSvg(text, opts = {}) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -187,30 +188,8 @@ export const LABEL_CSS = `
   .plabel footer { margin-top: auto; display: flex; justify-content: space-between; font-size: calc(var(--u) * .1); font-weight: 600; padding-top: calc(var(--u) * .06); }
 `;
 
-/** Print label pages through a hidden frame (no pop-up for the browser to block).
- *  `size` is the CSS page size. `fixed: false` leaves the page size to the paper chosen in the print window: a label
- *  printer whose paper is wider than it is tall gets a declared wide page turned a quarter by the print system (seen at
- *  the station 2026-11-14: a 2 x 1 label printed 1 in wide and 2 in long), and does not when the page takes the paper's size. */
-function printPages(pages, cls, size, title, fixed = true) {
-  return new Promise((resolve) => {
-    const styles = [...document.querySelectorAll('style, link[rel="stylesheet"]')].map((n) => n.outerHTML).join('');
-    const doc = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>${styles}
-      <style>@page { ${fixed ? `size: ${size}; ` : ''}margin: 0; } html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; min-height: 0 !important; height: auto !important; }
-      .${cls} { page-break-after: always; break-after: page; page-break-inside: avoid; break-inside: avoid; } .${cls}:last-child { page-break-after: auto; break-after: auto; }
-      ${LABEL_CSS}</style></head><body>${pages.join('')}</body></html>`;
-    document.getElementById('wms-print')?.remove();
-    const f = document.createElement('iframe');
-    f.id = 'wms-print'; f.setAttribute('aria-hidden', 'true'); f.dataset.size = size;
-    f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
-    f.onload = () => {
-      const w = f.contentWindow;
-      const go = () => { try { w.focus(); w.print(); } catch { /* printing blocked */ } resolve(true); };
-      (w.document.fonts?.ready || Promise.resolve()).then(() => setTimeout(go, 60), go);
-    };
-    document.body.appendChild(f);
-    f.srcdoc = doc;
-  });
-}
+/** Print label pages: see print.js. Every print function here answers true only if the print window was asked for. */
+const printPages = (pages, cls, size, title, fixed = true) => sendToPrint(pages, cls, size, title, fixed, LABEL_CSS);
 /** The first carton of a pallet that gets a label, for test prints and previews. An NCC product (no carton count; `cle` in the data) has one marker row and no labels. */
 export const firstLabelled = (p) => cartonCodes(p).find((c) => !c.cle) || null;
 /** 4x6: one page per pallet. */

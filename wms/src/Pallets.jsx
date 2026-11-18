@@ -1,7 +1,7 @@
 // Pallets. The register (scan or search any pallet) and, once one is open, the pallet's own work screen:
 //   Scan cartons → every carton label scanned in · Put away → the map shows its position; scan the position label and
 //   the PSKU label there · Received. A pallet entered by mistake is voided with a reason, never deleted.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, fmtStamp, sameDay } from './lib';
 import { printPalletLabels, printCartonLabels, printUnitLabels, linesOf, firstLabelled } from './label';
 import { fetchCartons, checkCartons } from './cartons.js';
@@ -105,20 +105,27 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
   const loc = (locations || []).find((l) => l.id === p.location_id) || null;
 
   const [cartonsOk, setCartonsOk] = useState(false);   // the carton rows were read and add up: labels may be printed from them
+  // Reads can overlap (a scan or an open box reloads while an earlier read is still out). Only the newest one is used,
+  // and only for the pallet it was made for; one that comes back after this screen is gone is dropped.
+  const reads = useRef(0); const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
   const loadCartons = async () => {
+    const mine = ++reads.current; const id = p.id; const stale = () => !alive.current || mine !== reads.current || id !== p.id;
     let c;
-    try { c = await fetchCartons(supabase, [p.id]); }
-    catch (x) { setCartons([]); setCartonsOk(false); return say('bad', `The cartons of ${p.psku} could not be read (${x.message}). Nothing can be scanned or printed for it until they are: reload to try again.`); }
+    try { c = await fetchCartons(supabase, [id]); }
+    catch (x) { if (stale()) return; setCartons([]); setCartonsOk(false); return say('bad', `The cartons of ${p.psku} could not be read (${x.message}). Nothing can be scanned or printed for it until they are: reload to try again.`); }
+    if (stale()) return;
     const bad = checkCartons(p, c);
     setCartons(c); setCartonsOk(bad.length === 0);
     if (bad.length) say('bad', `The cartons on file for ${p.psku} do not add up (${bad.join(', ')}). Carton labels cannot be printed. Tell an admin.`);
-    const u = await supabase.from('wms_units').select('*').eq('pallet_id', p.id).order('code');
+    const u = await supabase.from('wms_units').select('*').eq('pallet_id', id).order('code');
+    if (stale()) return;
     if (u.error) say('bad', `The open-box units of ${p.psku} could not be read (${u.error.message}).`);
     setUnits(u.data || []);
   };
   const printCartons = async (only) => {
-    const ok = await printCartonLabels([pp], () => brand, only, csize, cturn);
-    if (!ok) say('bad', `No carton labels were printed: the cartons on file for ${p.psku} are not verified.`);
+    if (!cartonsOk) return say('bad', `No carton labels were printed: the cartons on file for ${p.psku} are not verified.`);
+    if (!(await printCartonLabels([pp], () => brand, only, csize, cturn))) say('bad', `The print window did not open. Nothing was printed for ${p.psku}; try again.`);
   };
   useEffect(() => { loadCartons(); }, [p.id]);
   // NCC products (no carton count; cle in the data) have one marker row each: not a carton, never counted here
@@ -182,7 +189,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
     beep('ok'); setFeed(null); setOb({ made: made || [], seq: data.seq, shelf: data.location });
   };
   const reprint = async () => {
-    await printPalletLabels([pp], () => brand);
+    if (!(await printPalletLabels([pp], () => brand))) return say('bad', `The print window did not open. The pallet label for ${p.psku} was not printed; try again.`);
     const { error } = await supabase.rpc('wms_mark_printed', { p_ids: [p.id] });
     if (!error) merge([{ ...p, label_prints: (p.label_prints || 0) + 1, last_printed_at: new Date().toISOString() }]);
   };

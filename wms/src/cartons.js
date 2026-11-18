@@ -28,7 +28,14 @@ export async function fetchCartons(client, palletIds, page = PAGE) {
 }
 
 /** What is wrong with a pallet's carton rows, in plain words; an empty list means the labels can be printed from them.
- *  `rows` are that pallet's rows only. An NCC product has one marker row (cle) that is never labelled or counted. */
+ *  `rows` are that pallet's rows only. An NCC product has one marker row (cle) that is never labelled or counted.
+ *
+ *  What this can and cannot prove. It proves every counted carton is on file once, numbered 1..n with the code the
+ *  database gives it, on the right pallet, and (mixed pallets) with a product. It cannot prove that every NCC marker row
+ *  is there: the pallet row keeps the counted total, not how many NCC lines it had. A missing marker in the middle or at
+ *  the start leaves a gap in the numbering and is caught; a missing marker at the END of a mixed pallet leaves 1..n
+ *  intact and passes. That marker carries no label, so the printed labels are still right; what would be wrong is the
+ *  stock posted for that NCC product. Closing it needs the line count stored with the pallet (a schema change). */
 export function checkCartons(pallet, rows) {
   const bad = []; const list = rows || []; const counted = list.filter((c) => !c.cle);
   if (list.some((c) => c.pallet_id !== pallet.id)) bad.push('a carton that belongs to another pallet came back');
