@@ -8,6 +8,7 @@ import Orders from './Orders';
 import Receive from './Receive.jsx';
 import Pallets from './Pallets.jsx';
 import Locations from './Locations.jsx';
+import Nexus from './Nexus.jsx';
 import VersionWatch from './VersionWatch.jsx';
 
 const NAV = [
@@ -16,6 +17,7 @@ const NAV = [
   ['pallets', 'Pallets', 'M3 6h18v5H3zM5 11v7M19 11v7M12 11v7M3 18h18'],
   ['orders', 'Orders', 'M6 4h12v17l-3-2-3 2-3-2-3 2zM9 9h6M9 13h6'],
   ['locations', 'Locations', 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z'],
+  ['nexus', 'Nexus', 'M3 20V6l9-3 9 3v14M7 20v-8h10v8M7 15h10'],
 ];
 
 export default function App() {
@@ -87,6 +89,7 @@ function Shell({ me }) {
         {page === 'orders' && <Orders key={navTick} me={me} startBrand={startBrand} clearStart={() => setStartBrand(null)} />}
         {page === 'receive' && <Receive me={me} orgs={orgs} pallets={pallets} brandName={brandName} merge={merge} open={open} />}
         {page === 'pallets' && <Pallets key={navTick} me={me} orgs={orgs} pallets={pallets} locations={locations} brandName={brandName} merge={merge} find={find} setFind={setFind} />}
+        {page === 'nexus' && <Nexus />}
         {page === 'locations' && <Locations me={me} locations={locations} pallets={pallets} brandName={brandName} reload={load} open={open} />}
         <div className="phonewho"><span>{me.full_name || me.email}{me.employee_no ? ` · Employee ${me.employee_no}` : ''}</span><button onClick={() => supabase.auth.signOut()}>{me.employee_no ? 'Switch employee' : 'Sign out'}</button></div>
       </main>
