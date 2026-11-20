@@ -42,7 +42,7 @@ const api = (fn, body) => fetch(`http://127.0.0.1:54331/rest/v1/rpc/${fn}`, { me
   ok(/not on file/.test(await scan('ZZ99', inZone[0].psku)), 'unknown position refused');
   await shot('4-count'); await p.getByRole('button', { name: 'Finish count' }).click(); await p.waitForTimeout(1000);
   const lt = norm(await p.locator('[data-testid=line-table]').innerText());
-  ok(/Count closed\. Nothing was moved/.test(await p.locator('body').innerText()) && (inZone.length < 3 || /Missing/.test(lt)), 'finish: uncounted pallets become Missing; nothing moved');
+  ok(/Count closed\. Nothing was moved/.test(await p.locator('body').innerText()) && (inZone.length < 3 || /Missing/i.test(lt)), 'finish: uncounted pallets become Missing; nothing moved');
 
   await tab('Connections'); await p.getByLabel('WMS name').fill('Souled Sneakers WMS (synthetic)'); await p.getByLabel('Synthetic Sneakers').check();
   await p.getByRole('button', { name: 'Create key' }).click(); await p.waitForTimeout(1000);
