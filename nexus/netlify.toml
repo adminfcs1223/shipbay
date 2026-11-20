@@ -1,0 +1,9 @@
+# Nexus site (not created yet). Same public project values as the WMS go here at release; none are set in this candidate.
+[build]
+  base = "nexus"
+  command = "npm ci && npm run build"
+  publish = "dist"
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
