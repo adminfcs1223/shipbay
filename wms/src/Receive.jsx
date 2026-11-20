@@ -7,8 +7,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, fmtTime, sameDay } from './lib';
 import { printPalletLabels, printCartonLabels, cartonCodes, linesOf, firstLabelled, sizeLabel } from './label';
-import { fetchCartons, attachCartons, sameLabels, findReceipt } from './cartons.js';
+import { fetchCartons, attachCartons, sameLabels, findReceipt, lookupBookedReceipt } from './cartons.js';
 import { LabelPreview, CartonPreview, CartonSizePicker, CartonTurnPicker, useCartonSize, StatusTag, beep } from './parts.jsx';
+import { progressText } from './bookingProgress';
 
 const num = (n) => Number(n || 0).toLocaleString();
 let lineId = 0;
@@ -38,6 +39,8 @@ const saveFlight = (f) => {
 };
 const loadHold = () => { try { const h = JSON.parse(localStorage.getItem('wms-hold') || 'null'); return h && h.key && h.org && Array.isArray(h.lines) && h.lines.length && h.pskus?.length ? h : null; } catch { return null; } };
 
+export function BookingProgress({ b }) { return <span>{progressText(b)}</span>; }
+
 export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const [saved] = useState(loadHold);
   const [loaded] = useState(loadFlight);
@@ -47,6 +50,11 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const [products, setProducts] = useState(null);
   const [lines, setLines] = useState(() => (flight ? flight.form.lines.map((l) => ({ ...newLine(), ...l, id: ++lineId })) : saved ? saved.lines.map((l) => ({ ...newLine(), ...l, id: ++lineId })) : [newLine()]));
   const [count, setCount] = useState(flight?.form.count || saved?.count || 1);
+  // Optional booking link (separate database entrypoint, wms_receive_booking). Empty = unbooked receiving, unchanged.
+  const [booking, setBooking] = useState(flight?.form.booking || '');
+  const [mode, setMode] = useState(flight?.form.mode || 'partial');
+  const [holdWhy, setHoldWhy] = useState(flight?.form.holdWhy || '');
+  const [bookings, setBookings] = useState(null);
   const [hold, setHold] = useState(saved ? { pskus: saved.pskus, sig: saved.sig, full: !!saved.full } : null);   // carton labels printed before Receive
   const [holding, setHolding] = useState(false);
   const lastOrg = useRef(flight ? flight.form.org : saved ? saved.org : null);
@@ -62,6 +70,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const isAdmin = me?.role === 'shipbay_admin';
   const [pending, setPending] = useState(null);     // received, cartons not yet read and checked: { pallets, early, reading | why | bad }
   const sending = useRef(false);
+  const lastBookingOrg = useRef(flight?.form.org || null);
   const [csize, setCsize, cturn, setCturn] = useCartonSize();
 
   useEffect(() => { if (orgs && org && !orgs.some((o) => o.id === org)) setOrg(''); }, [orgs]);
@@ -74,6 +83,17 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
     supabase.rpc('wms_products', { p_org: org }).then(({ data, error }) => { if (live) { setProducts(data || []); if (error) setErr(error.message); } });
     return () => { live = false; };
   }, [org]);
+  const loadBookings = async (o = org) => {
+    if (!o) { setBookings(null); return; }
+    const { data, error } = await supabase.rpc('wms_bookings', { p_org: o });
+    if (error) { setBookings([]); return; }   // entrypoint not on this database: booking link hidden, unbooked receiving as before
+    setBookings(data || []);
+  };
+  useEffect(() => {
+    if (!sent) { const keep = lastBookingOrg.current === org; lastBookingOrg.current = org; if (!keep) { setBooking(''); setMode('partial'); setHoldWhy(''); } }
+    setBookings(null); loadBookings(org);
+  }, [org]);
+  const curBooking = (bookings || []).find((b) => b.id === booking) || null;
 
   const cur = orgs?.find((o) => o.id === org);
   const setLine = (id, patch) => setLines((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)));
@@ -84,7 +104,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const total = lines.reduce((s, l) => s + lineCartons(l), 0);
   const printable = total;   // an NCC product (no carton count; cle in the data) has no cartons to label
   const rows = total + lines.filter((l) => l.cle).length;   // the database writes one marker row per NCC product; carton codes are padded to this
-  const problem = !org ? 'Pick a brand' : !lines.every(lineReady) ? (mixed ? 'Pick every product' : 'Pick the product') : mixed && lines.some((l) => !l.cle && !lineCartons(l)) ? 'Every product needs its carton count, or NCC' : lines.some((l) => !l.cle && lineCartons(l) > 0 && !(Number(l.upc) >= 1)) ? 'Enter the units per carton' : total > 500 ? 'Up to 500 cartons on a pallet' : null;
+  const problem = booking && mode === 'hold' && !holdWhy.trim() ? 'Say why it is on HOLD' : !org ? 'Pick a brand' : !lines.every(lineReady) ? (mixed ? 'Pick every product' : 'Pick the product') : mixed && lines.some((l) => !l.cle && !lineCartons(l)) ? 'Every product needs its carton count, or NCC' : lines.some((l) => !l.cle && lineCartons(l) > 0 && !(Number(l.upc) >= 1)) ? 'Enter the units per carton' : total > 500 ? 'Up to 500 cartons on a pallet' : null;
 
   const sig = JSON.stringify([org, n, lines.map((l) => [l.prod?.id || l.what.trim(), lineCartons(l), l.upc, l.fba, !!l.cle])]);
   const stale = !!hold && hold.sig !== sig;   // the form changed after the labels were printed
@@ -132,14 +152,18 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const landed = async (data, early) => {
     saveFlight(null); setSent(null); setLooked(0); key.current = crypto.randomUUID();
     beep('ok'); merge(data); setErr(null);
-    setHold(null); setLines([newLine()]); setCount(1);
+    setHold(null); setLines([newLine()]); setCount(1); setMode('partial'); setHoldWhy('');
+    if (booking) {   // same booking stays chosen for the next pallets off the truck, unless that receipt closed it
+      const { data: bs } = await supabase.rpc('wms_bookings', { p_org: org });
+      setBookings(bs || []); if (!(bs || []).some((b) => b.id === booking)) setBooking('');
+    }
     await verify(data, early);
   };
   // Send a pinned request and settle what came back. Used for the first send and for an admin's re-send of the same request.
   const send = async (f) => {
     sending.current = true; setBusy(true); setErr(null);
     let res;
-    try { res = await supabase.rpc('wms_receive', f.payload); }
+    try { res = await supabase.rpc(f.rpc === 'wms_receive_booking' ? 'wms_receive_booking' : 'wms_receive', f.payload); }
     catch (x) { res = { data: null, error: { message: String(x?.message || x) }, status: 0 }; }
     sending.current = false; setBusy(false);
     const { data, error, status } = res;
@@ -154,9 +178,11 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
     if (problem || busy || sending.current || pending || sent || corrupt) return;
     const f = {
       key: key.current, at: Date.now(), early: hold?.full && !stale ? draft(hold.pskus) : null,
-      form: { org, count: n, lines: lines.map(({ id, q, ...l }) => l) },
+      form: { org, count: n, lines: lines.map(({ id, q, ...l }) => l), booking: booking || null, mode: booking ? mode : null, holdWhy: booking && mode === 'hold' ? holdWhy.trim() : null },
+      rpc: booking ? 'wms_receive_booking' : 'wms_receive',
       payload: { p_org: org, p_pallets: n, p_notes: null, p_key: key.current,
-        p_lines: lines.map((l) => ({ sku: l.prod?.id || null, name: l.prod ? null : l.what.trim(), cartons: lineCartons(l), units_per_carton: l.upc === '' ? null : Number(l.upc), fba: l.fba, cle: !!l.cle })) },
+        p_lines: lines.map((l) => ({ sku: l.prod?.id || null, name: l.prod ? null : l.what.trim(), cartons: lineCartons(l), units_per_carton: l.upc === '' ? null : Number(l.upc), fba: l.fba, cle: !!l.cle })),
+        ...(booking ? { p_inbound: booking, p_mode: mode, p_hold_reason: mode === 'hold' ? holdWhy.trim() : null } : {}) },
     };
     sending.current = true;   // closes the gap before React re-renders the button
     if (!saveFlight(f)) {   // not durably recorded: if the answer were lost, nothing would show it may be on file
@@ -172,10 +198,14 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
     if (busy || !sent) return;
     setBusy(true); setErr(null);
     let found;
-    try { found = await findReceipt(supabase, sent.key); }
+    // booked: the dedicated lookup (brand + booking + key + content); unbooked: the original search by key, unchanged
+    try { found = sent.rpc === 'wms_receive_booking' ? await lookupBookedReceipt(supabase, sent) : { state: 'legacy', pallets: await findReceipt(supabase, sent.key) }; }
     catch (x) { setBusy(false); beep('bad'); return setErr(`It could not be checked (${x.message}). Do not enter it again.`); }
     setBusy(false);
-    if (found.length) return landed(found, sent.early);
+    if (found.state === 'different_request' || found.state === 'key_used_elsewhere') {
+      beep('bad'); return setErr(`Receipt ${sent.key.slice(0, 8)} is on file for a different receipt${found.state === 'key_used_elsewhere' ? ' (another booking or an unbooked receipt)' : ' on this booking'}. This one was not received under it. Do not enter it again: ask an admin.`);
+    }
+    if (found.pallets?.length) return landed(found.pallets, sent.early);
     setLooked((k) => k + 1); beep('bad');
   };
   // Admin only: send the very same request again, same key. The database returns the pallets already made under that key
@@ -234,6 +264,26 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
               <button type="button" key={o.id} className={o.id === org ? 'on' : ''} onClick={() => setOrg(o.id)} aria-pressed={o.id === org}><b>{o.name}</b></button>
             ))}</div>
           )}
+
+          {org && bookings && bookings.length > 0 && (<>
+            <div className="step"><i>·</i><h3>Booking</h3><span>optional</span></div>
+            <div className="bookingrow" data-testid="booking">
+              <select value={booking} onChange={(e) => { setBooking(e.target.value); setMode('partial'); setHoldWhy(''); }} aria-label="Booking">
+                <option value="">No booking (unbooked receipt)</option>
+                {bookings.map((b) => <option key={b.id} value={b.id}>{b.reference} · {b.received_pallets} of {b.expected_pallets} pallets in</option>)}
+              </select>
+              {curBooking && <div className="bookingstate" data-testid="booking-state"><BookingProgress b={curBooking} /></div>}
+              {curBooking && (
+                <div className="bookingmode" role="radiogroup" aria-label="This receipt">
+                  {[['partial', 'More to come'], ['hold', 'On HOLD'], ['final', 'Last of this booking']].map(([k, t]) => (
+                    <label key={k}><input type="radio" name="bmode" value={k} checked={mode === k} onChange={() => setMode(k)} /> {t}</label>
+                  ))}
+                  {mode === 'hold' && <input className="holdwhy" placeholder="Why is it on HOLD?" value={holdWhy} onChange={(e) => setHoldWhy(e.target.value)} aria-label="HOLD reason" />}
+                  {mode === 'final' && <small>Closes the booking. Anything not received is recorded as short.</small>}
+                </div>
+              )}
+            </div>
+          </>)}
 
           <div className="step"><i>2</i><h3>{mixed ? 'Mixed pallet' : 'Product'}</h3>{org && products && <span>{mixed ? `${lines.length} products · ${num(total)} cartons` : `${num(products.length)} on ${cur?.name}’s list`}</span>}</div>
           {!org ? <div className="hold">Pick the brand first.</div> : (

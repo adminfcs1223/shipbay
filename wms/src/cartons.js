@@ -75,6 +75,26 @@ export function sameLabels(a, b) {
 }
 
 /** The pallets a Receive made, looked up by the key it was sent with: settles "did it go through?" without sending it again. */
+// "Did it go through?" for a BOOKED receipt: the dedicated server lookup, bound to brand, booking, request key and the request's
+// own content (version 1). Never the general pallet search by key (that is the unbooked path, findReceipt).
+// Resolves to { state: 'received', pallets } | { state: 'not_found' } | { state: 'different_request' } | { state: 'key_used_elsewhere' }.
+// Throws when the answer is missing, an error, or anything else: "could not check" is never reported as "not found".
+export const RECEIPT_LOOKUP_VERSION = 1;
+export async function lookupBookedReceipt(client, f) {
+  const p = f?.payload || {};
+  if (!f?.key || !p.p_inbound || !p.p_org) throw new Error('This Receive has no booking to look up.');
+  let res;
+  try {
+    res = await client.rpc('wms_receipt_lookup', { p_org: p.p_org, p_inbound: p.p_inbound, p_key: f.key, p_version: RECEIPT_LOOKUP_VERSION,
+      p_lines: p.p_lines, p_pallets: p.p_pallets, p_notes: p.p_notes ?? null, p_mode: p.p_mode ?? null, p_hold_reason: p.p_hold_reason ?? null });
+  } catch (x) { throw new Error(String(x?.message || x || 'no answer')); }
+  const { data, error } = res || {};
+  if (error) throw new Error(error.message || 'The lookup failed.');
+  const st = data?.state;
+  if (st === 'received') { if (!Array.isArray(data.pallets) || !data.pallets.length || data.pallets.some((x) => x.batch_key !== f.key)) throw new Error('The lookup answer was incomplete.'); return { state: st, pallets: data.pallets }; }
+  if (st === 'not_found' || st === 'different_request' || st === 'key_used_elsewhere') return { state: st };
+  throw new Error('The lookup answer was not understood.');
+}
 export async function findReceipt(client, key) {
   if (!key) return [];
   const { data, error } = await client.from('wms_pallets').select('*').eq('batch_key', key).order('batch_pos');

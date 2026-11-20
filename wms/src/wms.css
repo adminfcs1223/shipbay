@@ -638,3 +638,10 @@ label input.bignum { height: 59px; font-size: 26px; font-weight: 800; font-varia
 /* the receiving form while a Receive is unsettled */
 .lockset { border: 0; margin: 0; padding: 0; min-width: 0; }
 .lockset:disabled { opacity: .55; }
+
+/* booking link on Receive */
+.bookingrow { display: grid; gap: 8px; margin-bottom: 18px; }
+.bookingrow select, .bookingrow .holdwhy { font: inherit; padding: 10px 12px; border: 1px solid var(--line, #d9d6cf); border-radius: 8px; background: #fff; }
+.bookingstate { font-size: 14px; }
+.bookingmode { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.bookingmode small { flex-basis: 100%; color: var(--muted, #6b6b6b); }

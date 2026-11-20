@@ -1,7 +1,7 @@
 // node --test test/   (no backend, no network: the Supabase client is a fake that serves synthetic rows)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchCartons, checkCartons, attachCartons, canPrintCartons, sameLabels, findReceipt, expectedCode, PAGE } from '../src/cartons.js';
+import { fetchCartons, checkCartons, attachCartons, canPrintCartons, sameLabels, findReceipt, lookupBookedReceipt, RECEIPT_LOOKUP_VERSION, expectedCode, PAGE } from '../src/cartons.js';
 
 // ── synthetic data, built the way wms_receive builds it (migration 20261114180000, lines 566 and 590-591) ──
 let pid = 0;
@@ -142,4 +142,28 @@ test('a missing NCC marker at the start or middle IS detected (numbering gap)', 
   assert.match(checkCartons(a.pallet, a.rows.slice(1)).join(), /not 1 to/);
   const b = receive('PSKU-000803', [{ name: 'A', cartons: 2 }, { name: 'B', cle: true }, { name: 'C', cartons: 2 }]);
   assert.match(checkCartons(b.pallet, b.rows.filter((c) => !c.cle)).join(), /not 1 to/);
+});
+
+// ── booked "Did it go through?": the dedicated lookup only; transport and server errors are never "not found" ──
+const FL = { key: 'k-booked-1', rpc: 'wms_receive_booking', payload: { p_org: 'org-A', p_inbound: 'bk-1', p_key: 'k-booked-1', p_pallets: 1, p_notes: null, p_lines: [{ sku: 's', cartons: 2 }], p_mode: 'partial', p_hold_reason: null } };
+const rpcClient = (answer) => { const calls = []; return { calls, rpc: async (fn, args) => { calls.push({ fn, args }); if (answer instanceof Error) throw answer; return typeof answer === 'function' ? answer(fn, args) : answer; },
+  from: () => { throw new Error('the general pallet search must not be used for a booked receipt'); } }; };
+test('lookupBookedReceipt: calls only wms_receipt_lookup, bound to brand, booking, key, version and the exact request content', async () => {
+  const c = rpcClient({ data: { state: 'not_found' }, error: null });
+  assert.deepEqual(await lookupBookedReceipt(c, FL), { state: 'not_found' });
+  assert.equal(c.calls.length, 1); assert.equal(c.calls[0].fn, 'wms_receipt_lookup');
+  assert.deepEqual(c.calls[0].args, { p_org: 'org-A', p_inbound: 'bk-1', p_key: 'k-booked-1', p_version: RECEIPT_LOOKUP_VERSION, p_lines: FL.payload.p_lines, p_pallets: 1, p_notes: null, p_mode: 'partial', p_hold_reason: null });
+});
+test('lookupBookedReceipt: received returns the pallets; other-receipt answers are their own states', async () => {
+  assert.deepEqual((await lookupBookedReceipt(rpcClient({ data: { state: 'received', pallets: [{ id: 'p1', batch_key: 'k-booked-1' }] } }), FL)).pallets.map((p) => p.id), ['p1']);
+  for (const st of ['different_request', 'key_used_elsewhere']) assert.deepEqual(await lookupBookedReceipt(rpcClient({ data: { state: st } }), FL), { state: st });
+});
+test('lookupBookedReceipt: transport failure, server error, empty or odd answers throw (never "not found")', async () => {
+  await assert.rejects(lookupBookedReceipt(rpcClient(new TypeError('Failed to fetch')), FL), /Failed to fetch/);
+  await assert.rejects(lookupBookedReceipt(rpcClient({ data: null, error: { message: 'This login cannot look up receipts.' } }), FL), /cannot look up/);
+  await assert.rejects(lookupBookedReceipt(rpcClient({ data: null, error: null }), FL), /not understood/);
+  await assert.rejects(lookupBookedReceipt(rpcClient({ data: { state: 'maybe' } }), FL), /not understood/);
+  await assert.rejects(lookupBookedReceipt(rpcClient({ data: { state: 'received', pallets: [] } }), FL), /incomplete/);
+  await assert.rejects(lookupBookedReceipt(rpcClient({ data: { state: 'received', pallets: [{ id: 'x', batch_key: 'other' }] } }), FL), /incomplete/);
+  await assert.rejects(lookupBookedReceipt(rpcClient({ data: { state: 'not_found' } }), { key: 'k', payload: { p_org: 'org-A' } }), /no booking/);
 });
