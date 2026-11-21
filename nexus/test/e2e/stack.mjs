@@ -11,12 +11,13 @@ const g = (await db.query(`select current_setting('cluster_name') c, host(inet_s
 if (g.c !== 'shipbay-local-staging' || g.h !== '127.0.0.1' || g.m !== 'shipbay-local-staging') { console.error('REFUSED: not the dedicated local staging cluster'); process.exit(3); }
 if ((await db.query('select count(*) n from orgs')).rows[0].n !== '0') { console.error('REFUSED: staging not freshly loaded'); process.exit(3); }
 await db.query(fs.readFileSync(path.join(repo, 'supabase/candidates/20261124_nexus.sql'), 'utf8'));
+await db.query(fs.readFileSync(path.join(repo, 'supabase/candidates/20261124_nexus_map.sql'), 'utf8'));
 const U = { floor: 'aa000000-0000-4000-8000-000000000001', admin: 'aa000000-0000-4000-8000-000000000002', userA: 'aa000000-0000-4000-8000-000000000003', userB: 'aa000000-0000-4000-8000-000000000004' };
 const A = 'bb000000-0000-4000-8000-00000000000a', B = 'bb000000-0000-4000-8000-00000000000b';
 await db.query(`insert into orgs (id, name, slug, status) values ($1,'Synthetic Records','syn-records','onboarding'), ($2,'Synthetic Sneakers','syn-sneakers','onboarding')`, [A, B]);
 await db.query(`insert into auth.users (id, email, raw_user_meta_data) values ($1,'floor@example.test','{"role":"wms_employee","full_name":"Test Floor"}'), ($2,'admin@example.test','{"role":"shipbay_admin","full_name":"Test Admin"}'),
   ($3,'ua@example.test',jsonb_build_object('role','client_user','org_id',$5::text)), ($4,'ub@example.test',jsonb_build_object('role','client_user','org_id',$6::text))`, [U.floor, U.admin, U.userA, U.userB, A, B]);
-await db.query(`insert into locations (code, zone, kind) select z || lpad(n::text, 2, '0'), z, 'pallet' from unnest(array['A','B','C']) z, generate_series(1, 6) n`);
+await db.query(`insert into locations (code, zone, kind) select 'P-' || lpad(n::text, 2, '0'), 'bulk', 'pallet' from generate_series(1, 64) n`); await db.query(`insert into locations (code, zone, kind) values ('STG-01','staging','floor')`);
 const SKU = (await db.query(`insert into skus (org_id, sku, name) values ($1,'SYN-LP','Synthetic LP') returning id`, [A])).rows[0].id;
 const SKU2 = (await db.query(`insert into skus (org_id, sku, name) values ($1,'SYN-BOX','Synthetic box set') returning id`, [A])).rows[0].id;
 const SHOE = (await db.query(`insert into skus (org_id, sku, name) values ($1,'SYN-SHOE','Synthetic shoe') returning id`, [B])).rows[0].id;

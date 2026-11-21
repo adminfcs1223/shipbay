@@ -1,19 +1,21 @@
 // Nexus screens: Overview, Pallets, FIFO, Cycle counts, Connections. Every read and write goes through a nexus_* function.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, num, day, stamp } from './lib.js';
+import FloorMap from './FloorMap.jsx';
 
-const TABS = [['overview', 'Overview'], ['pallets', 'Pallets'], ['fifo', 'FIFO'], ['counts', 'Cycle counts'], ['connections', 'Connections']];
+const TABS = [['overview', 'Overview'], ['map', 'Locations'], ['pallets', 'Pallets'], ['fifo', 'FIFO'], ['counts', 'Cycle counts'], ['connections', 'Connections']];
 const STATUS = { open: 'Cartons to scan', counted: 'To put away', stored: 'Stored' };
 const RESULT = { pending: 'Not counted yet', found: 'Found', misplaced: 'Wrong position', missing: 'Missing', unexpected: 'Not expected here' };
 const useRpc = (fn, args, deps) => {
   const [s, set] = useState({ data: null, error: null, n: 0 });
   const load = () => supabase.rpc(fn, args).then(({ data, error }) => set((x) => ({ data: error ? x.data : data, error: error?.message || null, n: x.n + 1 })));
-  useEffect(() => { load(); }, deps);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, deps);   // live: re-read every 15 s
   return [s.data, s.error, load];
 };
 
-export default function Nexus({ me, onSignOut }) {
+export default function Nexus({ me, onSignOut, embed }) {
   const [tab, setTab] = useState('overview');
+  if (embed) return <main className="embed"><FloorMap compact /></main>;
   const [ov, ovErr, reloadOv] = useRpc('nexus_overview', {}, []);
   const brands = ov?.brands || []; const zones = (ov?.zones || []).map((z) => z.zone).filter((z) => z !== '—');
   const tabs = TABS.filter(([k]) => k !== 'connections' || me.role === 'shipbay_admin');
@@ -27,6 +29,7 @@ export default function Nexus({ me, onSignOut }) {
       <main>
         {ovErr && <div className="strip bad">{ovErr}</div>}
         {tab === 'overview' && <Overview ov={ov} />}
+        {tab === 'map' && <><div className="head"><h1>Locations</h1></div><FloorMap /></>}
         {tab === 'pallets' && <Pallets brands={brands} />}
         {tab === 'fifo' && <Fifo brands={brands} />}
         {tab === 'counts' && <Counts brands={brands} zones={zones} />}
@@ -72,9 +75,9 @@ function Pallets({ brands }) {
         <input aria-label="Search" placeholder="Pallet, position or item…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       {err && <div className="strip bad">{err}</div>}
-      <table data-testid="pallet-table"><thead><tr><th>Pallet</th><th>Brand</th><th>Item</th><th>Position</th><th>Status</th><th className="n">Cartons</th><th className="n">Units</th><th>Received</th><th className="n">Age</th></tr></thead>
+      <table data-testid="pallet-table"><thead><tr><th>Pallet</th><th>Brand</th><th>Item</th><th>Position</th><th>Status</th><th className="n">Cartons</th><th className="n">Units</th><th>Received</th><th className="n">Age</th><th className="n">Labels printed</th></tr></thead>
         <tbody>{list.map((r) => <tr key={r.id}><td className="code">{r.psku}</td><td>{r.org_name}</td><td>{r.item_name}{r.item_no ? <span className="sm"> · {r.item_no}</span> : null}</td><td className="code">{r.location_code || '—'}</td>
-          <td><span className={`pill ${r.held ? 'held' : r.status}`}>{r.held ? 'On hold' : STATUS[r.status] || r.status}</span></td><td className="n">{r.cartons ?? '—'}</td><td className="n">{r.units_total ?? '—'}</td><td>{day(r.received_at)}</td><td className="n">{r.age_days}d</td></tr>)}</tbody></table>
+          <td><span className={`pill ${r.held ? 'held' : r.status}`}>{r.held ? 'On hold' : STATUS[r.status] || r.status}</span></td><td className="n">{r.cartons ?? '—'}</td><td className="n">{r.units_total ?? '—'}</td><td>{day(r.received_at)}</td><td className="n">{r.age_days}d</td><td className="n" title={r.last_printed_at ? `last ${stamp(r.last_printed_at)}` : ''}>{r.label_prints ? `${r.label_prints}×` : 'Not printed'}</td></tr>)}</tbody></table>
       {rows && list.length === 0 && <div className="empty">Nothing matches.</div>}
     </>
   );

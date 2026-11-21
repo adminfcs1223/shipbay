@@ -18,11 +18,17 @@ const api = (fn, body) => fetch(`http://127.0.0.1:54331/rest/v1/rpc/${fn}`, { me
   const tab = async (n) => { await p.locator('.top nav button', { hasText: n }).click(); await p.waitForTimeout(900); };
 
   const g = norm(await p.locator('[data-testid=glance]').innerText());
-  ok(/^6 Pallets stored 2 Waiting for put-away 0 On hold 6 \/ 18 Positions used$/.test(g), `overview counts: ${g}`);
+  ok(/^6 Pallets stored 2 Waiting for put-away 0 On hold 6 \/ 64 Positions used$/.test(g), `overview counts: ${g}`);
   const bt = norm(await p.locator('[data-testid=brand-table] tbody').innerText());
   ok(/Synthetic Records 4 1 0 336/.test(bt) && /Synthetic Sneakers 2 1 0 288/.test(bt), `per-brand counts and units: ${bt.slice(0, 90)}`);
   await shot('1-overview');
 
+  await tab('Locations'); await p.waitForTimeout(600);
+  const full = await p.locator('[data-testid=floor-map] .cell.full').count(); const none = await p.locator('[data-testid=floor-map] .cell.none').count();
+  ok(full === 6 && none === 9, `floor map: 6 occupied squares, 9 not set up (P-65..72 and STG-02): ${full}/${none}`);
+  const first = S.pallets[0]; await p.locator(`[data-testid="cell-${first.loc}"]`).click(); await p.waitForTimeout(300);
+  ok((await p.locator('[data-testid=cell-detail]').innerText()).includes(first.psku), 'click a square: shows the pallet standing there');
+  ok(/no position yet · 2/i.test(await p.locator('[data-testid=unplaced]').innerText()), 'received pallets with no position are listed'); await shot('6-map');
   await tab('Pallets'); ok((await p.locator('[data-testid=pallet-table] tbody tr').count()) === 8, 'pallets: all 8 listed');
   await p.getByLabel('Brand').selectOption({ label: 'Synthetic Sneakers' }); await p.getByLabel('Status').selectOption('stored'); await p.waitForTimeout(800);
   ok((await p.locator('[data-testid=pallet-table] tbody tr').count()) === 2, 'pallets: brand + status filter'); await shot('2-pallets');
@@ -34,7 +40,7 @@ const api = (fn, body) => fetch(`http://127.0.0.1:54331/rest/v1/rpc/${fn}`, { me
   ok(/21d/.test(rows[0]) && /120/.test(rows[0]), `FIFO shows age and on-hand at the position: ${norm(rows[0])}`); await shot('3-fifo');
 
   await tab('Cycle counts'); const z = lp[0].zone; const inZone = S.pallets.filter((x) => x.zone === z);
-  await p.getByLabel('Zone').selectOption(z); await p.getByRole('button', { name: 'Start a count' }).click(); await p.waitForTimeout(1200);
+  await p.getByLabel('Zone').selectOption({ index: 1 }); await p.getByRole('button', { name: 'Start a count' }).click(); await p.waitForTimeout(1200);
   ok((await p.locator('[data-testid=line-table] tbody tr').count()) === inZone.length, `count started with the ${inZone.length} stored pallets of zone ${z}`);
   const scan = async (loc, psku) => { await p.getByLabel('Position').fill(loc); await p.getByLabel('Pallet').fill(psku); await p.getByRole('button', { name: 'Record' }).click(); await p.waitForTimeout(900); return norm(await p.locator('[data-testid=count-last]').innerText()); };
   ok(/: Found$/.test(await scan(inZone[0].loc, inZone[0].psku)), 'scan in the right position: found');

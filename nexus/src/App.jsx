@@ -1,9 +1,29 @@
 // Sign-in shell. The screens live in Nexus.jsx and take the signed-in profile.
 import { useEffect, useState } from 'react';
-import { supabase, NEXUS_ROLES } from './lib.js';
+import { supabase, NEXUS_ROLES, EMBED, WMS_ORIGINS, setToken } from './lib.js';
 import Nexus from './Nexus.jsx';
 
+// Inside a WMS: no sign-in here. Ask the parent for the signed-in user's access token; accept it only from a known WMS origin.
+function Embedded() {
+  const [me, setMe] = useState(null); const [err, setErr] = useState(null);
+  useEffect(() => {
+    const on = (e) => {
+      if (!WMS_ORIGINS.includes(e.origin) || e.data?.type !== 'nexus-token' || typeof e.data.token !== 'string') return;
+      setToken(e.data.token);
+      if (!me) supabase.from('profiles').select('id, role, full_name, email, active').eq('id', e.data.user).maybeSingle().then(({ data, error }) => (data?.active && NEXUS_ROLES.includes(data.role) ? setMe(data) : setErr(error?.message || 'This login cannot use Nexus.')));
+    };
+    window.addEventListener('message', on); window.parent.postMessage({ type: 'nexus-ready' }, '*');
+    return () => window.removeEventListener('message', on);
+  }, [me]);
+  if (err) return <div className="center">{err}</div>;
+  return me ? <Nexus me={me} embed /> : <div className="center">Connecting to the WMS…</div>;
+}
+
 export default function App() {
+  if (EMBED) return <Embedded />;
+  return <Standalone />;
+}
+function Standalone() {
   const [session, setSession] = useState(undefined); const [me, setMe] = useState(null);
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
