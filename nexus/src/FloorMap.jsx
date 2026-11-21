@@ -3,13 +3,15 @@
 // Which position code sits in which square is an assumption until confirmed on the floor: change LAYOUT only.
 import { useEffect, useState } from 'react';
 import { supabase, stamp } from './lib.js';
+import { printPositionLabels, expandCodes } from './positions.js';
 const ROWS = 18; const P = (n) => `P-${String(n).padStart(2, '0')}`;
 const col = (from) => Array.from({ length: ROWS }, (_, i) => P(from + i));
 export const LAYOUT = { outbound: [col(37), col(55)], inbound: [col(1), col(19)], staging: ['STG-01', 'STG-02'] };
 const HUES = [355, 205, 145, 40, 275, 175, 20, 310];
 
-export default function FloorMap({ compact }) {
+export default function FloorMap({ compact, admin }) {
   const [m, setM] = useState(null); const [err, setErr] = useState(null); const [sel, setSel] = useState(null);
+  const [codes, setCodes] = useState(''); const [zone, setZone] = useState('bulk'); const [msg, setMsg] = useState(null);
   const load = () => supabase.rpc('nexus_map').then(({ data, error }) => { if (error) setErr(error.message); else { setErr(null); setM(data); } });
   useEffect(() => { load(); const t = setInterval(load, 10000); const vis = () => { if (!document.hidden) load(); }; document.addEventListener('visibilitychange', vis); return () => { clearInterval(t); document.removeEventListener('visibilitychange', vis); }; }, []);
   if (err && !m) return <div className="strip bad">Nexus could not be read ({err}).</div>;
@@ -26,6 +28,13 @@ export default function FloorMap({ compact }) {
       </button>);
   };
   const Block = ({ cols }) => <div className="block">{cols.map((c, i) => <div className="line" key={i}>{c.map((code) => <Cell key={code} code={code} />)}</div>)}</div>;
+  const add = async (e) => {
+    e.preventDefault(); setMsg(null); let list;
+    try { list = expandCodes(codes); } catch (x) { return setMsg({ kind: 'bad', text: x.message }); }
+    const { data, error } = await supabase.rpc('nexus_positions_add', { p_codes: list, p_zone: zone, p_kind: list.every((c) => c.startsWith('STG')) ? 'floor' : 'pallet' });
+    if (error) return setMsg({ kind: 'bad', text: error.message }); setMsg({ kind: 'ok', text: `${data} position${data === 1 ? '' : 's'} added.` }); setCodes(''); load();
+  };
+  const print = (rows) => { if (!printPositionLabels(rows)) setMsg({ kind: 'bad', text: 'The print window did not open. Allow pop-ups for Nexus and press Print again.' }); };
   const s = sel && by[sel];
   const used = m.positions.filter((p) => p.kind === 'pallet' && p.pallets.length).length; const total = m.positions.filter((p) => p.kind === 'pallet').length;
   return (
@@ -44,6 +53,10 @@ export default function FloorMap({ compact }) {
         {s && <section data-testid="cell-detail"><h2>Position {s.code}</h2>{s.pallets.length === 0 ? <p className="sm">Empty.</p> : s.pallets.map((x) => (
           <div className="pal" key={x.psku}><b className="code">{x.psku}</b> · {x.brand}{x.held ? ' · ON HOLD' : ''}<div className="sm">{x.item || '—'} · {x.cartons ?? '—'} cartons · {x.units ?? '—'} units</div>
             <div className="sm">Received {stamp(x.received_at)} · {x.age_days}d · labels printed {x.label_prints}×</div></div>))}</section>}
+        {!compact && <section data-testid="position-controls"><h2>Positions</h2>
+          {msg && <div className={`strip ${msg.kind}`}>{msg.text}</div>}
+          <div className="filters"><button className="btn" onClick={() => print(m.positions.filter((p) => p.kind === 'pallet'))}>Print all pallet position labels</button>{s && <button className="btn" onClick={() => print([s])}>Print label for {s.code}</button>}</div>
+          {admin && <form className="filters" onSubmit={add}><input aria-label="New positions" placeholder="P-65..P-72 or STG-02" value={codes} onChange={(e) => setCodes(e.target.value)} /><input aria-label="Zone" placeholder="Zone" value={zone} onChange={(e) => setZone(e.target.value)} style={{ minWidth: 110 }} /><button className="btn primary" disabled={!codes.trim()}>Add positions</button></form>}</section>}
         {m.unplaced.length > 0 && <section data-testid="unplaced"><h2>Received, no position yet · {m.unplaced.length}</h2>{m.unplaced.slice(0, 12).map((x) => (
           <div className="pal" key={x.psku}><b className="code">{x.psku}</b> · {x.brand}{x.held ? ' · ON HOLD' : ''}<div className="sm">{x.item || '—'} · {stamp(x.received_at)} · labels printed {x.label_prints}×</div></div>))}</section>}
       </aside>

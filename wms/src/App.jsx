@@ -7,7 +7,6 @@ import Today from './Today';
 import Orders from './Orders';
 import Receive from './Receive.jsx';
 import Pallets from './Pallets.jsx';
-import Locations from './Locations.jsx';
 import NexusFrame from './NexusFrame.jsx';
 import VersionWatch from './VersionWatch.jsx';
 
@@ -89,7 +88,6 @@ function Shell({ me }) {
         {page === 'receive' && <Receive me={me} orgs={orgs} pallets={pallets} brandName={brandName} merge={merge} open={open} />}
         {page === 'pallets' && <Pallets key={navTick} me={me} orgs={orgs} pallets={pallets} locations={locations} brandName={brandName} merge={merge} find={find} setFind={setFind} />}
         {page === 'locations' && <NexusFrame />}
-        {page === 'locations' && <Locations me={me} locations={locations} pallets={pallets} brandName={brandName} reload={load} open={open} />}
         <div className="phonewho"><span>{me.full_name || me.email}{me.employee_no ? ` · Employee ${me.employee_no}` : ''}</span><button onClick={() => supabase.auth.signOut()}>{me.employee_no ? 'Switch employee' : 'Sign out'}</button></div>
       </main>
     </div>

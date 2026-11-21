@@ -29,7 +29,7 @@ export default function Nexus({ me, onSignOut, embed }) {
       <main>
         {ovErr && <div className="strip bad">{ovErr}</div>}
         {tab === 'overview' && <Overview ov={ov} />}
-        {tab === 'map' && <><div className="head"><h1>Locations</h1></div><FloorMap /></>}
+        {tab === 'map' && <><div className="head"><h1>Locations</h1></div><FloorMap admin={me.role === 'shipbay_admin'} /></>}
         {tab === 'pallets' && <Pallets brands={brands} />}
         {tab === 'fifo' && <Fifo brands={brands} />}
         {tab === 'counts' && <Counts brands={brands} zones={zones} />}

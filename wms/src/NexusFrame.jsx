@@ -15,7 +15,8 @@ export default function NexusFrame() {
   }, []);
   return (
     <section className="nexusframe" data-testid="nexus-frame">
-      <h3>Nexus · live floor map <a href={NEXUS_URL} target="_blank" rel="noopener">Open Nexus</a></h3>
+      <h3>Locations · live from Nexus</h3>
+      <p className="sm">Positions are managed in Nexus (add positions, print position labels, cycle counts). <a href={NEXUS_URL} target="_blank" rel="noopener">Open Nexus</a></p>
       <iframe ref={frame} title="Nexus floor map" src={`${NEXUS_URL}/?embed=1`} style={{ width: '100%', height: 720, border: '1px solid #2a2e35', background: '#0e1013' }} />
     </section>);
 }
