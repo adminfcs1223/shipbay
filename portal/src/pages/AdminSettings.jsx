@@ -4,6 +4,7 @@ import { supabase, fn } from '../lib';
 import { useBrands } from '../shared';
 import Employees from './Employees';
 import { Connector, Cameras } from './WmsAdmin';
+import BillingSettings from './BillingSettings';
 
 const ROLES = [['shipbay_admin', 'ShipBay admin', 'Everything, including this page'], ['shipbay_staff', 'ShipBay staff', 'Warehouse screens and client accounts'], ['shipbay_sales', 'Sales', 'Appt. Setting and CRM only: their leads, calls booked for them, quotes, their setters'], ['shipbay_setter', 'Appointment setter', 'Appt. Setting only: the call queue, the script, booking calls for a closer'], ['client_admin', 'Client admin', 'A brand’s portal: orders, documents, settings'], ['client_user', 'Client user', 'A brand’s portal, read-only']];
 const roleLabel = (r) => ROLES.find((x) => x[0] === r)?.[1] || r;
@@ -97,6 +98,7 @@ export default function AdminSettings({ me }) {
           </div>
         </div>
       )}
+      <BillingSettings me={me} />
     </>
   );
 }
