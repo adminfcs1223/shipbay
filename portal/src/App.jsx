@@ -15,7 +15,8 @@ import Quotes from './pages/Quotes';
 import ClientOrders from './pages/ClientOrders';
 import AdminSettings from './pages/AdminSettings';
 import ClientWarehouse from './pages/ClientWarehouse';
-import WmsHub from './pages/WmsHub';
+import WmsWindow from './pages/WmsWindow';
+import WmsBilling from './pages/WmsBilling';
 import Owner from './pages/owner/Owner';
 import SalesDesk from './pages/SalesDesk';
 import ApptSetting from './pages/ApptSetting';
@@ -228,7 +229,8 @@ const Ico = {
 // Grouped so the station screens sit together, client admin together, and setup at the bottom.
 const STAFF_NAV = [
   { group: 'Warehouse' },
-  { key: 'wms', label: 'WMS', icon: Ico.receiving, page: WmsHub },
+  { key: 'wms', label: 'WMS', icon: Ico.receiving, page: WmsWindow },
+  { key: 'wmsbilling', label: 'Billing', icon: Ico.quotes, page: WmsBilling },
   { group: 'Sales', salesOnly: true },
   { key: 'apptsetting', label: 'Appt. Setting', icon: Ico.appt, page: ApptSetting, salesOnly: true },
   { key: 'salesdesk', label: 'CRM', icon: Ico.sales, page: SalesDesk, salesOnly: true },

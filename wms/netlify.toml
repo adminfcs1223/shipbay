@@ -13,7 +13,8 @@
   for = "/*"
   [headers.values]
     X-Content-Type-Options = "nosniff"
-    X-Frame-Options = "SAMEORIGIN"
+    # framed only by itself and the ShipBay dashboard (the WMS window in Admin)
+    Content-Security-Policy = "frame-ancestors 'self' https://dashboard.shipbay3pl.com"
     Referrer-Policy = "strict-origin-when-cross-origin"
     X-Robots-Tag = "noindex, nofollow"
 

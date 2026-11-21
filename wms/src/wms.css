@@ -645,3 +645,6 @@ label input.bignum { height: 59px; font-size: 26px; font-weight: 800; font-varia
 .bookingstate { font-size: 14px; }
 .bookingmode { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
 .bookingmode small { flex-basis: 100%; color: var(--muted, #6b6b6b); }
+
+/* inside the dashboard: the dashboard owns sign-out */
+.embed .who button, .embed .phonewho button { display: none; }

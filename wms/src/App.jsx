@@ -2,7 +2,7 @@
 // (created in the dashboard's Admin settings); admins can also use their dashboard email login.
 // Receiving (product → pallets + cartons → labels), Pallets (carton scan → put-away → received), Locations (the map).
 import { useEffect, useRef, useState } from 'react';
-import { supabase, WMS_ROLES } from './lib';
+import { supabase, WMS_ROLES, EMBED, PARENT_ORIGINS, setAccess, signOut } from './lib';
 import Today from './Today';
 import Orders from './Orders';
 import Receive from './Receive.jsx';
@@ -18,7 +18,23 @@ const NAV = [
   ['locations', 'Locations', 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z'],
 ];
 
-export default function App() {
+function Embedded() {
+  const [me, setMe] = useState(null); const [err, setErr] = useState(null);
+  useEffect(() => {
+    document.body.classList.add('embed');
+    const on = (e) => {
+      if (!PARENT_ORIGINS.includes(e.origin) || e.data?.type !== 'wms-token' || typeof e.data.token !== 'string') return;
+      setAccess({ token: e.data.token, user: e.data.user });
+      if (!me) supabase.from('profiles').select('id, full_name, email, role, employee_no').eq('id', e.data.user).maybeSingle().then(({ data, error }) => (data && WMS_ROLES.includes(data.role) ? setMe(data) : setErr(error?.message || 'This login cannot use the WMS.')));
+    };
+    window.addEventListener('message', on); window.parent.postMessage({ type: 'wms-ready' }, '*');
+    return () => window.removeEventListener('message', on);
+  }, [me]);
+  if (err) return <div className="empty">{err}</div>;
+  return me ? <Shell me={me} /> : <div className="empty">Connecting to the dashboard…</div>;
+}
+export default function App() { return EMBED ? <Embedded /> : <Standalone />; }
+function Standalone() {
   const [session, setSession] = useState(undefined);
   const [me, setMe] = useState(null);
 
@@ -77,7 +93,7 @@ function Shell({ me }) {
         ))}</nav>
         <div className="railfoot">
           <Clock />
-          <div className="who"><b>{me.full_name || me.email}</b>{me.employee_no && <span>Employee {me.employee_no}</span>}<button onClick={() => supabase.auth.signOut()}>{me.employee_no ? 'Switch employee' : 'Sign out'}</button></div>
+          <div className="who"><b>{me.full_name || me.email}</b>{me.employee_no && <span>Employee {me.employee_no}</span>}<button onClick={() => signOut()}>{me.employee_no ? 'Switch employee' : 'Sign out'}</button></div>
         </div>
       </aside>
       <main className="work">
@@ -88,7 +104,7 @@ function Shell({ me }) {
         {page === 'receive' && <Receive me={me} orgs={orgs} pallets={pallets} brandName={brandName} merge={merge} open={open} />}
         {page === 'pallets' && <Pallets key={navTick} me={me} orgs={orgs} pallets={pallets} locations={locations} brandName={brandName} merge={merge} find={find} setFind={setFind} />}
         {page === 'locations' && <NexusFrame />}
-        <div className="phonewho"><span>{me.full_name || me.email}{me.employee_no ? ` · Employee ${me.employee_no}` : ''}</span><button onClick={() => supabase.auth.signOut()}>{me.employee_no ? 'Switch employee' : 'Sign out'}</button></div>
+        <div className="phonewho"><span>{me.full_name || me.email}{me.employee_no ? ` · Employee ${me.employee_no}` : ''}</span><button onClick={() => signOut()}>{me.employee_no ? 'Switch employee' : 'Sign out'}</button></div>
       </main>
     </div>
   );
@@ -161,7 +177,7 @@ function NoAccess({ me }) {
     <div className="noaccess">
       <h2>This login isn’t set up for the WMS<span className="dot">.</span></h2>
       <p>{me.email} is signed in, but the WMS is for warehouse staff.</p>
-      <button className="btn" onClick={() => supabase.auth.signOut()}>Sign out</button>
+      <button className="btn" onClick={() => signOut()}>Sign out</button>
     </div>
   );
 }
