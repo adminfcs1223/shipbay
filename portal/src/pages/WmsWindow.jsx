@@ -2,10 +2,9 @@
 // hands it this user's current access token (and again whenever it is refreshed), only to the WMS origin.
 import { useEffect, useRef } from 'react';
 import { supabase } from '../lib';
-import WmsHub from './WmsHub';
 export const WMS_URL = import.meta.env.VITE_WMS_URL || 'https://wmsshipbay.netlify.app';
 const ORIGIN = new URL(WMS_URL).origin;
-export default function WmsWindow(props) {
+export default function WmsWindow() {
   const frame = useRef(null);
   useEffect(() => {
     const send = async (session) => { const s = session || (await supabase.auth.getSession()).data.session; if (s && frame.current?.contentWindow) frame.current.contentWindow.postMessage({ type: 'wms-token', token: s.access_token, user: s.user.id }, ORIGIN); };
@@ -20,6 +19,5 @@ export default function WmsWindow(props) {
         <div className="cardhead" style={{ padding: '12px 16px' }}><h3>ShipBay WMS<span className="dot">.</span></h3><a className="sm" href={WMS_URL} target="_blank" rel="noopener">Open in its own tab</a></div>
         <iframe ref={frame} title="ShipBay WMS" src={`${WMS_URL}/?embed=1`} style={{ width: '100%', height: '82vh', border: 0, display: 'block' }} />
       </div>
-      <WmsHub {...props} />
     </>);
 }
