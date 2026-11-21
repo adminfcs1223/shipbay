@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { supabase } from '../lib';
 import WmsHub from './WmsHub';
-export const WMS_URL = import.meta.env.VITE_WMS_URL || 'https://wms.shipbay3pl.com';
+export const WMS_URL = import.meta.env.VITE_WMS_URL || 'https://wmsshipbay.netlify.app';
 const ORIGIN = new URL(WMS_URL).origin;
 export default function WmsWindow(props) {
   const frame = useRef(null);
