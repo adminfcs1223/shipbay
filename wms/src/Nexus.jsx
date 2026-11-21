@@ -2,7 +2,7 @@
 // FIFO and cycle counts open in Nexus itself. Refreshes every 30 seconds and whenever the tab is shown again.
 import { useEffect, useState } from 'react';
 import { supabase } from './lib.js';
-export const NEXUS_URL = import.meta.env.VITE_NEXUS_URL || 'https://nexuslogistics-tjbp.netlify.app';
+export const NEXUS_URL = import.meta.env.VITE_NEXUS_URL || 'https://nexus-logistics-wms.netlify.app';
 const num = (n) => Number(n || 0).toLocaleString('en-US');
 export default function Nexus() {
   const [ov, setOv] = useState(null); const [err, setErr] = useState(null); const [at, setAt] = useState(null);
