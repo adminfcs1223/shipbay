@@ -10,9 +10,18 @@
     const res = await fetch('/api/nexus' + path, { method: opts.method || 'GET', cache: 'no-store',
       headers: { 'x-preview-passcode': pass, ...(opts.body ? { 'content-type': 'application/json' } : {}) }, body: opts.body ? JSON.stringify(opts.body) : undefined });
     let data = null; try { data = await res.json(); } catch { /* ignore */ }
+    record(opts.method || 'GET', path, res.status, data);
     if (res.status === 401) { pass = ''; try { sessionStorage.removeItem('preview-pass'); } catch { /* ignore */ } showGate('That passcode was not accepted.'); throw new Error('passcode'); }
     if (!data || !data.ok) throw new Error((data && data.message) || `The preview could not be reached (${res.status}).`);
     return data;
+  }
+  // Read-only diagnostics: the HTTP status and the exact answer of each call this page made to its own function.
+  const calls = [];
+  function record(method, path, status, data) {
+    calls.unshift({ method, path: path.split('?')[0], query: path.includes('?') ? path.slice(path.indexOf('?')) : '', status, data }); calls.length = Math.min(calls.length, 12);
+    const box = $('rawlist'); if (!box) return; box.replaceChildren();
+    for (const c of calls) { const d = el('details', 'rawcall'); d.dataset.path = c.path; d.dataset.status = c.status;
+      d.append(el('summary', null, `${c.method} /api/nexus${c.path} → HTTP ${c.status}`), el('pre', null, (c.query ? c.query + '\n' : '') + JSON.stringify(c.data, null, 1))); box.append(d); }
   }
   function showGate(text) { $('app').hidden = true; $('gate').hidden = false; say(text || '', !!text); $('pass').focus(); }
   const when = (t) => new Date(t).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });

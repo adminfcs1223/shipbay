@@ -39,6 +39,7 @@ let pass = 0, fail = 0; const ok = (c, w) => { c ? pass++ : fail++; console.log(
   const sum = p.locator('[data-testid=map-sum]'); ok(await sum.getAttribute('data-version') === '4' && /checksum stubsum/.test(await sum.innerText()), 'the map version and checksum from Nexus are shown');
   ok(await p.locator('.pos[data-code="P-31"]').getAttribute('data-state') === 'mine' && await p.locator('.pos[data-code="P-01"]').getAttribute('data-state') === 'other', 'own pallet shown by id; the other company shown as occupied only');
   ok(!/hidden/.test(await p.locator('.pos[data-code="P-01"]').innerText()), "the other company's pallet id is not shown");
+  ok(await p.locator('[data-testid=raw] .rawcall[data-path="/calendar"][data-status="200"]').count() >= 1 && /"company": "SOULED"/.test(await p.locator('[data-testid=raw] .rawcall[data-path="/calendar"] pre').first().textContent()), 'the raw answer and HTTP status of each call are shown');
   const cal0 = await p.locator('#cal tbody tr').count();
   await p.click('#newev .btn'); await p.waitForFunction((n) => document.querySelectorAll('#cal tbody tr').length > n, cal0);
   const row = (await p.locator('#cal tbody tr', { hasText: 'DEV-' }).innerText()).replace(/\s+/g, ' ');
