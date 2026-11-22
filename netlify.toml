@@ -1,0 +1,22 @@
+# ShipBay development preview for the Nexus integration. A SEPARATE Netlify site: never the WMS, dashboard or www sites.
+# No build step, no dependencies, no ShipBay database. Secrets are set in the Netlify UI for this site only:
+#   NEXUS_STAGING_API_KEY (scope: Functions)   PREVIEW_PASSCODE (scope: Functions)
+[build]
+  publish = "public"
+  command = "node --test test/function.test.mjs"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "no-store"

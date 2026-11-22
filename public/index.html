@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex, nofollow">
+<title>ShipBay · Nexus staging preview</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div><small>ShipBay development preview</small><h1>Shared warehouse map<span class="dot">.</span></h1></div>
+  <div class="badge" id="badge">Nexus staging · test floor · synthetic data</div>
+</header>
+<div class="strip" id="msg" hidden></div>
+
+<form id="gate" class="gate" hidden>
+  <label for="pass">Preview passcode</label>
+  <input id="pass" type="password" autocomplete="off" required>
+  <button class="btn">Open the preview</button>
+</form>
+
+<main id="app" hidden>
+  <section class="facts" id="facts"></section>
+  <section>
+    <div class="head"><h2>Floor</h2><div class="legend"><span class="k free">Free</span><span class="k mine">ShipBay</span><span class="k other">Other company</span><span class="k off">Not available</span></div></div>
+    <div class="floor" id="floor" data-testid="floor"></div>
+    <p class="note">Positions and layout come from Nexus (<code>/v1/map</code>); who stands where comes from Nexus (<code>/v1/occupancy</code>). Assign, move and release are switched off in this preview.</p>
+  </section>
+  <section>
+    <div class="head"><h2>Shared calendar</h2><span class="note">next 30 days</span></div>
+    <form id="newev" class="newev" data-testid="new-event">
+      <label>Direction<select id="dir"><option value="inbound">Inbound delivery</option><option value="outbound">Outbound pickup</option></select></label>
+      <label>Starts<input id="start" type="datetime-local" required></label>
+      <label>Pallets<input id="pal" type="number" min="0" max="200" value="6" required></label>
+      <button class="btn">Publish a synthetic event</button>
+    </form>
+    <table id="cal" data-testid="calendar"><thead><tr><th>When</th><th>Company</th><th>Direction</th><th class="n">Pallets</th><th>Status</th><th>Event</th><th></th></tr></thead><tbody></tbody></table>
+    <p class="note">Events published here are synthetic, carry an id starting <code>DEV-</code>, and go to the Nexus test floor only. Another company's events show company, direction, time, pallets and status, and nothing else.</p>
+  </section>
+  <section>
+    <div class="head"><h2>Change feed</h2><span class="note">latest 15 from <code>/v1/changes</code></span></div>
+    <table id="feed" data-testid="feed"><thead><tr><th class="n">No.</th><th>When</th><th>Kind</th><th>Company</th><th>Position</th><th>Ref</th></tr></thead><tbody></tbody></table>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
