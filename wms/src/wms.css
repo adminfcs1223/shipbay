@@ -681,3 +681,5 @@ label input.bignum { height: 59px; font-size: 26px; font-weight: 800; font-varia
 .sc-row .sc-notime { color: var(--muted); font-weight: 600; } .sc-row.gone > div b, .sc-row.gone > div span { text-decoration: line-through; color: var(--muted); }
 .sc-tools .sc-check { white-space: nowrap; font-weight: 600; } .sc-tools .sc-check input { width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0; flex: none; appearance: auto; accent-color: var(--orange); }
 .sc-tools .sc-dot { margin-right: 0; } .sc-tools .sc-dot.other { background: var(--ink); box-shadow: 0 0 0 1.5px currentColor; }
+
+.sc-row.tentative { border-left-style: dashed; }

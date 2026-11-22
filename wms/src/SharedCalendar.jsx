@@ -1,6 +1,6 @@
 // WMS → Calendar: the dock calendar ShipBay's staff work from. ShipBay's own shipments with their private detail, and
 // the other company's appointments as Nexus shares them (company, direction, time, pallets, status and nothing else).
-// All times America/New_York. Read-only in this build: nothing here writes to Nexus.
+// All times America/New_York. This screen only reads: publishing is done by the bridge from ShipBay's shipment records.
 import { useEffect, useMemo, useState } from 'react';
 import { mergeCalendar, byDay, easternWindow, ZONE } from './nexusCalendar.js';
 import { loadCalendar, MODE } from './nexusSource.js';
@@ -13,7 +13,7 @@ const longDay = (s) => fmt(s, { weekday: 'long', month: 'long', day: 'numeric' }
 const add = (s, n) => { const d = at(s); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const NAMES = { SHIPBAY: 'ShipBay', SOULED: 'Souled' };
 const STATUS = { scheduled: 'Scheduled', arrived: 'Arrived', completed: 'Completed', cancelled: 'Cancelled', expected: 'Booked', in_transit: 'On its way' };
-const SHARED = { published: 'On the shared calendar', not_published: 'Not on the shared calendar yet', cancelled_in_nexus: 'Shared booking cancelled' };
+const SHARED = { published: 'On the shared calendar', not_published: 'Not on the shared calendar yet', cancelled_in_nexus: 'Shared booking cancelled', held_date_only: 'Not shared yet: Nexus needs a time' };
 
 export default function SharedCalendar({ go }) {
   const [d, setD] = useState(null); const [err, setErr] = useState(null); const [sel, setSel] = useState(null); const [busy, setBusy] = useState(false); const [hideCancelled, setHide] = useState(true);
@@ -41,6 +41,7 @@ export default function SharedCalendar({ go }) {
         </div>
       </header>
       {MODE === 'demo' && <div className="strip" data-testid="demo-banner"><b>Demonstration data.</b><span>Everything on this screen is synthetic. This build is not connected to Nexus and cannot publish, change or cancel a booking.</span></div>}
+      {d.mode === 'bridge' && !d.nexus.ok && <div className="strip bad" data-testid="nexus-down"><b>Nexus is not answering.</b><span>Showing ShipBay's own shipments only. The other company's appointments are not on this screen right now.</span></div>}
       {err && <div className="strip bad"><b>Not refreshed.</b><span>{err}</span><button onClick={load}>Try again</button></div>}
 
       <section className="panel">
@@ -81,11 +82,11 @@ export default function SharedCalendar({ go }) {
 
 function Row({ r, go }) {
   const cancelled = r.status === 'cancelled'; const s = r.shipment;
-  const time = r.time_known ? easternWindow(r.starts_at, r.ends_at) : r.day ? 'Time not set' : 'Date not set';
+  const time = r.time_known ? easternWindow(r.starts_at, r.ends_at) : r.day ? 'Time not confirmed' : 'Date not set';
   return (
-    <li className={`sc-row ${r.kind} ${cancelled ? 'gone' : ''}`} data-kind={r.kind} data-company={r.company} data-booking={r.kind === 'other' ? '' : r.booking_id} data-time-known={r.time_known}>
+    <li className={`sc-row ${r.kind} ${cancelled ? 'gone' : ''} ${r.tentative ? 'tentative' : ''}`} data-tentative={!!r.tentative} data-kind={r.kind} data-company={r.company} data-booking={r.kind === 'other' ? '' : r.booking_id} data-time-known={r.time_known}>
       <div>
-        <b><i className={`sc-dot ${r.company === 'SHIPBAY' ? 'own' : 'other'}`} />{r.kind === 'shipment' ? s.brand : NAMES[r.company] || r.company}{r.kind !== 'shipment' && <small> · {r.direction === 'outbound' ? 'Outbound pickup' : 'Inbound delivery'}</small>}</b>
+        <b><i className={`sc-dot ${r.company === 'SHIPBAY' ? 'own' : 'other'}`} />{r.kind === 'shipment' ? s.brand : NAMES[r.company] || r.company}{r.kind !== 'shipment' && <small> · {r.tentative ? 'Expected arrival' : r.direction === 'outbound' ? 'Outbound pickup' : 'Inbound delivery'}</small>}{r.kind === 'shipment' && r.tentative && <small> · Expected arrival</small>}</b>
         {r.kind === 'shipment' && <span>{[s.reference, s.carrier, s.notes].filter(Boolean).join(' · ') || 'No details given'}</span>}
         {r.kind === 'own' && <span>ShipBay booking {r.booking_id} · no shipment record in this WMS</span>}
         {r.kind === 'other' && <span>Shared by Nexus. Details are private to {NAMES[r.company] || r.company}.</span>}

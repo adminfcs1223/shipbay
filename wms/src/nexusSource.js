@@ -1,13 +1,15 @@
-// Where the shared calendar's data comes from. Three modes, chosen at build time by VITE_NEXUS_CALENDAR:
-//   (unset)  the feature is off: the WMS is exactly as it was, with no Calendar tab.
-//   "demo"   synthetic data bundled in this file. No network call of any kind. For demonstrations.
-//   anything else is refused: this build has no server-side Nexus connection for the WMS, and a browser never holds a
-//            Nexus key, so there is deliberately no way to point this screen at Nexus production (or staging) from here.
+// Where the shared calendar's data comes from, chosen at build time by VITE_NEXUS_CALENDAR:
+//   (unset)   the feature is off: the WMS is exactly as it was, with no Calendar tab.
+//   "demo"    synthetic data bundled in this file. No network call of any kind. For demonstrations.
+//   "bridge"  ShipBay's own server-side bridge (see nexusBridge.js; needs VITE_NEXUS_BRIDGE=on and a non-production database).
+//             The bridge reads ShipBay's shipments as the signed-in user and the Nexus calendar with ShipBay's key.
+//   anything else is refused. A browser never holds a Nexus key, and nothing here can reach Nexus production.
 // The answer has the same shape in every mode, and `nexus.events` is exactly the `events` array of Nexus GET /v1/calendar.
 import { easternDay } from './nexusCalendar.js';
+import { bridge, BRIDGE } from './nexusBridge.js';
 
 export const MODE = (import.meta.env && import.meta.env.VITE_NEXUS_CALENDAR) || '';
-export const ENABLED = MODE === 'demo';
+export const ENABLED = MODE === 'demo' || (MODE === 'bridge' && BRIDGE);
 
 // An Eastern wall-clock time on the day `plus` days from today, as the instant Nexus would hold.
 function eastern(today, plus, hh, mm = 0) {
@@ -38,8 +40,14 @@ export function demoData(now = Date.now()) {
   return { mode: 'demo', today, shipments, nexus: { warehouse: 'HILLSBOROUGH-TEST', events, fetched_at: new Date(now).toISOString() } };
 }
 
-/** Load the calendar. In this build only the demonstration data can be loaded. */
-export async function loadCalendar() {
-  if (MODE === 'demo') return demoData();
+const shift = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+/** Load the calendar: the demonstration data, or ShipBay's shipments and the Nexus calendar through the bridge. */
+export async function loadCalendar(now = Date.now()) {
+  if (MODE === 'demo') return demoData(now);
+  if (MODE === 'bridge' && BRIDGE) {
+    const today = easternDay(now); const r = await bridge(`/calendar?from=${shift(today, -7)}&to=${shift(today, 42)}`);
+    if (!r.ok) throw new Error(r.message || 'The calendar could not be loaded.');
+    return { mode: 'bridge', today, shipments: r.shipments || [], nexus: { ok: !!r.nexus?.ok, warehouse: r.nexus?.warehouse || null, events: r.nexus?.events || [], fetched_at: new Date(now).toISOString() } };
+  }
   throw new Error('The shared calendar is not connected in this build.');
 }

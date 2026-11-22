@@ -17,3 +17,13 @@ Not covered: storage, edge functions, PostgREST itself, `auth` triggers other th
 
 `flow.test.mjs` runs receive → scan → count → put-away → pick → pack → dispatch as the real roles on the live
 functions (shows the double deduction), applies the candidate, repeats the flow, then runs the rollback.
+
+## Bridge test (ShipBay to Nexus, local only)
+`bridge.test.mjs` runs ShipBay's database functions, the bridge (`supabase/functions/nexus-bridge`) and the real Nexus service
+code together on this machine. It needs the `neutral/` folder of branch `nexus-neutral` of `adminfcs1223/nexus` extracted
+somewhere (tested against commit `b4d3053`, map version 4):
+
+    EXTRACT=<schema extract> supabase/tests/staging/load.sh
+    NEXUS_NEUTRAL=<path to neutral/> node --test supabase/tests/staging/bridge.test.mjs
+
+It creates and drops a second database, `nexus_bridge_test`, on the same guarded local cluster. It calls nothing hosted.
