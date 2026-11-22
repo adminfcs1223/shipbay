@@ -23,6 +23,20 @@ await db.query(`insert into skus (org_id, sku, name) values ($1,'SYN-SHOE','Synt
 const bk = async (org, ref, p, c, approved = true) => (await db.query(`insert into inbound_shipments (org_id, reference, status, pallets, cartons, expected_at, approved_at) values ($1,$2,'expected',$3,$4,current_date,$5) returning id`, [org, ref, p, c, approved ? new Date() : null])).rows[0].id;
 const bookings = { a: await bk(A, 'SYN-REC-BOOK', 3, 30), a2: await bk(A, 'SYN-REC-TWO', 2, 20), aWait: await bk(A, 'SYN-REC-WAIT', 1, 5, false), b: await bk(B, 'SYN-SNK-BOOK', 2, 10) };
 await db.query(`insert into inbound_lines (inbound_id, sku_id, qty_expected, qty_received) values ($1,$2,300,0)`, [bookings.a, SKU]);
+if (process.env.ORDERS === '1') {   // the orders flow: wave candidate + stock on a pallet and a shelf + open orders
+  await db.query(fs.readFileSync(path.join(repo, 'supabase/candidates/20261127_wms_waves.sql'), 'utf8'));
+  await db.query(`insert into locations (code, zone, kind) values ('A-01','a','shelf')`); await db.query(`update locations set walk_seq = case code when 'A-01' then 1 when 'E01' then 2 else 3 end`);
+  const fl = async (sql, p) => { await db.query('begin'); await db.query('set local role authenticated'); await db.query(`select set_config('request.jwt.claims',$1,true)`, [JSON.stringify({ sub: U.floor, role: 'authenticated' })]); const r = await db.query(sql, p); await db.query('commit'); return r.rows; };
+  const TEE = (await db.query(`insert into skus (org_id, sku, name) values ($1,'SYN-TEE','Synthetic Tee') returning id`, [A])).rows[0].id, CAP = (await db.query(`insert into skus (org_id, sku, name) values ($1,'SYN-CAP','Synthetic Cap') returning id`, [A])).rows[0].id;
+  const pal = (await fl(`select * from wms_receive_booking($1,$2,$3::jsonb,1,null,'ord-1','partial',null)`, [bookings.a2, A, JSON.stringify([{ sku: SKU, cartons: 3, units_per_carton: 10 }])]))[0];
+  await fl('select nexus_putaway($1,$2)', [pal.psku, 'E02']);
+  await db.query(`insert into inventory_moves (org_id, sku_id, qty, reason, location_id) select $1, x.s, x.q, 'receive', (select id from locations where code='A-01') from (values ($2::uuid, 20), ($3::uuid, 10)) x(s, q)`, [A, TEE, CAP]);
+  const order = async (no, lines) => { const id = (await db.query(`insert into orders (org_id, order_number, source, status, customer_name, ship_to, total_units) values ($1,$2,'connector','new','Pat Example',$3::jsonb,$4) returning id`, [A, no, JSON.stringify({ name: 'Pat Example', address1: '1 Test Way', city: 'Testville', province_code: 'NJ', zip: '08844', country_code: 'US' }), lines.reduce((s, l) => s + l[2], 0)])).rows[0].id;
+    for (const [sid, s, n, q] of lines.map((l) => [l[0], l[1], l[3], l[2]])) await db.query(`insert into order_lines (order_id, sku_id, sku, name, qty) values ($1,$2,$3,$4,$5)`, [id, sid, s, n, q]); };
+  await order('O-501', [[SKU, 'SYN-LP', 1, 'Synthetic LP'], [TEE, 'SYN-TEE', 2, 'Synthetic Tee']]); await order('O-502', [[SKU, 'SYN-LP', 1, 'Synthetic LP'], [TEE, 'SYN-TEE', 2, 'Synthetic Tee']]);
+  await order('O-503', [[CAP, 'SYN-CAP', 12, 'Synthetic Cap']]); await order('O-504', [[SKU, 'SYN-LP', 2, 'Synthetic LP'], [CAP, 'SYN-CAP', 1, 'Synthetic Cap']]);
+  bookings.pallet = pal.psku; bookings.carton = (await db.query('select code from wms_cartons where pallet_id = $1 order by seq limit 1', [pal.id])).rows[0].code;
+}
 await db.end();
 const secret = crypto.randomBytes(32).toString('base64url'); const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const jwt = (c) => { const h = b64({ alg: 'HS256', typ: 'JWT' }), p = b64({ iss: 'booking-e2e', exp: Math.floor(Date.now() / 1000) + 3600, ...c }); return `${h}.${p}.${crypto.createHmac('sha256', secret).update(`${h}.${p}`).digest('base64url')}`; };

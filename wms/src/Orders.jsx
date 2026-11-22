@@ -1,11 +1,15 @@
-// Orders → brand → Picklist. Built for a phone held in one hand.
+// Orders → brand → wave → pack. Built for a phone held in one hand, one step on screen at a time.
 // Orders arrive from each brand's own program through the connector (POST /api/orders); the WMS never fetches them.
-// The list is re-read every time it is shown, so a product that moved shows where it is now. The same product across
-// orders is one row with the total, rows run in walking order (location code), and anything that can't be picked
-// (no location, or not enough on hand) sits at the top so it gets reported instead of searched for.
+// The picker never sees every order or every item: they open one wave (one trip), walk its stops in route order
+// (far end first, ending at the pack station), confirm the exact units taken at each stop (stock leaves the position
+// and its pallet only then), are sent back to the pack station, and pack the orders they just picked. Identical orders
+// are packed together; an order can be split into several packages. A short stop goes to a manager and never blocks.
+// The earlier pick-list screen is in git history (last at 7a52155).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from './lib';
-import { beep } from './parts';
+import { beep, ScanBox } from './parts';
+import { barcodeSvg } from './label';
+import { printPages } from './print';
 import { demoOrders } from './demo';
 
 const num = (n) => Number(n || 0).toLocaleString('en-US');
@@ -28,7 +32,7 @@ export default function Orders({ me, startBrand, clearStart }) {
     const rows = await load(); const b = rows.find((x) => x.client_code === 'DEMO'); if (b) setBrand(b);
   };
 
-  if (brand) return <Picklist me={me} brand={brand} back={() => { setBrand(null); load(); }} />;
+  if (brand) return <Brand me={me} brand={brand} back={() => { setBrand(null); load(); }} />;
   const due = (brands || []).reduce((s, b) => s + b.due_orders, 0);
   return (
     <>
@@ -67,251 +71,197 @@ async function resetDemo() {
   return null;
 }
 
-function Picklist({ me, brand, back }) {
-  const [data, setData] = useState(null); const [err, setErr] = useState(null); const [note, setNote] = useState(null);
-  const [day, setDay] = useState(null);       // null = due today or earlier (the default); a date = that day only
-  const [all, setAll] = useState(false);
-  const [openRow, setOpenRow] = useState(null); const [zoom, setZoom] = useState(null); const [busy, setBusy] = useState(null);
-  const [showPicked, setShowPicked] = useState(false); const [showProbs, setShowProbs] = useState(false);
-  const [report, setReport] = useState(null);
-  const [scanSkus, setScanSkus] = useState(() => new Set());   // products that have a barcode on file: picking them takes a scan
-  const [scanRow, setScanRow] = useState(null);   // the row a problem is being reported on
+const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const sigOf = (o) => o.lines.map((l) => `${l.key}x${l.qty}`).join('|');
+const plural = (n, w) => `${num(n)} ${w}${n === 1 ? '' : 's'}`;
 
-  const load = async () => {
-    const [{ data: d, error }, sc] = await Promise.all([supabase.rpc('wms_picklist', { p_org: brand.id, p_day: day, p_all: all }), supabase.rpc('wms_scan_needed', { p_org: brand.id })]);
-    if (error) setErr(error.message); else { setErr(null); setData(d); setScanSkus(new Set(sc.data || [])); }
-  };
-  useEffect(() => { load(); const t = setInterval(load, 45000); const vis = () => { if (!document.hidden) load(); }; document.addEventListener('visibilitychange', vis); return () => { clearInterval(t); document.removeEventListener('visibilitychange', vis); }; }, [brand.id, day, all]);
+/* One package label per package, 4 x 6. It names the order, the ship-to and what is inside. It is not a carrier label. */
+const PKG_CSS = `.pklabel { width: 4in; height: 6in; box-sizing: border-box; padding: .22in; font-family: Archivo, Arial, sans-serif; color: #000; display: flex; flex-direction: column; gap: .1in; }
+.pklabel h1 { font-size: .3in; margin: 0; line-height: 1.05; } .pklabel h2 { font-size: .2in; margin: 0; } .pklabel .of { font-size: .34in; font-weight: 800; border: 3px solid #000; padding: .04in .12in; align-self: flex-start; }
+.pklabel .to { font-size: .17in; line-height: 1.25; border-top: 2px solid #000; padding-top: .08in; } .pklabel ul { margin: 0; padding: 0; list-style: none; font-size: .15in; flex: 1; overflow: hidden; } .pklabel li { display: flex; justify-content: space-between; gap: .1in; border-bottom: 1px solid #999; padding: .03in 0; }
+.pklabel .bc { height: .8in; } .pklabel .bc svg { width: 100%; height: 100%; } .pklabel .code { font-family: monospace; font-size: .15in; text-align: center; letter-spacing: .08em; } .pklabel small { font-size: .11in; }`;
+function packageLabelHtml(brand, o, k) {
+  const a = o.ship_to || {}; const names = Object.fromEntries(o.lines.map((l) => [l.key, l.name]));
+  const to = [a.name || o.customer, a.company, a.address1, a.address2, [a.city, a.province_code || a.province, a.zip].filter(Boolean).join(', '), a.country_code && a.country_code !== 'US' ? a.country_code : null].filter(Boolean);
+  return `<div class="pklabel"><h2>${esc(brand)}</h2><h1>Order ${esc(o.order_number)}</h1><div class="of">Package ${k.seq} of ${k.of}</div>
+    <div class="to">${to.length ? to.map(esc).join('<br>') : 'No ship-to on the order'}</div>
+    <ul>${k.items.map((it) => `<li><span>${esc(names[it.key] || it.key)}</span><b>× ${it.qty}</b></li>`).join('')}</ul>
+    <div class="bc">${barcodeSvg(k.code)}</div><div class="code">${esc(k.code)}</div><small>Package label. The carrier label goes on separately.</small></div>`;
+}
+const printPackageLabels = (brand, orders) => printPages(orders.flatMap((o) => o.packages.map((k) => packageLabelHtml(brand, o, k))), 'pklabel', '4in 6in', 'Package labels', true, PKG_CSS);
 
-  const { todo, probs, done } = useMemo(() => {
-    if (!data) return { todo: [], probs: [], done: [] };
-    const stock = new Map();   // sku_id → its locations, the one to pick from first
-    for (const s of data.stock) { if (s.on_hand > 0) { if (!stock.has(s.sku_id)) stock.set(s.sku_id, []); stock.get(s.sku_id).push(s); } }
-    for (const locs of stock.values()) locs.sort((a, b) => (b.zone === 'open box') - (a.zone === 'open box') || String(a.first_in || '').localeCompare(String(b.first_in || '')) || byCode(a.code, b.code));
-    const group = (lines, extra) => {
-      const m = new Map();
-      for (const l of lines) {
-        const k = (l.sku_id || `sku:${l.sku.toLowerCase()}`) + (extra ? extra(l) : '');
-        if (!m.has(k)) m.set(k, { key: k, sku: l.sku, sku_id: l.sku_id, name: l.name, image_url: l.image_url, qty: 0, lines: [], notes: [] });
-        const g = m.get(k); g.qty += l.qty; g.lines.push(l); if (!g.image_url && l.image_url) g.image_url = l.image_url;
-        if (l.notes && !g.notes.some((n) => n.order_number === l.order_number)) g.notes.push({ order_number: l.order_number, text: l.notes });
-      }
-      return [...m.values()];
-    };
-    // Every open line is on the list to be picked, whether or not the system knows a location or enough stock for it.
-    // What the system has on file is shown beside it; it never blocks the pick. No-location rows come first (nowhere to
-    // walk to yet), then walking order by location.
-    const withStock = (g) => { const locs = g.sku_id ? stock.get(g.sku_id) || [] : []; return { ...g, locs, onHand: locs.reduce((t, x) => t + x.on_hand, 0) }; };
-    const order = (a, b) => (!a.locs.length - !b.locs.length) * -1 || byCode(a.locs[0]?.code || '', b.locs[0]?.code || '') || a.name.localeCompare(b.name);
-    const todo = group(data.lines.filter((l) => !l.picked_at && !l.problem)).map(withStock).sort(order);
-    // lines someone reported a problem on, one row per product and problem
-    const probs = group(data.lines.filter((l) => !l.picked_at && l.problem), (l) => `|${l.problem.kind}|${l.problem.found ?? ''}|${l.problem.note || ''}`).map(withStock).map((g) => ({ ...g, problem: g.lines[0].problem })).sort((a, b) => (b.problem.at > a.problem.at ? 1 : -1));
-    const done = group(data.lines.filter((l) => l.picked_at)).map((g) => ({ ...g, from: [...new Set(g.lines.map((l) => l.picked_from).filter(Boolean))].join(', '), who: g.lines[0].picked_by_name, at: g.lines.reduce((t, l) => (l.picked_at > t ? l.picked_at : t), '') }))
-      .sort((a, b) => (b.at > a.at ? 1 : -1));
-    return { todo, probs, done };
-  }, [data]);
+function Brand({ me, brand, back }) {
+  const [sum, setSum] = useState(null); const [wave, setWave] = useState(null); const [short, setShort] = useState(null);
+  const [err, setErr] = useState(null); const [busy, setBusy] = useState(false); const [ready, setReady] = useState(false);
+  const loadSum = async () => { const { data, error } = await supabase.rpc('wms_orders_summary', { p_org: brand.id }); if (error) { setErr(error.message); return null; } setSum(data); return data; };
+  useEffect(() => { (async () => {
+    const s = await loadSum();
+    if (s?.my_wave) { const { data } = await supabase.rpc('wms_wave', { p_wave: s.my_wave }); if (data) setWave(data); }   // pick up where this login left off
+    setReady(true);
+  })(); }, []);
+  const start = async () => {
+    setBusy(true); setErr(null);
+    const { data, error } = await supabase.rpc('wms_wave_start', { p_org: brand.id }); setBusy(false);
+    if (error) return setErr(error.message);
+    setShort(data.short || []); setWave(data.wave || null); if (!data.wave) loadSum();
+  };
+  const leave = () => { setWave(null); setShort(null); loadSum(); };
+  const resolve = async (line) => { const { error } = await supabase.rpc('wms_resolve_problem', { p_lines: [line] }); if (error) setErr(error.message); loadSum(); };
 
-  const pick = async (g) => {
-    if (busy) return;
-    if (g.sku_id && scanSkus.has(g.sku_id)) return setScanRow(g);
-    setBusy(g.key); setNote(null);
-    const { data: r, error } = await supabase.rpc('wms_pick_scan', { p_lines: g.lines.map((l) => l.id), p_scan: null });
-    setBusy(null);
-    if (error) { beep('bad'); return setNote({ kind: 'bad', text: error.message }); }
-    beep('ok'); if (navigator.vibrate) navigator.vibrate(30);
-    load();
-  };
-  const undo = async (g) => {
-    if (busy) return; setBusy(g.key); setNote(null);
-    const { error } = await supabase.rpc('wms_unpick', { p_lines: g.lines.map((l) => l.id) });
-    setBusy(null); if (error) { beep('bad'); setNote({ kind: 'bad', text: error.message }); } load();
-  };
-  const putBack = async (g) => {
-    if (busy) return; setBusy(g.key); setNote(null);
-    const { error } = await supabase.rpc('wms_resolve_problem', { p_lines: g.lines.map((l) => l.id) });
-    setBusy(null); if (error) { beep('bad'); setNote({ kind: 'bad', text: error.message }); } load();
-  };
-  const reset = async () => { setBusy('reset'); setNote(null); const problem = await resetDemo(); setBusy(null); if (problem) setNote({ kind: 'bad', text: problem }); else setNote({ kind: 'ok', text: 'Demo data reset.' }); setDay(null); setAll(false); load(); };
-
-  const today = data?.today; const unitsLeft = todo.reduce((s, g) => s + g.qty, 0);
-  const viewing = all ? 'All open orders' : day ? (day === today ? 'Due today only' : fmtDate(day)) : 'Due today';
+  if (wave?.status === 'picking') return <Pick brand={brand} wave={wave} setWave={setWave} leave={leave} />;
+  if (wave?.status === 'packing') return <Pack brand={brand} wave={wave} setWave={setWave} leave={leave} />;
+  if (wave?.status === 'done') return <WaveDone brand={brand} wave={wave} next={start} busy={busy} leave={leave} err={err} />;
   return (
     <>
-      <header className="pagehead pick">
-        <div><button className="back" onClick={back}>‹ Orders</button><h1>{brand.name}<span className="dot">.</span></h1></div>
-        <div className="glance"><div><b className={unitsLeft ? 'hot' : ''}>{num(unitsLeft)}</b><small>Units to pick</small></div><div><b>{num(todo.length)}</b><small>Stops</small></div><div><b className={probs.length ? 'hot' : ''}>{num(probs.length)}</b><small>Problems</small></div></div>
+      <header className="pagehead">
+        <div><button className="backlink" onClick={back}>‹ Brands</button><h1>{brand.name}<span className="dot">.</span></h1></div>
+        {sum && <div className="glance"><div><b className={sum.to_pick ? 'hot' : ''}>{num(sum.to_pick)}</b><small>Orders to pick</small></div><div><b>{num(sum.packed_today)}</b><small>Packed today</small></div></div>}
       </header>
-
-      <div className="daybar">
-        <button className={!day && !all ? 'on' : ''} onClick={() => { setDay(null); setAll(false); }}>Due today</button>
-        <label className={day && !all ? 'on' : ''}><span>{day && !all ? fmtDate(day) : 'Another day'}</span><input type="date" value={day || ''} onChange={(e) => { setDay(e.target.value || null); setAll(false); }} aria-label="Ship-by date" /></label>
-        {today && <button className={day === shift(today, 1) && !all ? 'on' : ''} onClick={() => { setDay(shift(today, 1)); setAll(false); }}>Tomorrow</button>}
-        <button className={all ? 'on' : ''} onClick={() => setAll(true)}>All open</button>
-      </div>
-
-      {err && <div className="strip bad"><span>{err}</span><button onClick={load}>Try again</button></div>}
-      {note && <div className={`strip ${note.kind}`}><span>{note.text}</span><button className="x" onClick={() => setNote(null)} aria-label="Dismiss">×</button></div>}
-
-      {data?.ready?.length > 0 && (
-        <section className="ready">
-          <h3>Ready to pack <span>{data.ready.length}</span></h3>
-          <ul>{data.ready.map((o) => <li key={o.order_number} className="code">{o.order_number}</li>)}</ul>
-        </section>
-      )}
-
-      <h2 className="sect">To pick <span>{todo.length ? `${viewing} · ${num(unitsLeft)} unit${unitsLeft === 1 ? '' : 's'}` : viewing}</span></h2>
-      {data && todo.length > 0 && <div className="phead"><span /><span>Item</span><span>Qty</span><span>Location</span><span>Pick</span></div>}
-      {!data ? <div className="empty">Loading…</div> : todo.length === 0 ? <div className="empty panel">{done.length ? 'Everything in this view is picked.' : 'Nothing to pick in this view.'}</div> : (
-        <ul className="prows">{todo.map((g) => (
-          <li key={g.key}>
-            <div className="prow">
-              <button className="pthumb" onClick={() => g.image_url && setZoom(g)} aria-label={g.image_url ? `Enlarge ${g.name}` : undefined} disabled={!g.image_url}>
-                {g.image_url ? <img src={g.image_url} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : null}
-              </button>
-              <button className="pwhat" onClick={() => setOpenRow(openRow === g.key ? null : g.key)} aria-expanded={openRow === g.key}>
-                <b>{g.name}</b>
-                <span className="code">{g.sku}</span>
-                {g.notes.map((n) => <em key={n.order_number}>{n.text}</em>)}
-              </button>
-              <div className="pq"><b>{num(g.qty)}</b>{g.lines.length > 1 && <span>{g.lines.length} orders</span>}</div>
-              <div className={`pl ${g.locs.length ? '' : 'none'}`}>
-                <b>{g.locs.length ? g.locs[0].code : 'No location'}</b>
-                {g.locs.length > 0 && g.onHand < g.qty && <span>{num(g.onHand)} on file</span>}
-                {g.locs.length > 1 && g.onHand >= g.qty && <span>also {g.locs.slice(1).map((x) => x.code).join(', ')}</span>}
-              </div>
-              {g.sku_id && scanSkus.has(g.sku_id)
-                ? <button className="pcheck scan" onClick={() => setScanRow(g)} disabled={!!busy} aria-label={`Scan ${g.name} to pick it`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6v12M7 6v12M10 6v12M14 6v12M17 6v12M20 6v12" stroke="currentColor" strokeWidth="1.6" fill="none" /></svg></button>
-                : <button className="pcheck" onClick={() => pick(g)} disabled={!!busy} aria-label={`Picked ${g.qty} ${g.name}`}>{busy === g.key ? '…' : ''}</button>}
-            </div>
-            <button className="pprob" onClick={() => setReport(g)}>Problem?</button>
-            {openRow === g.key && <ul className="breakdown">{g.lines.map((l) => <li key={l.id}><span className="code">{l.order_number}</span><span>{l.ship_by ? (l.ship_by < today ? 'Late · ' : '') + fmtDate(l.ship_by) : 'No date'}</span><b>{num(l.qty)}</b></li>)}</ul>}
-          </li>
-        ))}</ul>
-      )}
-
-      <button className="sect toggle" onClick={() => setShowProbs((v) => !v)} aria-expanded={showProbs}>Problems <span className={probs.length ? 'hot' : ''}>{probs.length} <i>{showProbs ? '▴' : '▾'}</i></span></button>
-      {showProbs && (probs.length === 0 ? <div className="empty panel">No problems reported in this view.</div> : (
-        <ul className="prows probs">{probs.map((g) => (
-          <li key={g.key}>
-            <div className="prow">
-              <div className="pthumb">{g.image_url ? <img src={g.image_url} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : null}</div>
-              <div className="pwhat"><b>{g.name}</b><span className="code">{g.sku}</span>
-                <em>{PROBLEM[g.problem.kind]}{g.problem.kind === 'short' ? `: ${num(g.problem.found)} there` : ''}{g.problem.note ? ` · ${g.problem.note}` : ''}</em>
-                <span>{g.problem.by || 'Someone'} · {new Date(g.problem.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} · {g.lines.map((l) => l.order_number).join(', ')}</span></div>
-              <div className="pq"><b>{num(g.qty)}</b></div>
-              <div className={`pl ${g.problem.location || g.locs.length ? '' : 'none'}`}><b>{g.problem.location || g.locs[0]?.code || 'No location'}</b></div>
-              <button className="undo" onClick={() => putBack(g)} disabled={!!busy}>{busy === g.key ? '…' : 'Back to list'}</button>
-            </div>
-          </li>
-        ))}</ul>
-      ))}
-
-      <button className="sect toggle" onClick={() => setShowPicked((v) => !v)} aria-expanded={showPicked}>Picked <span>{done.length} <i>{showPicked ? '▴' : '▾'}</i></span></button>
-      {showPicked && (done.length === 0 ? <div className="empty panel">Nothing picked in this view yet.</div> : (
-        <ul className="prows done">{done.map((g) => (
-          <li key={g.key}>
-            <div className="prow">
-              <div className="pthumb">{g.image_url ? <img src={g.image_url} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : null}</div>
-              <div className="pwhat"><b>{g.name}</b><span className="code">{g.sku}</span><span>{g.who || 'Someone'} · {new Date(g.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span></div>
-              <div className="pq"><b>{num(g.qty)}</b></div>
-              <div className="pl"><b>{g.from || '—'}</b></div>
-              <button className="undo" onClick={() => undo(g)} disabled={!!busy}>{busy === g.key ? '…' : 'Undo'}</button>
-            </div>
-          </li>
-        ))}</ul>
-      ))}
-
-      {brand.client_code === 'DEMO' && <button className="btn reset" onClick={reset} disabled={busy === 'reset'}>{busy === 'reset' ? 'Resetting…' : 'Reset demo data'}</button>}
-
-      {scanRow && <ScanToPick row={scanRow} onClose={() => setScanRow(null)} onProblem={() => { setReport(scanRow); setScanRow(null); }} onDone={() => { setScanRow(null); beep('ok'); if (navigator.vibrate) navigator.vibrate(30); load(); }} />}
-      {report && <ReportProblem row={report} onClose={() => setReport(null)} onDone={() => { setReport(null); setShowProbs(true); load(); }} />}
-      {zoom && (
-        <div className="overlay" onClick={() => setZoom(null)}>
-          <div className="zoom" role="dialog" aria-label={zoom.name}><img src={zoom.image_url} alt={zoom.name} /><b>{zoom.name}</b><span className="code">{zoom.sku}</span></div>
+      {err && <div className="strip bad"><span>{err}</span><button className="x" onClick={() => setErr(null)} aria-label="Dismiss">×</button></div>}
+      {!ready ? <div className="empty">Loading…</div> : (
+        <div className="wv-start" data-testid="wave-start">
+          {short && !wave && <div className="strip bad" data-testid="no-wave"><span>{short.length ? `No wave can be built: the stock on file does not cover ${plural(new Set(short.map((s) => s.order_number)).size, 'open order')}. A manager has the list.` : 'There are no orders to pick right now.'}</span></div>}
+          <button className="btn big go" data-testid="start-wave" onClick={start} disabled={busy || (sum && sum.to_pick === 0)}>{busy ? 'Building your wave…' : sum && sum.to_pick === 0 ? 'Nothing to pick' : 'Start the next wave'}</button>
+          <p className="wv-note">You get one trip at a time: the stops in walking order, ending at your pack station. Then you pack what you picked.</p>
+          {brand.client_code === 'DEMO' && <button className="swap" disabled={busy} onClick={async () => { setBusy(true); const problem = await resetDemo(); setBusy(false); setShort(null); if (problem) setErr(problem); loadSum(); }}>Reset the demo data</button>}
+          {sum && sum.other_waves.length > 0 && <p className="wv-note">{sum.other_waves.map((w) => `Wave ${w.seq}: ${w.picker} (${w.status})`).join(' · ')}</p>}
+          {sum && sum.with_manager > 0 && !sum.manager && <p className="wv-note" data-testid="with-manager">{plural(sum.with_manager, 'order')} {sum.with_manager === 1 ? 'is' : 'are'} with a manager.</p>}
+          {sum?.manager && (sum.problems.length > 0 || (short && short.length > 0)) && (
+            <section className="panel wv-mgr" data-testid="manager">
+              <div className="panelhead"><h3>Needs a manager</h3><span>{plural(sum.problems.length + (short || []).length, 'item')}</span></div>
+              <table className="grid"><thead><tr><th>Order</th><th>Item</th><th>What happened</th><th>Where</th><th>Reported</th><th /></tr></thead><tbody>
+                {sum.problems.map((p) => <tr key={p.line_id}><td className="code">{p.order_number}</td><td>{p.name}</td><td>{PROBLEM[p.kind] || p.kind}{p.found != null ? `: ${p.found} of ${p.need} picked` : ''}{p.note ? ` · ${p.note}` : ''}</td><td className="code">{p.location || '—'}</td><td>{p.by || '—'}</td>
+                  <td><button className="btn sm" onClick={() => resolve(p.line_id)}>Back to the pick list</button></td></tr>)}
+                {(short || []).map((s, i) => <tr key={`s${i}`}><td className="code">{s.order_number}</td><td className="code">{s.sku}</td><td>Not enough stock on file: {num(s.need)} needed, {num(s.on_file)} free</td><td>—</td><td>System</td><td /></tr>)}
+              </tbody></table>
+            </section>
+          )}
         </div>
       )}
     </>
   );
 }
 
-// Report a problem on a row: not at the location, short (with how many are there), or anything else in a few words.
-// The row moves to Problems until someone puts it back on the list.
-function ReportProblem({ row, onClose, onDone }) {
-  const [kind, setKind] = useState(null); const [found, setFound] = useState(''); const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
-  const ok = kind === 'missing' || (kind === 'short' && found !== '' && Number(found) >= 0) || (kind === 'other' && note.trim());
-  const send = async () => {
-    if (!ok || busy) return; setBusy(true); setErr(null);
-    const { error } = await supabase.rpc('wms_report_problem', { p_lines: row.lines.map((l) => l.id), p_kind: kind, p_found: kind === 'short' ? Math.round(Number(found)) : null, p_note: note.trim() || null, p_location: row.locs[0]?.code || null });
-    setBusy(false); if (error) return setErr(error.message); onDone();
-  };
-  return (
-    <div className="overlay" onClick={onClose}>
-      <div className="dialog probdlg" role="dialog" aria-label="Report a problem" onClick={(e) => e.stopPropagation()}>
-        <h2>Problem<span className="dot">.</span></h2>
-        <p className="lead">{row.name} · {num(row.qty)} to pick{row.locs[0] ? ` · ${row.locs[0].code}` : ''}</p>
-        <div className="kinds">
-          {[['missing', 'Not at the location'], ['short', 'Short'], ['other', 'Something else']].map(([k, t]) => <button key={k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>{t}</button>)}
-        </div>
-        {kind === 'short' && <label className="pf">How many are there?<input type="number" min="0" inputMode="numeric" value={found} onChange={(e) => setFound(e.target.value)} autoFocus /></label>}
-        {kind && <label className="pf">{kind === 'other' ? 'What is the problem?' : <>Note <em>optional</em></>}<textarea rows="2" maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} autoFocus={kind === 'other'} /></label>}
-        {err && <div className="strip bad"><span>{err}</span></div>}
-        <div className="dlgbtns"><button className="btn" onClick={onClose}>Cancel</button><button className="btn big" disabled={!ok || busy} onClick={send}>{busy ? 'Sending…' : 'Report it'}</button></div>
-      </div>
+/* PICK: one stop at a time, in route order. Stock leaves the position only when the exact units are confirmed. */
+function Pick({ brand, wave, setWave, leave }) {
+  const cur = wave.tasks.find((t) => !t.confirmed) || null;
+  const [qty, setQty] = useState(''); const [scan, setScan] = useState(''); const [err, setErr] = useState(null); const [busy, setBusy] = useState(false);
+  useEffect(() => { setQty(cur ? String(cur.qty_planned) : ''); setScan(''); setErr(null); }, [cur?.id]);
+  const done = wave.tasks.filter((t) => t.confirmed);
+  const call = async (fn, args) => { setBusy(true); setErr(null); const { data, error } = await supabase.rpc(fn, args); setBusy(false); if (error) { beep('bad'); setErr(error.message); return false; } beep('ok'); setWave(data); return true; };
+  const confirm = (code) => { const n = Number(qty); if (qty === '' || !Number.isInteger(n) || n < 0) return setErr('Enter how many units you picked.'); return call('wms_wave_confirm', { p_task: cur.id, p_qty: n, p_scan: (typeof code === 'string' ? code : scan) || null }); };
+  const handBack = async () => { setBusy(true); const { error } = await supabase.rpc('wms_wave_cancel', { p_wave: wave.id }); setBusy(false); if (error) return setErr(error.message); leave(); };
+  const problems = wave.orders.filter((o) => o.pack_state === 'problem');
+
+  if (!cur) return (
+    <div className="wv-return" data-testid="return-prompt">
+      <small>{brand.name} · wave {wave.seq}</small>
+      <h1>Wave picked<span className="dot">.</span></h1>
+      <p className="lead">Take everything back to your pack station.</p>
+      {problems.length > 0 && <div className="strip bad"><span>{plural(problems.length, 'order')} came up short and went to a manager ({problems.map((o) => o.order_number).join(', ')}). Keep {problems.length === 1 ? 'its' : 'their'} items to one side.</span></div>}
+      {err && <div className="strip bad"><span>{err}</span></div>}
+      <button className="btn big go" data-testid="to-pack" disabled={busy} onClick={() => call('wms_wave_to_pack', { p_wave: wave.id })}>I’m at my pack station · start packing</button>
+      <button className="swap" disabled={busy} onClick={() => call('wms_wave_unconfirm', { p_task: done[done.length - 1].id })}>Go back to the last stop</button>
     </div>
+  );
+  const sameSpot = wave.tasks.filter((t) => !t.confirmed && t.location === cur.location).length;
+  return (
+    <>
+      <header className="pagehead">
+        <div><small className="wv-crumb">{brand.name}</small><h1>Wave {wave.seq}<span className="dot">.</span></h1></div>
+        <div className="glance"><div><b className="hot">{done.length + 1}</b><small>of {wave.tasks.length} stops</small></div><div><b>{wave.orders.length}</b><small>Orders</small></div></div>
+      </header>
+      {err && <div className="strip bad" data-testid="pick-err"><span>{err}</span><button className="x" onClick={() => setErr(null)} aria-label="Dismiss">×</button></div>}
+      <section className="wv-stop" data-testid="stop">
+        <div className="wv-where"><small>Go to</small><b>{cur.location}</b>{cur.psku && <span>Pallet {cur.psku}{cur.mixed ? ' · mixed pallet' : ''}</span>}{sameSpot > 1 && <em>{sameSpot} items to pick here</em>}</div>
+        <div className="wv-what">{cur.image_url && <img src={cur.image_url} alt="" />}<div><b>{cur.name}</b><span className="code">{cur.sku}</span><span>for {plural(cur.orders, 'order')}</span></div><div className="wv-need"><small>Pick</small><b>{num(cur.qty_planned)}</b></div></div>
+        <div className="wv-confirm">
+          {cur.needs_scan && <ScanBox value={scan} onChange={setScan} onScan={(code) => { setScan(code); confirm(code); }} placeholder="Scan the item (carton label or barcode)" autoFocus />}
+          <label>Units you picked<input className="bignum" data-testid="picked-qty" type="number" min="0" max={cur.qty_planned} inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') confirm(); }} /></label>
+          <button type="button" className="btn big go" data-testid="confirm-stop" disabled={busy} onClick={() => confirm()}>{Number(qty) === cur.qty_planned ? `Picked all ${num(cur.qty_planned)}` : Number(qty) === 0 && qty !== '' ? 'None here · tell a manager' : `Picked ${qty || '…'} of ${num(cur.qty_planned)} · tell a manager`}</button>
+        </div>
+      </section>
+      <ol className="wv-route" data-testid="route">
+        {wave.tasks.map((t) => (
+          <li key={t.id} className={t.confirmed ? 'done' : t.id === cur.id ? 'now' : ''}>
+            <i>{t.seq}</i><b className="code">{t.location}</b><span>{t.name}</span><em>{t.confirmed ? `${num(t.qty_picked)} of ${num(t.qty_planned)}` : num(t.qty_planned)}</em>
+            {t.confirmed && <button className="swap" disabled={busy} onClick={() => call('wms_wave_unconfirm', { p_task: t.id })}>Redo</button>}
+          </li>))}
+        <li className="end"><i>⌂</i><b>Pack station</b><span>bring everything back here</span></li>
+      </ol>
+      {done.length === 0 && <button className="swap" disabled={busy} onClick={handBack}>Hand this wave back</button>}
+    </>
   );
 }
 
-// Picking a product that has a barcode on file takes a scan of it: the product's own barcode, the label on one of its
-// cartons, or an open-box unit label. A hand scanner types into the box; on a phone the camera reads it where the
-// browser can (otherwise the numbers under the barcode can be typed). The database checks the code, not this screen.
-function ScanToPick({ row, onClose, onProblem, onDone }) {
-  const [code, setCode] = useState(''); const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
-  const [cam, setCam] = useState(false); const video = useRef(null); const input = useRef(null);
-  const canCam = typeof window !== 'undefined' && 'BarcodeDetector' in window && !!navigator.mediaDevices?.getUserMedia;
-  const send = async (value) => {
-    const v = String(value ?? code).trim(); if (!v || busy) return;
+/* PACK: only the orders just picked, one group at a time. Identical orders are one group. An order can go out in several packages. */
+function Pack({ brand, wave, setWave, leave }) {
+  const pending = wave.orders.filter((o) => o.pack_state === 'pending');
+  const groups = useMemo(() => { const m = new Map(); pending.forEach((o) => { const s = sigOf(o); if (!m.has(s)) m.set(s, []); m.get(s).push(o); }); return [...m.values()]; }, [wave]);
+  const g = groups[0]; const first = g?.[0];
+  const [extra, setExtra] = useState([]); const [err, setErr] = useState(null); const [busy, setBusy] = useState(false); const [printFail, setPrintFail] = useState(null);
+  useEffect(() => { setExtra([]); setErr(null); }, [first?.id]);
+  if (!g) return null;
+  const rest = (key, total) => total - extra.reduce((s, p) => s + (p[key] || 0), 0);
+  const pkgs = [Object.fromEntries(first.lines.map((l) => [l.key, rest(l.key, l.qty)])), ...extra];
+  const empty = pkgs.findIndex((p) => Object.values(p).reduce((s, n) => s + n, 0) === 0);
+  const setQ = (i, key, v, max) => { setErr(null); return setExtra((xs) => xs.map((p, j) => (j === i ? { ...p, [key]: Math.max(0, Math.min(max, Number(v) || 0)) } : p))); };
+  const pack = async () => {
+    if (empty >= 0) return setErr(`Package ${empty + 1} has nothing in it. Move an item into it or remove it.`);
     setBusy(true); setErr(null);
-    const { error } = await supabase.rpc('wms_pick_scan', { p_lines: row.lines.map((l) => l.id), p_scan: v });
-    setBusy(false);
-    if (error) { beep('bad'); setErr(error.message); setCode(''); input.current?.focus(); return; }
-    onDone();
+    const body = pkgs.map((p) => ({ items: Object.entries(p).filter(([, n]) => n > 0).map(([key, qty]) => ({ key, qty })) }));
+    const ids = g.map((o) => o.id);
+    const { data, error } = await supabase.rpc('wms_wave_pack', { p_wave: wave.id, p_orders: ids, p_packages: body }); setBusy(false);
+    if (error) { beep('bad'); return setErr(error.message); }
+    beep('ok');
+    const packed = data.orders.filter((o) => ids.includes(o.id));
+    setPrintFail((await printPackageLabels(brand.name, packed)) ? null : packed); setWave(data);
   };
-  useEffect(() => {
-    if (!cam) return undefined;
-    let stream; let stop = false; let timer;
-    (async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        if (stop) { stream.getTracks().forEach((t) => t.stop()); return; }
-        video.current.srcObject = stream; await video.current.play();
-        const det = new window.BarcodeDetector();
-        const tick = async () => {
-          if (stop) return;
-          try { const found = await det.detect(video.current); if (found[0]?.rawValue) { stop = true; setCam(false); send(found[0].rawValue); return; } } catch { /* frame not ready */ }
-          timer = setTimeout(tick, 250);
-        };
-        tick();
-      } catch { setCam(false); setErr('The camera could not be opened. Type the numbers under the barcode instead.'); }
-    })();
-    return () => { stop = true; clearTimeout(timer); stream?.getTracks().forEach((t) => t.stop()); };
-  }, [cam]);
+  const problems = wave.orders.filter((o) => o.pack_state === 'problem'); const packedN = wave.orders.filter((o) => o.pack_state === 'packed').length;
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className="dialog probdlg" role="dialog" aria-label="Scan to pick" onClick={(e) => e.stopPropagation()}>
-        <h2>Scan it<span className="dot">.</span></h2>
-        <p className="lead">{row.name} · pick {num(row.qty)}{row.locs[0] ? ` · ${row.locs[0].code}` : ''}</p>
-        {cam && <video ref={video} className="camview" playsInline muted />}
-        <form onSubmit={(e) => { e.preventDefault(); send(); }}>
-          <label className="pf">Barcode<input ref={input} value={code} onChange={(e) => setCode(e.target.value)} autoFocus autoComplete="off" autoCapitalize="characters" inputMode="text" placeholder="Scan, or type the numbers" /></label>
-        </form>
-        {err && <div className="strip bad"><span>{err}</span></div>}
-        <div className="dlgbtns">
-          {canCam && <button className="btn" onClick={() => setCam((v) => !v)}>{cam ? 'Stop camera' : 'Use camera'}</button>}
-          <button className="btn big" disabled={!code.trim() || busy} onClick={() => send()}>{busy ? 'Checking…' : `Picked ${num(row.qty)}`}</button>
+    <>
+      <header className="pagehead">
+        <div><small className="wv-crumb">{brand.name} · wave {wave.seq}</small><h1>Pack<span className="dot">.</span></h1></div>
+        <div className="glance"><div><b className="hot">{pending.length}</b><small>Orders to pack</small></div><div><b>{packedN}</b><small>Packed</small></div></div>
+      </header>
+      {printFail && <div className="strip bad"><span>The print window did not open for the last package labels.</span><button onClick={async () => { if (await printPackageLabels(brand.name, printFail)) setPrintFail(null); }}>Print them again</button></div>}
+      {err && <div className="strip bad" data-testid="pack-err"><span>{err}</span><button className="x" onClick={() => setErr(null)} aria-label="Dismiss">×</button></div>}
+      {problems.length > 0 && <div className="strip"><span>Set aside, with a manager: {problems.map((o) => o.order_number).join(', ')}.</span></div>}
+      <section className="wv-pack" data-testid="pack-group">
+        <div className="wv-ordhead">
+          <h2>{g.length > 1 ? `${g.length} identical orders` : `Order ${first.order_number}`}</h2>
+          <p>{g.length > 1 ? g.map((o) => o.order_number).join(' · ') : [first.customer, first.shipping_method].filter(Boolean).join(' · ') || 'One order'}</p>
+          {g.filter((o) => o.notes).map((o) => <p key={o.id} className="wv-ordnote">{g.length > 1 ? `${o.order_number}: ` : ''}{o.notes}</p>)}
+          {g.length > 1 && <p className="wv-note">Pack every one of them the same way. One set of package labels prints for each order.</p>}
         </div>
-        <button className="swap" onClick={onProblem}>Can’t scan it? Report a problem</button>
-      </div>
+        {pkgs.map((p, i) => (
+          <div className="wv-pkg" key={i} data-testid={`pkg-${i + 1}`}>
+            <div className="wv-pkghead"><b>Package {i + 1}{pkgs.length > 1 ? ` of ${pkgs.length}` : ''}</b>{i > 0 && <button className="swap" onClick={() => setExtra((xs) => xs.filter((_, j) => j !== i - 1))}>Remove this package</button>}</div>
+            <ul>{first.lines.map((l) => (i === 0 ? (p[l.key] > 0 || pkgs.length === 1) && <li key={l.key}>{l.image_url && <img src={l.image_url} alt="" />}<span>{l.name}<small className="code">{l.sku}</small></span><b>× {num(p[l.key])}</b></li>
+              : <li key={l.key}>{l.image_url && <img src={l.image_url} alt="" />}<span>{l.name}<small className="code">{l.sku}</small></span>
+                <input aria-label={`${l.name} in package ${i + 1}`} type="number" min="0" max={l.qty} inputMode="numeric" value={p[l.key] || ''} placeholder="0" onChange={(e) => setQ(i - 1, l.key, e.target.value, (p[l.key] || 0) + rest(l.key, l.qty))} /></li>))}
+              {i === 0 && empty === 0 && <li className="none">Everything has been moved to other packages.</li>}
+            </ul>
+          </div>))}
+        <button className="swap" data-testid="add-package" onClick={() => setExtra((xs) => [...xs, {}])}>Split into another package</button>
+        <button className="btn big go" data-testid="pack" disabled={busy} onClick={pack}>{busy ? 'Saving…' : `Packed · print ${plural(pkgs.length * g.length, 'label')}`}</button>
+      </section>
+      {groups.length > 1 && <p className="wv-note">{plural(groups.length - 1, 'more group')} after this one.</p>}
+    </>
+  );
+}
+
+function WaveDone({ brand, wave, next, busy, leave, err }) {
+  const packed = wave.orders.filter((o) => o.pack_state === 'packed'); const problems = wave.orders.filter((o) => o.pack_state === 'problem');
+  return (
+    <div className="wv-return" data-testid="wave-done">
+      <small>{brand.name} · wave {wave.seq}</small>
+      <h1>{packed.length ? 'Wave packed' : 'Nothing to pack'}<span className="dot">.</span></h1>
+      <p className="lead">{packed.length ? `${plural(packed.length, 'order')} in ${plural(packed.reduce((s, o) => s + o.packages.length, 0), 'package')}.` : 'Every order in this wave came up short.'}</p>
+      {problems.length > 0 && <div className="strip bad"><span>With a manager: {problems.map((o) => o.order_number).join(', ')}.</span></div>}
+      {err && <div className="strip bad"><span>{err}</span></div>}
+      <button className="btn big go" data-testid="next-wave" disabled={busy} onClick={next}>{busy ? 'Building your wave…' : 'Start the next wave'}</button>
+      <button className="swap" onClick={leave}>Back to {brand.name}</button>
     </div>
   );
 }

@@ -1,0 +1,66 @@
+// Orders end to end in a real browser (Chromium) against the local stack: the real Orders screen with the synthetic floor
+// login. Start a wave, walk its stops, confirm units (stock moves only then), go to the pack station, pack identical orders
+// in split packages. Every request not to 127.0.0.1 is blocked and counted. Printing is mocked and counted.
+const { chromium } = require('playwright'); const fs = require('fs'); const path = require('path'); const http = require('http');
+const pg = require(path.resolve(__dirname, '../../../supabase/tests/db/node_modules/pg'));
+const S = JSON.parse(fs.readFileSync('/tmp/graft-e2e/session.json', 'utf8')); const BUILD = '/tmp/graft-e2e/builds/orders'; const SHOTS = '/tmp/graft-e2e/shots'; fs.mkdirSync(SHOTS, { recursive: true });
+let pass = 0, fail = 0; const ok = (c, w) => { c ? pass++ : fail++; console.log(`${c ? 'ok  ' : 'FAIL'} ${w}`); };
+const q = async (sql, p = []) => { const c = new pg.Client('postgres://postgres@127.0.0.1:54317/staging'); await c.connect(); try { return (await c.query(sql, p)).rows; } finally { await c.end(); } };
+const serve = (dir, port) => http.createServer((req, res) => { const p = decodeURIComponent(String(req.url).split('?')[0]); const f = path.resolve(dir, '.' + p);
+  const file = f.startsWith(dir + path.sep) && fs.existsSync(f) && fs.statSync(f).isFile() ? f : path.join(dir, fs.readdirSync(dir).find((x) => x.endsWith('.html')));
+  res.setHeader('Content-Type', { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2' }[path.extname(file)] || 'application/octet-stream'); fs.createReadStream(file).pipe(res); }).listen(port, '127.0.0.1');
+const norm = (t) => t.replace(/\s+/g, ' ').trim();
+(async () => {
+  const server = serve(BUILD, 4502); const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1243/chrome-linux64/chrome' });
+  const blocked = []; const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+  await ctx.route('**/*', (r) => { const u = r.request().url(); const h = u.startsWith('http') ? new URL(u).hostname : '127.0.0.1'; if (h === '127.0.0.1') return r.fallback(); blocked.push(u); return r.abort(); });
+  await ctx.exposeBinding('__printed', () => { prints++; }); let prints = 0;
+  await ctx.addInitScript(() => { window.print = () => { window.top.__printed ? window.top.__printed() : window.__printed(); }; });
+  const p = await ctx.newPage(); p.on('pageerror', (e) => ok(false, `page error: ${e.message}`));
+  const shot = (n) => p.screenshot({ path: `${SHOTS}/orders-${n}.png`, fullPage: true });
+  const stockLP = async () => Number((await q(`select coalesce(sum(m.qty),0) n from inventory_moves m join skus s on s.id = m.sku_id where s.sku = 'SYN-LP'`))[0].n);
+  await p.goto('http://127.0.0.1:4502/'); await p.waitForTimeout(1200);
+  await p.locator('.brandlist button', { hasText: 'Synthetic Records' }).click(); await p.waitForTimeout(900);
+
+  const start = norm(await p.locator('body').innerText());
+  ok(/4 Orders to pick/.test(start) && !/O-50\d/.test(start) && !/Synthetic (LP|Tee|Cap)/.test(start), 'entering a brand shows a count and one button, not every order or item');
+  await shot('1-start');
+  await p.locator('[data-testid=start-wave]').click(); await p.waitForTimeout(1200);
+  const stop1 = norm(await p.locator('[data-testid=stop]').innerText()); const route = await p.locator('[data-testid=route] li').allInnerTexts();
+  ok(new RegExp(`Go to E02 Pallet ${S.bookings.pallet}`).test(stop1) && /Synthetic LP.*for 3 orders.*Pick 4/.test(stop1), `first stop only: position, pallet, item, units: ${stop1.slice(0, 110)}`);
+  ok(route.length === 4 && /E02/.test(route[0]) && /A-01/.test(route[1]) && /A-01/.test(route[2]) && /Pack station/.test(route[3]), `route: pallet position, then the shelf's two items back to back, ending at the pack station: ${route.map(norm).join(' | ')}`);
+  ok(!/O-503/.test(norm(await p.locator('body').innerText())), 'the order with no stock on file is not in the wave');
+  await shot('2-stop');
+  await p.locator('[data-testid=confirm-stop]').click(); await p.waitForTimeout(600);
+  ok(/Scan the barcode/.test(await p.locator('[data-testid=pick-err]').innerText()) && await stockLP() === 30, 'a pallet item must be scanned; nothing left stock');
+  await p.locator('.scanbox input').fill(S.bookings.carton); await p.locator('.scanbox input').press('Enter'); await p.waitForTimeout(900);
+  if (await stockLP() !== 26) console.log('DEBUG', norm(await p.locator('body').innerText()).slice(0, 600));
+  ok(await stockLP() === 26, 'confirming the stop takes exactly those units off the position');
+  const stop2 = norm(await p.locator('[data-testid=stop]').innerText()); ok(/Go to A-01 2 items to pick here Synthetic Cap/.test(stop2), `second stop: ${stop2.slice(0, 80)}`);
+  await p.locator('[data-testid=picked-qty]').fill('0'); ok(/None here · tell a manager/.test(await p.locator('[data-testid=confirm-stop]').innerText()), 'a short stop says it goes to a manager');
+  await p.locator('[data-testid=confirm-stop]').click(); await p.waitForTimeout(900);
+  await p.locator('[data-testid=confirm-stop]').click(); await p.waitForTimeout(1000);
+  const ret = norm(await p.locator('[data-testid=return-prompt]').innerText());
+  ok(/Wave picked\. Take everything back to your pack station\./.test(ret) && /1 order came up short and went to a manager \(O-504\)/.test(ret), `after the last stop the picker is sent to the pack station, short order named: ${ret.slice(0, 150)}`);
+  await shot('3-return');
+  await p.locator('[data-testid=to-pack]').click(); await p.waitForTimeout(1000);
+  const grp = norm(await p.locator('[data-testid=pack-group]').innerText());
+  ok(/2 identical orders O-501 · O-502/.test(grp) && /Synthetic LP SYN-LP × 1/.test(grp) && /Synthetic Tee SYN-TEE × 2/.test(grp) && /Packed · print 2 labels/.test(grp), `packing shows only the orders just picked, identical ones as one group: ${grp.slice(0, 130)}`);
+  await p.locator('[data-testid=add-package]').click(); await p.locator('[data-testid=pack]').click(); await p.waitForTimeout(400);
+  ok(/Package 2 has nothing in it/.test(await p.locator('[data-testid=pack-err]').innerText()), 'an empty package is refused');
+  await p.locator('[data-testid=pkg-2] input').nth(1).fill('2'); await p.waitForTimeout(200);
+  const split = norm(await p.locator('[data-testid=pack-group]').innerText()); ok(/Package 1 of 2 Synthetic LP SYN-LP × 1 Package 2 of 2/.test(split) && /print 4 labels/.test(split), 'split: the tees moved to package 2, package 1 keeps the rest');
+  await shot('4-pack');
+  await p.locator('[data-testid=pack]').click(); await p.waitForTimeout(1500);
+  const done = norm(await p.locator('[data-testid=wave-done]').innerText()); ok(/Wave packed\. 2 orders in 4 packages\./.test(done) && /With a manager: O-504/.test(done), `wave done: ${done.slice(0, 110)}`);
+  const pk = await q(`select o.order_number, o.status, k.seq, k.of_n, k.items from wms_packages k join orders o on o.id = k.order_id order by 1, 3`);
+  ok(pk.length === 4 && pk.every((r) => r.status === 'packed' && r.of_n === 2) && pk[1].items[0].key === 'SYN-TEE' && pk[1].items[0].qty === 2, 'four packages on file, both orders packed');
+  ok(prints === 1, `package labels sent to the print window once (${prints})`);
+  await shot('5-done');
+  await p.locator('[data-testid=next-wave]').click(); await p.waitForTimeout(1200);
+  const none = norm(await p.locator('[data-testid=wave-start]').innerText());
+  ok(/No wave can be built: the stock on file does not cover 1 open order/.test(none) && /1 order is with a manager/.test(none), `next wave: told why there is none: ${none.slice(0, 140)}`);
+  ok(blocked.length === 0, `requests outside 127.0.0.1: ${blocked.length}`);
+  await browser.close(); server.close();
+  console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
+})();
