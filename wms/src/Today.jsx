@@ -3,6 +3,7 @@
 // Orders come from each brand's connector. Read fresh every minute.
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from './lib';
+import { ENABLED as CALENDAR } from './nexusSource.js';
 
 const num = (n) => Number(n || 0).toLocaleString('en-US');
 const plural = (n, w, ws) => `${num(n)} ${Number(n) === 1 ? w : ws || `${w}s`}`;
@@ -82,7 +83,7 @@ export default function Today({ me, go, openBrand }) {
       </div>
 
       <section className="panel">
-        <header className="panelhead"><h3>Shipments expected</h3><span>{d.inbound.length ? `${plural(d.inbound.length, 'shipment')} in the next 5 weeks` : 'Nothing booked in the next 5 weeks'}</span></header>
+        <header className="panelhead"><h3>Shipments expected</h3>{CALENDAR && <button className="btn sm" onClick={() => go('calendar')}>Open the shared calendar</button>}<span>{d.inbound.length ? `${plural(d.inbound.length, 'shipment')} in the next 5 weeks` : 'Nothing booked in the next 5 weeks'}</span></header>
         <div className="cal" role="grid" aria-label="Shipments expected by day">
           {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((w) => <div key={w} className="calhead">{w}</div>)}
           {days.map((day) => {

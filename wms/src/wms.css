@@ -672,3 +672,12 @@ label input.bignum { height: 59px; font-size: 26px; font-weight: 800; font-varia
 .wv-pkg ul { list-style: none; margin: 0; padding: 0; } .wv-pkg li { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line-2); } .wv-pkg li:last-child { border-bottom: 0; } .wv-pkg li img { width: 44px; height: 44px; object-fit: cover; border-radius: var(--r-sm); }
 .wv-pkg li span { flex: 1; display: grid; font-weight: 600; } .wv-pkg li small { color: var(--muted); font-weight: 500; } .wv-pkg li b { font-size: 22px; font-variant-numeric: tabular-nums; } .wv-pkg li input { width: 84px; height: 44px; font-size: 20px; font-weight: 800; text-align: center; border: 1.5px solid var(--line-2); border-radius: var(--r-sm); } .wv-pkg li.none { color: var(--muted); }
 @media (max-width: 700px) { .wv-where b { font-size: 48px; } .wv-need b { font-size: 42px !important; } .wv-route li { grid-template-columns: 24px 70px 1fr auto; } .wv-route li button { grid-column: 1 / -1; justify-self: start; } }
+
+/* shared dock calendar (WMS -> Calendar) */
+.sc-tools { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; } .sc-key { display: inline-flex; align-items: center; gap: 6px; } .sc-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.sc-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: 1px; } .sc-dot.own { background: var(--orange); } .sc-dot.other { background: var(--ink); }
+.calday em.sc-chip { font-size: 12px; font-weight: 700; padding: 2px 6px; border-radius: var(--r-sm); align-self: flex-start; max-width: 100%; } .sc-chip.own { background: var(--orange); color: #fff; } .sc-chip.other { background: var(--ink); color: #fff; }
+.sc-row b small { font-size: 13.5px; font-weight: 600; color: var(--muted); } .sc-row .r { display: grid; gap: 4px; justify-items: end; } .sc-row .r b { font-size: 16px; font-variant-numeric: tabular-nums; }
+.sc-row .sc-notime { color: var(--muted); font-weight: 600; } .sc-row.gone > div b, .sc-row.gone > div span { text-decoration: line-through; color: var(--muted); }
+.sc-tools .sc-check { white-space: nowrap; font-weight: 600; } .sc-tools .sc-check input { width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0; flex: none; appearance: auto; accent-color: var(--orange); }
+.sc-tools .sc-dot { margin-right: 0; } .sc-tools .sc-dot.other { background: var(--ink); box-shadow: 0 0 0 1.5px currentColor; }
