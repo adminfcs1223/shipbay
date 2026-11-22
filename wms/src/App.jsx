@@ -2,7 +2,7 @@
 // (created in the dashboard's Admin settings); admins can also use their dashboard email login.
 // Receiving (product → pallets + cartons → labels), Pallets (carton scan → put-away → received), Locations (the map).
 import { useEffect, useRef, useState } from 'react';
-import { supabase, WMS_ROLES, EMBED, PARENT_ORIGINS, setAccess, signOut } from './lib';
+import { PALLET_SCREEN, supabase, WMS_ROLES, EMBED, PARENT_ORIGINS, setAccess, signOut } from './lib';
 import Today from './Today';
 import Orders from './Orders';
 import Receive from './Receive.jsx';
@@ -57,7 +57,7 @@ function Standalone() {
 }
 
 function Shell({ me }) {
-  const [page, setPage] = useState(() => (['#receive', '#pallets', '#orders', '#locations'].includes(window.location.hash) ? window.location.hash.slice(1) : 'today'));
+  const [page, setPage] = useState(() => (['#receive', ...(PALLET_SCREEN ? ['#pallets'] : []), '#orders', '#locations'].includes(window.location.hash) ? window.location.hash.slice(1) : 'today'));
   const [startBrand, setStartBrand] = useState(null);   // a brand handed from Today to Orders
   const [orgs, setOrgs] = useState(null);
   const [pallets, setPallets] = useState(null);
@@ -80,13 +80,13 @@ function Shell({ me }) {
 
   const brandName = (id) => (orgs || []).find((o) => o.id === id)?.name || 'Unknown brand';
   const merge = (rows) => setPallets((cur) => { const m = new Map((cur || []).map((r) => [r.id, r])); rows.forEach((r) => m.set(r.id, { ...m.get(r.id), ...r })); return [...m.values()].sort((a, b) => (b.received_at > a.received_at ? 1 : b.received_at < a.received_at ? -1 : b.batch_pos - a.batch_pos)); });
-  const open = (psku) => { setFind(psku); setPage('pallets'); };
+  const open = (psku) => { if (!PALLET_SCREEN) return; setFind(psku); setPage('pallets'); };
 
   return (
     <div className="wms">
       <aside className="rail">
         <div className="mark"><img src="/brand/13-mono-horizontal-white.svg" alt="shipbay." /><span>WMS</span></div>
-        <nav>{NAV.map(([k, label, d]) => (
+        <nav>{NAV.filter(([k]) => PALLET_SCREEN || k !== 'pallets').map(([k, label, d]) => (
           <button key={k} className={page === k ? 'on' : ''} onClick={() => { setFind(''); setPage(k); setNavTick((t) => t + 1); }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>{label}
           </button>
@@ -102,7 +102,7 @@ function Shell({ me }) {
         {page === 'today' && <Today key={navTick} me={me} go={(k) => { setFind(''); setPage(k); }} openBrand={(id) => { setStartBrand(id); setPage('orders'); }} />}
         {page === 'orders' && <Orders key={navTick} me={me} startBrand={startBrand} clearStart={() => setStartBrand(null)} />}
         {page === 'receive' && <Receive me={me} orgs={orgs} pallets={pallets} brandName={brandName} merge={merge} open={open} />}
-        {page === 'pallets' && <Pallets key={navTick} me={me} orgs={orgs} pallets={pallets} locations={locations} brandName={brandName} merge={merge} find={find} setFind={setFind} />}
+        {PALLET_SCREEN && page === 'pallets' && <Pallets key={navTick} me={me} orgs={orgs} pallets={pallets} locations={locations} brandName={brandName} merge={merge} find={find} setFind={setFind} />}
         {page === 'locations' && <NexusFrame />}
         <div className="phonewho"><span>{me.full_name || me.email}{me.employee_no ? ` · Employee ${me.employee_no}` : ''}</span><button onClick={() => signOut()}>{me.employee_no ? 'Switch employee' : 'Sign out'}</button></div>
       </main>

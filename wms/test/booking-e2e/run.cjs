@@ -45,6 +45,8 @@ const norm = (t) => t.replace(/\s+/g, ' ').trim();
   await p.getByRole('button', { name: 'Check whether it was received' }).click(); await p.waitForTimeout(1500); await closePrompt();
   ok((await links()).length === 1, 'settled by the lookup: still exactly one receipt');
   ok(lookups.length >= 2 && lookups.every((u) => u === '/rest/v1/rpc/wms_receipt_lookup'), `booked check used only the dedicated lookup (${lookups.length})`);
+  { const due = norm(await p.locator('[data-testid=due]').innerText()); ok(/SYN-REC-BOOK/.test(due) && /SYN-LP × 300/.test(due) && !/SYN-REC-WAIT/.test(due), `shipments to receive are listed with their items (unapproved one hidden): ${due.slice(0, 110)}`); }
+  await pickBooking(/SYN-REC-BOOK/); const exp = norm(await p.locator('[data-testid=expected-items]').innerText()); ok(/SYN-LP · .* · 300 units/.test(exp), `shipment's expected items shown at receiving: ${exp.slice(0, 90)}`);
   const st1 = norm(await p.locator('[data-testid=booking-state]').innerText());
   ok(/^Partly received · 1 of 3 pallets · 10 of 30 cartons$/.test(st1), `floor progress from actual counts: ${st1}`);
 
@@ -57,10 +59,9 @@ const norm = (t) => t.replace(/\s+/g, ' ').trim();
   const held = await q(`select held, inbound_id from wms_pallets where batch_key = (select batch_key from wms_receipt_links where mode='hold')`);
   ok(held.length === 1 && held[0].held && held[0].inbound_id === S.bookings.a2, 'held pallet linked to booking two and quarantined');
 
-  // 3. unbooked receipt: the legacy route, unchanged
-  await p.locator('[data-testid=booking] select').selectOption(''); await p.waitForTimeout(200); await line(3); await press(); await closePrompt();
-  const ub = await q(`select inbound_id, held from wms_pallets where org_id = $1 order by received_at desc limit 1`, [S.orgs.A]);
-  ok(ub[0].inbound_id === null && !ub[0].held && (await links()).length === 2, 'unbooked receipt: no booking, no link, no hold');
+  // 3. shipments only: with no shipment chosen the form will not send
+  await p.locator('[data-testid=booking] select').selectOption(''); await p.waitForTimeout(200);
+  ok(/Pick the shipment/.test(await p.locator('form.entry .btn.big').innerText()) && await p.locator('form.entry .btn.big').isDisabled(), 'no shipment chosen: Receive is blocked');
 
   // 4. last of booking one: closes it on the floor; the booking row is not touched
   const before = (await q('select status, received_at, pallets, cartons from inbound_shipments where id = $1', [S.bookings.a]))[0];

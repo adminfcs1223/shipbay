@@ -57,3 +57,26 @@ main.embed { padding: 14px; } .floor { display: grid; grid-template-columns: aut
 .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 18px; font-size: 12.5px; } .legend span { display: flex; align-items: center; gap: 6px; } .legend i { width: 14px; height: 10px; background: hsl(var(--h) 70% 42%); display: inline-block; } .legend i.e { background: #0b0d10; border: 1px solid #3a3f48; } .legend i.x { background: none; border: 1px dashed #3a3f48; }
 .pal { padding: 8px 0; border-bottom: 1px solid var(--line); } .pal:last-child { border: 0; }
 .floor.compact { gap: 18px; } @media (max-width: 900px) { .floor { grid-template-columns: 1fr; } .plan { overflow: auto; } }
+
+/* dock: put-away and calendar */
+.strip.ok { border-color: var(--ok); color: var(--ok); }
+.scanflow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0 22px; }
+.scanflow form { display: grid; grid-template-columns: 44px 1fr; gap: 4px 12px; align-items: center; background: var(--panel); border: 1px solid var(--line); padding: 16px; }
+.scanflow form.now { border-color: var(--red); } .scanflow form.off { opacity: .45; }
+.scanflow form > span { font-family: var(--mono); font-size: 28px; font-weight: 700; color: var(--mut); grid-row: span 2; align-self: start; }
+.scanflow label { display: grid; gap: 6px; font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--mut); }
+.scanflow input { height: 52px; font-family: var(--mono); font-size: 22px; padding: 0 12px; border: 1px solid var(--line); background: #0b0d10; color: var(--ink); border-radius: 2px; }
+.scanflow .what { grid-column: 2; font-size: 13px; }
+.calnav { display: flex; align-items: center; gap: 10px; } .calnav b { font-family: var(--mono); min-width: 170px; text-align: center; }
+.cal { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid var(--line); background: var(--line); gap: 1px; }
+.cal .dow { background: var(--panel); padding: 6px 8px; font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--mut); }
+.cal .day { background: var(--panel); min-height: 96px; padding: 6px; display: flex; flex-direction: column; gap: 4px; } .cal .day.out { opacity: .4; } .cal .day.today { box-shadow: inset 0 0 0 1px var(--red); }
+.cal .day i { font-style: normal; font-family: var(--mono); font-size: 12px; color: var(--mut); }
+.ship { display: grid; text-align: left; border: 0; border-left: 3px solid var(--red); background: #0b0d10; color: var(--ink); padding: 4px 6px; cursor: pointer; font-size: 12px; border-radius: 2px; }
+.ship span { color: var(--mut); font-family: var(--mono); font-size: 11px; } .ship.part { border-left-color: var(--warn); } .ship.done { border-left-color: var(--ok); opacity: .7; } .ship.wait { border-left-color: var(--mut); border-left-style: dashed; }
+.legend .ship { display: inline-block; cursor: default; margin-right: 8px; }
+.shipform { background: var(--panel); border: 1px solid var(--line); padding: 18px; margin-bottom: 18px; display: grid; gap: 12px; }
+.shipform .fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; } .shipform label { display: grid; gap: 5px; font-size: 12px; color: var(--mut); font-family: var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.shipform input, .shipform select { height: 38px; padding: 0 10px; border: 1px solid var(--line); background: #0b0d10; color: var(--ink); border-radius: 2px; min-width: 0; }
+.lineitem { display: grid; grid-template-columns: 1fr 180px auto; gap: 8px; } .shipform .actions { display: flex; gap: 8px; }
+@media (max-width: 900px) { .scanflow, .shipform .fields { grid-template-columns: 1fr; } }

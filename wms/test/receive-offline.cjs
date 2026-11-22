@@ -1,3 +1,4 @@
+// Build for this test with VITE_PALLET_SCREEN=1 VITE_ALLOW_UNBOOKED=1 (it exercises the retained pallet screen and label machinery).
 // The receiving screen in a real browser with no backend: every /rest and /auth request is answered here from synthetic
 // rows, and any request to a host other than this machine or the stub is refused and counted.
 // Build first with the stub address, then run:

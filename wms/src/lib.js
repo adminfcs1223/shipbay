@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 // Same Supabase project and the same logins as dashboard.shipbay3pl.com; the WMS keeps its own session on its own host.
 export const STORAGE_KEY = 'shipbay-wms-auth';
 // Embedded in the dashboard (?embed): no session of its own. The dashboard hands over the signed-in user's access token.
+// The individual pallet section is off (Derek 2026-11-21); record in claude/wms-pallet-page-as-of-2026-11-21.md. Build with VITE_PALLET_SCREEN=1 to bring it back.
+export const PALLET_SCREEN = import.meta.env.VITE_PALLET_SCREEN === '1';
 export const EMBED = new URLSearchParams(window.location.search).has('embed');
 export const PARENT_ORIGINS = ['https://dashboard.shipbay3pl.com'];
 let access = null; const subs = new Set();

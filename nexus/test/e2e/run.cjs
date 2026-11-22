@@ -60,6 +60,22 @@ const api = (fn, body) => fetch(`http://127.0.0.1:54331/rest/v1/rpc/${fn}`, { me
   ok((await api('nexus_api_fifo', { p_key: key, p_sku: 'SYN-LP' })).status >= 400, 'API: another brand\'s product refused');
   ok((await api('nexus_api_counts', { p_key: 'nxs_wrong' })).status >= 400, 'API: wrong key refused');
 
+  // dock: book a shipment on the calendar, then put a waiting pallet away by two scans
+  await tab('Calendar'); await p.locator('[data-testid=new-shipment]').click(); const f = p.locator('[data-testid=shipment-form]');
+  await f.locator('select').first().selectOption({ label: 'Synthetic Records' }); await p.waitForTimeout(500);
+  await f.getByLabel('Reference (PO, BOL or shipment no.)').fill('SYN-CAL-1'); await f.getByLabel('Pallets', { exact: true }).fill('2');
+  await f.getByLabel('Item').selectOption({ label: 'SYN-LP · Synthetic LP' }); await f.getByLabel('Units expected').fill('240'); await f.getByText('Book it').click(); await p.waitForTimeout(900);
+  const cal = norm(await p.locator('[data-testid=calendar] .day.today').innerText()); ok(/Synthetic Records 0\/2 pallets/.test(cal), `booked shipment appears on today's calendar square: ${cal}`);
+  await p.locator('[data-testid=calendar] .day.today .ship').click(); const det = norm(await p.locator('[data-testid=shipment-detail]').innerText()); ok(/SYN-CAL-1/.test(det) && /SYN-LP Synthetic LP 240/i.test(det), `its items are on file: ${det.slice(0, 120)}`);
+  await shot('7-calendar');
+  await tab('Put-away'); const w5 = S.pallets.find((x) => x.key === 'e-a5');
+  ok(await p.locator('[data-testid=putaway-table] tbody tr').count() === 2, 'two received pallets are waiting for a position');
+  await p.locator('[data-testid=scan-pallet]').fill(w5.psku); await p.locator('[data-testid=scan-pallet]').press('Enter'); await p.waitForTimeout(300);
+  await p.locator('[data-testid=scan-position]').fill('LOC-' + S.pallets[0].loc); await p.locator('[data-testid=scan-position]').press('Enter'); await p.waitForTimeout(700);
+  ok(/already holds a pallet/i.test(await p.locator('[data-testid=putaway-msg]').innerText()), 'an occupied position is refused');
+  await p.locator('[data-testid=scan-position]').fill('LOC-P-40'); await p.locator('[data-testid=scan-position]').press('Enter'); await p.waitForTimeout(900);
+  const pm = norm(await p.locator('[data-testid=putaway-msg]').innerText()); ok(new RegExp(`${w5.psku} is in P-40\\. 36 units are now in stock`, 'i').test(pm), `two scans put the pallet away and post its stock: ${pm}`);
+  ok(await p.locator('[data-testid=putaway-table] tbody tr').count() === 1, 'it left the waiting list'); await shot('8-putaway');
   ok(blocked.length === 0, `requests outside 127.0.0.1: ${blocked.length}`);
   await browser.close(); server.close(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
 })();

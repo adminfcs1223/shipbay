@@ -2,9 +2,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, num, day, stamp } from './lib.js';
 import FloorMap from './FloorMap.jsx';
+import { Putaway, Calendar } from './Dock.jsx';
 
-const TABS = [['overview', 'Overview'], ['map', 'Locations'], ['pallets', 'Pallets'], ['fifo', 'FIFO'], ['counts', 'Cycle counts'], ['connections', 'Connections']];
-const STATUS = { open: 'Cartons to scan', counted: 'To put away', stored: 'Stored' };
+const TABS = [['overview', 'Overview'], ['calendar', 'Calendar'], ['putaway', 'Put-away'], ['map', 'Locations'], ['pallets', 'Pallets'], ['fifo', 'FIFO'], ['counts', 'Cycle counts'], ['connections', 'Connections']];
+const STATUS = { open: 'To put away', counted: 'To put away', stored: 'Stored' };
 const RESULT = { pending: 'Not counted yet', found: 'Found', misplaced: 'Wrong position', missing: 'Missing', unexpected: 'Not expected here' };
 const useRpc = (fn, args, deps) => {
   const [s, set] = useState({ data: null, error: null, n: 0 });
@@ -30,6 +31,8 @@ export default function Nexus({ me, onSignOut, embed }) {
         {ovErr && <div className="strip bad">{ovErr}</div>}
         {tab === 'overview' && <Overview ov={ov} />}
         {tab === 'map' && <><div className="head"><h1>Locations</h1></div><FloorMap admin={me.role === 'shipbay_admin'} /></>}
+        {tab === 'calendar' && <Calendar me={me} />}
+        {tab === 'putaway' && <Putaway />}
         {tab === 'pallets' && <Pallets brands={brands} />}
         {tab === 'fifo' && <Fifo brands={brands} />}
         {tab === 'counts' && <Counts brands={brands} zones={zones} />}
@@ -65,13 +68,13 @@ function Overview({ ov }) {
 function Pallets({ brands }) {
   const [org, setOrg] = useState(''); const [q, setQ] = useState(''); const [status, setStatus] = useState('');
   const [rows, err] = useRpc('nexus_pallets', { p_org: org || null, p_q: q || null }, [org, q]);
-  const list = (rows || []).filter((r) => !status || (status === 'held' ? r.held : r.status === status && !r.held));
+  const list = (rows || []).filter((r) => !status || (status === 'held' ? r.held : (status === 'open' ? ['open', 'counted'].includes(r.status) : r.status === status) && !r.held));
   return (
     <>
       <div className="head"><h1>Pallets</h1><div className="glance"><div><b>{num(list.length)}</b><small>Shown</small></div></div></div>
       <div className="filters">
         <select aria-label="Brand" value={org} onChange={(e) => setOrg(e.target.value)}><option value="">All brands</option>{brands.map((b) => <option key={b.org_id} value={b.org_id}>{b.brand}</option>)}</select>
-        <select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">Any status</option><option value="stored">Stored</option><option value="counted">To put away</option><option value="open">Cartons to scan</option><option value="held">On hold</option></select>
+        <select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">Any status</option><option value="stored">Stored</option><option value="open">To put away</option><option value="held">On hold</option></select>
         <input aria-label="Search" placeholder="Pallet, position or item…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       {err && <div className="strip bad">{err}</div>}

@@ -5,7 +5,7 @@
 // The carton labels can also be printed before Receive is pressed: the PSKU# is taken then (wms_hold_pskus) so the
 // barcodes are the real ones, and Receive uses that number. What was printed is kept on the station until it is received.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { supabase, fmtTime, sameDay } from './lib';
+import { supabase, fmtTime, sameDay, PALLET_SCREEN } from './lib';
 import { printPalletLabels, printCartonLabels, cartonCodes, linesOf, firstLabelled, sizeLabel } from './label';
 import { fetchCartons, attachCartons, sameLabels, findReceipt, lookupBookedReceipt } from './cartons.js';
 import { LabelPreview, CartonPreview, CartonSizePicker, CartonTurnPicker, useCartonSize, StatusTag, beep } from './parts.jsx';
@@ -13,6 +13,8 @@ import { progressText } from './bookingProgress';
 
 const num = (n) => Number(n || 0).toLocaleString();
 let lineId = 0;
+// Receiving is against a pre-entered shipment only (Derek 2026-11-21). The switch exists for the station test of the unchanged label/print machinery.
+const NEED_SHIPMENT = import.meta.env.VITE_ALLOW_UNBOOKED !== '1';
 const newLine = () => ({ id: ++lineId, prod: null, off: false, what: '', q: '', cartons: '', upc: '', fba: false, cle: false });
 const lineReady = (l) => !!(l.prod || (l.off && l.what.trim()));
 const lineCartons = (l) => (l.cle || l.cartons === '' ? 0 : Math.max(0, Math.min(500, Math.round(Number(l.cartons) || 0))));
@@ -55,6 +57,13 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const [mode, setMode] = useState(flight?.form.mode || 'partial');
   const [holdWhy, setHoldWhy] = useState(flight?.form.holdWhy || '');
   const [bookings, setBookings] = useState(null);
+  const [due, setDue] = useState(null);   // every shipment set to be received
+  const wantBooking = useRef('');
+  const loadDue = () => supabase.rpc('wms_shipments_due').then(({ data, error }) => setDue(error ? [] : data || []));
+  useEffect(() => { loadDue(); }, []);
+  const pickDue = (d) => { if (d.org_id === org) { setBooking(d.id); setMode('partial'); setHoldWhy(''); } else { wantBooking.current = d.id; setOrg(d.org_id); } };
+  const [expected, setExpected] = useState([]);   // what the chosen shipment says is on it
+  useEffect(() => { setExpected([]); if (booking) supabase.rpc('wms_booking_lines', { p_inbound: booking }).then(({ data }) => setExpected(data || [])); }, [booking]);
   const [hold, setHold] = useState(saved ? { pskus: saved.pskus, sig: saved.sig, full: !!saved.full } : null);   // carton labels printed before Receive
   const [holding, setHolding] = useState(false);
   const lastOrg = useRef(flight ? flight.form.org : saved ? saved.org : null);
@@ -90,7 +99,8 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
     setBookings(data || []);
   };
   useEffect(() => {
-    if (!sent) { const keep = lastBookingOrg.current === org; lastBookingOrg.current = org; if (!keep) { setBooking(''); setMode('partial'); setHoldWhy(''); } }
+    if (!sent) { const keep = lastBookingOrg.current === org; lastBookingOrg.current = org; if (!keep) { setBooking(wantBooking.current || ''); setMode('partial'); setHoldWhy(''); } }
+    wantBooking.current = '';
     setBookings(null); loadBookings(org);
   }, [org]);
   const curBooking = (bookings || []).find((b) => b.id === booking) || null;
@@ -104,7 +114,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const total = lines.reduce((s, l) => s + lineCartons(l), 0);
   const printable = total;   // an NCC product (no carton count; cle in the data) has no cartons to label
   const rows = total + lines.filter((l) => l.cle).length;   // the database writes one marker row per NCC product; carton codes are padded to this
-  const problem = booking && mode === 'hold' && !holdWhy.trim() ? 'Say why it is on HOLD' : !org ? 'Pick a brand' : !lines.every(lineReady) ? (mixed ? 'Pick every product' : 'Pick the product') : mixed && lines.some((l) => !l.cle && !lineCartons(l)) ? 'Every product needs its carton count, or NCC' : lines.some((l) => !l.cle && lineCartons(l) > 0 && !(Number(l.upc) >= 1)) ? 'Enter the units per carton' : total > 500 ? 'Up to 500 cartons on a pallet' : null;
+  const problem = NEED_SHIPMENT && org && !booking ? (bookings && bookings.length === 0 ? 'No shipment is booked for this brand' : 'Pick the shipment') : booking && mode === 'hold' && !holdWhy.trim() ? 'Say why it is on HOLD' : !org ? 'Pick a brand' : !lines.every(lineReady) ? (mixed ? 'Pick every product' : 'Pick the product') : mixed && lines.some((l) => !l.cle && !lineCartons(l)) ? 'Every product needs its carton count, or NCC' : lines.some((l) => !l.cle && lineCartons(l) > 0 && !(Number(l.upc) >= 1)) ? 'Enter the units per carton' : total > 500 ? 'Up to 500 cartons on a pallet' : null;
 
   const sig = JSON.stringify([org, n, lines.map((l) => [l.prod?.id || l.what.trim(), lineCartons(l), l.upc, l.fba, !!l.cle])]);
   const stale = !!hold && hold.sig !== sig;   // the form changed after the labels were printed
@@ -222,7 +232,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   };
   const testCarton = async () => { if (!(await printCartonLabels([done[0]], (p) => brandName(p.org_id), [firstLabelled(done[0])?.seq], csize, cturn))) printFail('test label'); };   // one label, to check size and direction before the full run
   const printCartons = async () => { if (!(await printCartonLabels(done, (p) => brandName(p.org_id), null, csize, cturn))) return printFail('carton labels'); setPrinted((x) => ({ ...x, cartons: true, fail: null })); };
-  const toPallet = () => { const first = done[0]; setDone(null); open(first.psku); };
+  const toPallet = () => { const first = done[0]; setDone(null); loadDue(); open(first.psku); };
 
   // what the labels will look like, from what is typed so far
   const sample = useMemo(() => draft([hold?.pskus[0] || 'PSKU-______'])[0], [lines, n, mixed, total, me, hold, org]);
@@ -258,6 +268,15 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
       <div className="station">
         <form className="panel entry" onSubmit={receive}>
           <fieldset className="lockset" disabled={locked}>
+          {NEED_SHIPMENT && <div className="duelist" data-testid="due">
+            <div className="step"><i>·</i><h3>Shipments to receive</h3><span>tap the one at the dock</span></div>
+            {due === null ? <div className="empty">Loading shipments…</div> : due.length === 0 ? <div className="empty">Nothing is booked. Book the shipment in Nexus (Calendar) first.</div> : due.map((d) => (
+              <button type="button" key={d.id} className={`due ${d.id === booking ? 'on' : ''}`} onClick={() => pickDue(d)} aria-pressed={d.id === booking}>
+                <b>{d.brand}</b><span>{d.reference}</span>
+                <small>{d.expected_at ? new Date(d.expected_at + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'No date'} · {d.received_pallets} of {d.expected_pallets} pallets in{d.lines.length ? ' · ' + d.lines.map((x) => `${x.sku} × ${num(x.qty)}`).join(', ') : ' · no items listed'}</small>
+              </button>
+            ))}
+          </div>}
           <div className="step"><i>1</i><h3>Brand</h3></div>
           {orgs === null ? <div className="empty">Loading brands…</div> : orgs.length === 0 ? <div className="empty">No brands on file yet.</div> : (
             <div className="brands">{orgs.map((o) => (
@@ -265,14 +284,17 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
             ))}</div>
           )}
 
+          {org && bookings && bookings.length === 0 && NEED_SHIPMENT && <div className="strip bad" data-testid="no-shipment"><span>No shipment is booked for this brand. Book it in Nexus (Calendar) first, then receive against it.</span></div>}
           {org && bookings && bookings.length > 0 && (<>
-            <div className="step"><i>·</i><h3>Booking</h3><span>optional</span></div>
+            <div className="step"><i>·</i><h3>Shipment</h3><span>{NEED_SHIPMENT ? 'which delivery is this?' : 'optional'}</span></div>
             <div className="bookingrow" data-testid="booking">
               <select value={booking} onChange={(e) => { setBooking(e.target.value); setMode('partial'); setHoldWhy(''); }} aria-label="Booking">
-                <option value="">No booking (unbooked receipt)</option>
+                <option value="">{NEED_SHIPMENT ? 'Choose the shipment…' : 'No booking (unbooked receipt)'}</option>
                 {bookings.map((b) => <option key={b.id} value={b.id}>{b.reference} · {b.received_pallets} of {b.expected_pallets} pallets in</option>)}
               </select>
               {curBooking && <div className="bookingstate" data-testid="booking-state"><BookingProgress b={curBooking} /></div>}
+              {curBooking && expected.length > 0 && <div className="expected" data-testid="expected-items"><small>Expected on this shipment. Check the pallet against it; tap one to receive it:</small>
+                {expected.map((x) => <button type="button" key={x.sku_id} className="btn sm" onClick={() => { const pr = (products || []).find((p) => p.id === x.sku_id); if (pr) setLines((ls) => ls.map((l, i) => (i === 0 ? { ...l, prod: pr, q: '' } : l))); }}>{x.sku} · {x.name} · {num(x.qty_expected)} units</button>)}</div>}
               {curBooking && (
                 <div className="bookingmode" role="radiogroup" aria-label="This receipt">
                   {[['partial', 'More to come'], ['hold', 'On HOLD'], ['final', 'Last of this booking']].map(([k, t]) => (
@@ -335,7 +357,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
       </div>
 
       <section className="panel">
-        <div className="panelhead"><h3>Not finished</h3><span>{waiting.length} pallet{waiting.length === 1 ? '' : 's'}</span></div>
+        <div className="panelhead"><h3>{PALLET_SCREEN ? 'Not finished' : 'Waiting for put-away in Nexus'}</h3><span>{waiting.length} pallet{waiting.length === 1 ? '' : 's'}</span></div>
         {pallets === null ? <div className="empty">Loading…</div> : waiting.length === 0 ? <div className="empty">Every pallet is put away.</div> : (
           <table className="grid pick">
             <thead><tr><th>PSKU#</th><th>Brand</th><th>Product</th><th className="n">Cartons</th><th>Received</th><th>By</th><th>Next step</th></tr></thead>
@@ -381,7 +403,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
               ))}</div>
             )}
             {doneCartons > 0 && doneLines.length <= 1 && <div className="proof"><CartonPreview pallet={done[0]} brand={brandName(done[0].org_id)} carton={firstLabelled(done[0])} size={csize} turn={cturn} width={300} /><small>How it leaves the printer</small></div>}
-            <button className={`btn big ${printed.pallet && (printed.cartons || !doneCartons) ? 'go' : ''}`} onClick={toPallet}>{doneCartons ? 'Labels are on · scan the cartons' : 'Label is on · put it away'}</button>
+            <button className={`btn big ${printed.pallet && (printed.cartons || !doneCartons) ? 'go' : ''}`} onClick={toPallet}>{!PALLET_SCREEN ? 'Labels are on · next pallet' : doneCartons ? 'Labels are on · scan the cartons' : 'Label is on · put it away'}</button>
           </div>
         </div>
       )}
