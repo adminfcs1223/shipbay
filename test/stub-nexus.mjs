@@ -29,7 +29,7 @@ export function makeStub({ test = true, warehouse = 'HILLSBOROUGH-TEST', key = '
       ...[...events.values()].map((e) => ({ company: 'SHIPBAY', mine: true, ...e }))] });
     const ev = path.match(/^\/v1\/calendar\/([^/]+)$/)?.[1];
     if (ev && (m === 'PUT' || m === 'DELETE')) { const id = decodeURIComponent(ev); const was = events.get(id); const next = m === 'DELETE' ? { ...was, status: 'cancelled' } : { id, ends_at: null, pallets: null, status: 'scheduled', ...was, ...body };
-      events.set(id, next); changes.push({ seq: ++seq, at: new Date().toISOString(), kind: m === 'DELETE' ? 'calendar.cancelled' : was ? 'calendar.changed' : 'calendar.created', v: 1, company: 'SHIPBAY', event: id }); return j({ ok: true, event: id, changed: true, created: !was, status: next.status }); }
+      events.set(id, next); changes.push({ seq: ++seq, at: new Date().toISOString(), kind: m === 'DELETE' ? 'calendar_cancelled' : was ? 'calendar_changed' : 'calendar_added', v: 1, company: 'SHIPBAY', event: id }); return j({ ok: true, event: id, changed: true, created: !was, status: next.status }); }
     if (/^\/v1\/pallets\//.test(path)) return j({ ok: false, error: 'forbidden', message: 'key lacks the scope' }, 403);
     return j({ ok: false, error: 'not_found', message: 'unknown path or method' }, 404);
   }

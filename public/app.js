@@ -24,7 +24,20 @@
       d.append(el('summary', null, `${c.method} /api/nexus${c.path} → HTTP ${c.status}`), el('pre', null, (c.query ? c.query + '\n' : '') + JSON.stringify(c.data, null, 1))); box.append(d); }
   }
   function showGate(text) { $('app').hidden = true; $('gate').hidden = false; say(text || '', !!text); $('pass').focus(); }
-  const when = (t) => new Date(t).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  // Every time on this page is America/New_York, whatever zone the browser is in.
+  const ZONE = 'America/New_York';
+  const when = (t) => new Date(t).toLocaleString('en-US', { timeZone: ZONE, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' ET';
+  const clock = (t) => new Date(t).toLocaleString('en-US', { timeZone: ZONE, hour: 'numeric', minute: '2-digit' });
+  const parts = (ms) => Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: ZONE, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  const wall = (ms) => { const q = parts(ms); return `${q.year}-${q.month}-${q.day}T${q.hour}:${q.minute}`; };   // an instant as Eastern wall-clock, in the form a datetime field takes
+  // Eastern wall-clock "YYYY-MM-DDTHH:MM" -> the instant, with the right offset for that date (EST or EDT)
+  function fromEastern(v) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v || ''); if (!m) return null;
+    const want = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]); let ms = want;
+    for (let i = 0; i < 3; i++) { const q = parts(ms); ms += want - Date.UTC(+q.year, +q.month - 1, +q.day, +q.hour, +q.minute); }
+    return wall(ms) === v.slice(0, 16) ? new Date(ms) : null;   // null for a wall-clock time that does not exist (spring forward)
+  }
+
 
   // The floor is drawn from Nexus's own answer: every position sits on the square (x, y) Nexus gives it, on the grid
   // Nexus describes in layout.grid. Nothing about the layout is written into this page.
@@ -69,9 +82,12 @@
     if (!cal.events.length) { const r = body.insertRow(); const c = r.insertCell(); c.colSpan = 7; c.className = 'empty'; c.textContent = 'Nothing is scheduled in the next 30 days.'; return; }
     for (const e of [...cal.events].sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at))) {
       const r = body.insertRow(); if (e.status === 'cancelled') r.className = 'gone';
-      [when(e.starts_at), e.company, e.direction, e.pallets ?? '—', e.status, e.mine ? e.id : 'private'].forEach((v, i) => { const c = r.insertCell(); c.textContent = String(v); if (i === 3) c.className = 'n'; });
+      r.dataset.event = e.mine ? e.id : ''; r.dataset.company = e.company; r.dataset.start = e.starts_at;
+      [when(e.starts_at).replace(/ ET$/, '') + (e.ends_at ? ` to ${clock(e.ends_at)}` : '') + ' ET', e.company, e.direction, e.pallets ?? '—', e.status, e.mine ? e.id : 'private'].forEach((v, i) => { const c = r.insertCell(); c.textContent = String(v); if (i === 3) c.className = 'n'; });
       const c = r.insertCell();
-      if (e.mine && e.status !== 'cancelled' && /^DEV-/.test(e.id)) { const b = el('button', 'btn sm', 'Cancel'); b.type = 'button'; b.addEventListener('click', async () => { try { await api('/calendar/' + encodeURIComponent(e.id), { method: 'DELETE' }); await load(); } catch (x) { if (x.message !== 'passcode') say(x.message, true); } }); c.append(b); }
+      if (e.mine && e.status !== 'cancelled' && /^DEV-/.test(e.id)) {
+        const ed = el('button', 'btn sm ghost', 'Edit'); ed.type = 'button'; ed.addEventListener('click', () => startEdit(e)); c.append(ed);
+        const b = el('button', 'btn sm', 'Cancel'); b.type = 'button'; b.addEventListener('click', async () => { try { await api('/calendar/' + encodeURIComponent(e.id), { method: 'DELETE' }); await load(); } catch (x) { if (x.message !== 'passcode') say(x.message, true); } }); c.append(b); }
     }
   }
   function drawFeed(feed) {
@@ -89,14 +105,24 @@
     $('gate').hidden = true; $('app').hidden = false;
   }
   $('gate').addEventListener('submit', async (e) => { e.preventDefault(); pass = $('pass').value; try { sessionStorage.setItem('preview-pass', pass); } catch { /* ignore */ } $('pass').value = ''; say('Loading…'); try { await load(); say(''); } catch (x) { if (x.message !== 'passcode') say(x.message, true); } });
+  let editing = null;   // the id of the own event being changed, or null when publishing a new one
+  function startEdit(e) {
+    editing = e.id; $('dir').value = e.direction; $('start').value = wall(Date.parse(e.starts_at)); $('end').value = e.ends_at ? wall(Date.parse(e.ends_at)) : ''; $('pal').value = e.pallets ?? 0;
+    $('save').textContent = `Save changes to ${e.id}`; $('stop').hidden = false; $('newev').dataset.editing = e.id; $('start').focus();
+  }
+  function stopEdit() { editing = null; $('save').textContent = 'Publish a synthetic event'; $('stop').hidden = true; delete $('newev').dataset.editing; }
+  $('stop').addEventListener('click', stopEdit);
   $('newev').addEventListener('submit', async (e) => {
-    e.preventDefault(); const start = new Date($('start').value); if (Number.isNaN(start.getTime())) return say('Pick when it starts.', true);
-    const id = 'DEV-' + Date.now().toString(36).toUpperCase();
-    try { await api('/calendar/' + id, { method: 'PUT', body: { direction: $('dir').value, starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 2 * 36e5).toISOString(), pallets: Number($('pal').value), status: 'scheduled' } }); say(`Published ${id} to the Nexus test floor.`); await load(); }
+    e.preventDefault(); const start = fromEastern($('start').value); const end = $('end').value ? fromEastern($('end').value) : null;
+    if (!start) return say('Pick when it arrives (Eastern Time).', true); if ($('end').value && !end) return say('Pick a valid departure time (Eastern Time).', true);
+    if (end && end <= start) return say('Departure must be after arrival.', true);
+    const id = editing || 'DEV-' + Date.now().toString(36).toUpperCase();
+    try { await api('/calendar/' + id, { method: 'PUT', body: { direction: $('dir').value, starts_at: start.toISOString(), ends_at: (end || new Date(start.getTime() + 2 * 36e5)).toISOString(), pallets: Number($('pal').value), status: 'scheduled' } });
+      say(`${editing ? 'Updated' : 'Published'} ${id} on the Nexus test floor.`); stopEdit(); await load(); }
     catch (x) { if (x.message !== 'passcode') say(x.message, true); }
   });
   (async () => {
-    const d = new Date(Date.now() + 864e5); d.setHours(10, 0, 0, 0); $('start').value = new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
+    { const t = wall(Date.now() + 864e5).slice(0, 10); $('start').value = `${t}T10:00`; $('end').value = `${t}T12:00`; }   // tomorrow, 10 to 12 Eastern
     try { const s = await (await fetch('/api/nexus/status', { cache: 'no-store' })).json(); if (!s.ready) { say('This preview is not configured yet: its server-side secrets are missing.', true); return; } } catch { say('The preview function did not answer.', true); return; }
     if (!pass) return showGate();
     say('Loading…'); try { await load(); say(''); } catch (x) { if (x.message !== 'passcode') say(x.message, true); }

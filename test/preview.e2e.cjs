@@ -5,7 +5,7 @@ let pass = 0, fail = 0; const ok = (c, w) => { c ? pass++ : fail++; console.log(
 (async () => {
   const srv = spawn('node', [path.join(__dirname, 'serve.mjs')], { stdio: ['ignore', 'pipe', 'inherit'] }); await new Promise((r) => srv.stdout.on('data', (d) => /READY/.test(d) && r()));
   const browser = await chromium.launch({ executablePath: process.env.CHROME || undefined }); const outside = [];
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 1100 } });
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 1100 }, timezoneId: process.env.TZ_ID || 'Asia/Tokyo' });   // a browser far from New York, on purpose
   await ctx.route('**/*', (r) => { const h = new URL(r.request().url()).hostname; if (h === '127.0.0.1') return r.fallback(); outside.push(r.request().url()); return r.abort(); });
   const p = await ctx.newPage(); const errors = []; p.on('pageerror', (e) => errors.push(e.message)); p.on('console', (m) => m.type() === 'error' && !/status of 401/.test(m.text()) && errors.push(m.text()));   // the wrong-passcode step answers 401 on purpose
   await p.goto('http://127.0.0.1:4610/'); await p.waitForSelector('#gate:not([hidden])');
@@ -40,15 +40,23 @@ let pass = 0, fail = 0; const ok = (c, w) => { c ? pass++ : fail++; console.log(
   ok(await p.locator('.pos[data-code="P-31"]').getAttribute('data-state') === 'mine' && await p.locator('.pos[data-code="P-01"]').getAttribute('data-state') === 'other', 'own pallet shown by id; the other company shown as occupied only');
   ok(!/hidden/.test(await p.locator('.pos[data-code="P-01"]').innerText()), "the other company's pallet id is not shown");
   ok(await p.locator('[data-testid=raw] .rawcall[data-path="/calendar"][data-status="200"]').count() >= 1 && /"company": "SOULED"/.test(await p.locator('[data-testid=raw] .rawcall[data-path="/calendar"] pre').first().textContent()), 'the raw answer and HTTP status of each call are shown');
-  const cal0 = await p.locator('#cal tbody tr').count();
-  await p.click('#newev .btn'); await p.waitForFunction((n) => document.querySelectorAll('#cal tbody tr').length > n, cal0);
-  const row = (await p.locator('#cal tbody tr', { hasText: 'DEV-' }).innerText()).replace(/\s+/g, ' ');
-  ok(/SHIPBAY inbound 6 scheduled DEV-/.test(row), `a synthetic event is published and listed: ${row}`);
-  ok(/SOULED inbound 4 scheduled private/.test((await p.locator('#cal tbody tr', { hasText: 'SOULED' }).innerText()).replace(/\s+/g, ' ')), "the other company's event shows no reference");
-  ok(/calendar\.created/.test(await p.locator('#feed').innerText()), 'the change feed shows it');
+  ok(/America\/New_York \(ET\)/.test(await p.locator('[data-testid=zone]').innerText()), 'the calendar says its times are America/New_York');
+  // publish for 4 Dec 2026, 11:00 to 13:00 Eastern, from a browser that is not in Eastern time
+  await p.fill('#start', '2026-12-04T11:00'); await p.fill('#end', '2026-12-04T13:00'); await p.fill('#pal', '3'); await p.click('#save'); await p.waitForSelector('#cal tbody tr[data-event^="DEV-"]');
+  const mine = p.locator('#cal tbody tr[data-event^="DEV-"]'); const id = await mine.getAttribute('data-event'); const txt = async () => (await mine.innerText()).replace(/\s+/g, ' ');
+  ok(/Fri, Dec 4, 11:00 AM to 1:00 PM ET SHIPBAY inbound 3 scheduled DEV-/.test(await txt()) && await mine.getAttribute('data-start') === '2026-12-04T16:00:00.000Z', `Eastern in, the right instant out, Eastern shown: ${await txt()}`);
+  ok(/SOULED inbound 4 scheduled private/.test((await p.locator('#cal tbody tr[data-company=SOULED]').innerText()).replace(/\s+/g, ' ')), "the other company's event shows no reference");
+  ok(/calendar_added/.test(await p.locator('#feed').innerText()), 'the change feed shows it');
+  // change the same event: 12:00 to 14:00 Eastern, same id
+  await mine.locator('button', { hasText: 'Edit' }).click();
+  ok(await p.inputValue('#start') === '2026-12-04T11:00' && await p.inputValue('#end') === '2026-12-04T13:00' && new RegExp(id).test(await p.locator('#save').innerText()), 'Edit loads the event in Eastern time and names the id it will keep');
+  await p.fill('#start', '2026-12-04T12:00'); await p.fill('#end', '2026-12-04T14:00'); await p.click('#save'); await p.waitForFunction(() => /12:00 PM to 2:00 PM ET/.test(document.querySelector('#cal').innerText));
+  ok(await p.locator(`#cal tbody tr[data-event="${id}"]`).count() === 1 && await p.locator('#cal tbody tr[data-event^="DEV-"]').count() === 1 && await mine.getAttribute('data-start') === '2026-12-04T17:00:00.000Z', 'the same id, once, at the new time');
+  ok(/calendar_changed/.test(await p.locator('#feed').innerText()) && /Updated DEV-/.test(await p.locator('#msg').innerText()), 'the change feed records the change');
+  ok(/PUT \/api\/nexus\/calendar\/DEV-.* HTTP 200/.test(await p.locator('[data-testid=raw]').innerText()), 'the raw panel shows the PUT and its status');
   if (process.env.SHOT) await p.screenshot({ path: process.env.SHOT, fullPage: true });
-  await p.locator('#cal tbody tr', { hasText: 'DEV-' }).locator('button').click(); await p.waitForSelector('#cal tbody tr.gone');
-  ok(/calendar\.cancelled/.test(await p.locator('#feed').innerText()), 'cancelling marks it cancelled and the feed shows it');
+  await mine.locator('button', { hasText: 'Cancel' }).click(); await p.waitForSelector('#cal tbody tr.gone');
+  ok(/calendar_cancelled/.test(await p.locator('#feed').innerText()), 'cancelling marks it cancelled and the feed shows it');
   const html = await p.content(); ok(!/stub-staging-key/.test(html) && !/ankoqruedjujyefhrmtw/.test(html), 'no key or Nexus address anywhere in the page');
   ok(outside.length === 0, `requests from the browser to anywhere but this site: ${outside.length}`); ok(errors.length === 0, `page errors: ${errors.join(' | ') || 'none'}`);
   await browser.close(); srv.kill(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
