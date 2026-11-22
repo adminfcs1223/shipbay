@@ -16,12 +16,29 @@ let pass = 0, fail = 0; const ok = (c, w) => { c ? pass++ : fail++; console.log(
   ok(!(await p.locator('#gate').isVisible()) && await p.locator('#floor').isVisible(), 'the passcode form goes away once the preview is open');
   ok(await p.locator('.pos[data-kind=pallet]').count() === 66, 'the floor draws 66 pallet positions');
   ok(await p.locator('.pos[data-kind=staging]').count() === 2, 'and 2 staging spots');
-  ok(await p.locator('[data-block=outbound] .pos[data-kind=pallet]').count() === 36 && await p.locator('[data-block=inbound] .pos[data-kind=pallet]').count() === 30, 'left 2 x 18 = 36, right 2 x 15 = 30');
-  const box = async (sel) => p.locator(sel).first().boundingBox(); const L = await box('[data-block=outbound]'), R = await box('[data-block=inbound]'), S = await box('[data-block=staging]');
-  ok(L.x < R.x && S.x >= R.x - 1 && S.y > R.y, 'outbound on the left, inbound on the right, staging at the bottom right');
-  ok(await p.locator('.pos[data-code="P-37"]').getAttribute('data-state') === 'mine' && await p.locator('.pos[data-code="P-01"]').getAttribute('data-state') === 'other', 'own pallet shown by id; the other company shown as occupied only');
+  // Every code in its approved square. The expectation below is written from the approved layout, independently of the page.
+  const want = {}; for (let n = 1; n <= 66; n++) { const code = 'P-' + String(n).padStart(2, '0');
+    want[code] = n <= 15 ? [4, n] : n <= 30 ? [5, n - 15] : n <= 48 ? [1, n - 30] : [2, n - 48]; } want['STG-01'] = [4, 16]; want['STG-02'] = [5, 16];
+  const got = await p.$$eval('.pos', (els) => Object.fromEntries(els.map((e) => { const r = e.getBoundingClientRect(); return [e.dataset.code, { x: Number(e.dataset.x), y: Number(e.dataset.y), left: Math.round(r.left), top: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), text: e.querySelector('b').textContent }]; })));
+  const wrong = Object.keys(want).filter((c) => !got[c] || got[c].x !== want[c][0] || got[c].y !== want[c][1] || got[c].text !== c);
+  ok(Object.keys(got).length === 68 && wrong.length === 0, `all 68 squares carry the right code on the right grid square${wrong.length ? ': wrong ' + wrong.join(', ') : ''}`);
+  // ...and on screen: one left edge per column, columns in order left to right, rows in order top to bottom
+  const lefts = [1, 2, 4, 5].map((x) => [...new Set(Object.keys(want).filter((c) => want[c][0] === x).map((c) => got[c].left))]);
+  ok(lefts.every((l) => l.length === 1) && lefts[0][0] < lefts[1][0] && lefts[1][0] < lefts[2][0] && lefts[2][0] < lefts[3][0], `four straight columns on screen, outbound pair left of inbound pair: ${lefts.map((l) => l.join('/')).join(' < ')}`);
+  const tops = (codes) => codes.map((c) => got[c].top); const rising = (a) => a.every((v, i) => i === 0 || v > a[i - 1]); const col = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => 'P-' + String(a + i).padStart(2, '0'));
+  ok(rising(tops(col(1, 15))) && rising(tops(col(16, 30))) && rising(tops(col(31, 48))) && rising(tops(col(49, 66))), 'each column runs top to bottom: P-01..15, P-16..30, P-31..48, P-49..66');
+  ok(got['P-01'].top === got['P-16'].top && got['P-01'].top === got['P-31'].top && got['P-01'].top === got['P-49'].top, 'the four columns start on the same top row');
+  const under = (a, b) => got[a].left === got[b].left && got[a].top > got[b].top && got[a].top - got[b].top < got[b].h * 2;
+  ok(under('STG-01', 'P-15') && under('STG-02', 'P-30') && got['STG-01'].top === got['STG-02'].top, 'STG-01 sits directly beneath P-15 and STG-02 directly beneath P-30');
+  const lm = await p.$$eval('.mark', (els) => Object.fromEntries(els.map((e) => { const r = e.getBoundingClientRect(); return [e.dataset.landmark, { cx: r.left + r.width / 2, cy: r.top + r.height / 2, text: e.textContent }]; })));
+  const mid = (got['P-49'].left + got['P-49'].w + got['P-01'].left) / 2; const bottom = got['P-48'].top + got['P-48'].h;
+  ok(lm.exit.cy < got['P-31'].top && lm.exit.cx < mid && lm.dock.cy < got['P-01'].top && lm.dock.cx > mid, 'Exit upper left, Dock upper right');
+  ok(lm.walkway.cx > got['P-49'].left + got['P-49'].w && lm.walkway.cx < got['P-01'].left && lm.walkway.cy > got['P-01'].top && lm.walkway.cy < bottom, 'Walkway in the centre, between the two sides');
+  ok(lm.entrance.cy > bottom && Math.abs(lm.entrance.cx - mid) < 40 && lm.prep.cy > bottom && lm.prep.cx > got['P-01'].left, 'Entrance bottom centre, Prep area bottom right');
+  ok(await p.locator('.pos.clash').count() === 0 && await p.locator('.pos[data-code="RCV-DOCK"]').count() === 0, 'no two codes share a square; the dock is not drawn as a position');
+  const sum = p.locator('[data-testid=map-sum]'); ok(await sum.getAttribute('data-version') === '4' && /checksum stubsum/.test(await sum.innerText()), 'the map version and checksum from Nexus are shown');
+  ok(await p.locator('.pos[data-code="P-31"]').getAttribute('data-state') === 'mine' && await p.locator('.pos[data-code="P-01"]').getAttribute('data-state') === 'other', 'own pallet shown by id; the other company shown as occupied only');
   ok(!/hidden/.test(await p.locator('.pos[data-code="P-01"]').innerText()), "the other company's pallet id is not shown");
-  ok(await p.locator('.pos[data-code="P-16"]').count() === 0 && await p.locator('.pos[data-code="P-72"]').count() === 1, 'P-16 is not drawn; P-72 is');
   const cal0 = await p.locator('#cal tbody tr').count();
   await p.click('#newev .btn'); await p.waitForFunction((n) => document.querySelectorAll('#cal tbody tr').length > n, cal0);
   const row = (await p.locator('#cal tbody tr', { hasText: 'DEV-' }).innerText()).replace(/\s+/g, ' ');

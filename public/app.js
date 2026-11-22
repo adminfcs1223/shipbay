@@ -17,34 +17,43 @@
   function showGate(text) { $('app').hidden = true; $('gate').hidden = false; say(text || '', !!text); $('pass').focus(); }
   const when = (t) => new Date(t).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
+  // The floor is drawn from Nexus's own answer: every position sits on the square (x, y) Nexus gives it, on the grid
+  // Nexus describes in layout.grid. Nothing about the layout is written into this page.
   function drawFloor(map, occ) {
     const by = Object.fromEntries(occ.locations.map((l) => [l.code, l]));
+    const grid = (map.layout && map.layout.grid) || {}; const blocks = (map.layout && map.layout.blocks) || [];
     const floor = $('floor'); floor.replaceChildren();
-    const cell = (p) => {
+    const drawn = map.positions.filter((p) => Number.isInteger(p.x) && Number.isInteger(p.y));
+    if (!Number.isInteger(grid.cols) || !Number.isInteger(grid.rows) || !drawn.length) { floor.append(el('p', 'note', 'Nexus sent a map this preview cannot draw (no grid or no squares).')); return; }
+    const walk = blocks.find((b) => b.key === 'walkway'); const isWalk = (x) => walk && x >= walk.x[0] && x <= walk.x[1];
+    floor.style.gridTemplateColumns = Array.from({ length: grid.cols }, (_, i) => (isWalk(i + 1) ? 'minmax(48px, .45fr)' : 'minmax(0, 1fr)')).join(' ');
+    floor.style.gridTemplateRows = `auto repeat(${grid.rows}, minmax(34px, auto)) auto`;   // a landmark row above and below the squares
+    const span = (x) => `${x[0]} / ${x[1] + 1}`;
+    for (const b of blocks) {
+      if (b.key === 'walkway') { const w = el('div', 'walk'); w.style.gridColumn = span(b.x); w.style.gridRow = `${b.y[0] + 1} / ${b.y[1] + 2}`; w.dataset.block = 'walkway'; floor.append(w); continue; }
+      const t = el('div', `zone ${b.key}`); t.style.gridColumn = span(b.x); t.style.gridRow = `${b.y[0] + 1} / ${b.y[1] + 2}`; t.dataset.block = b.key; t.dataset.label = b.label; floor.append(t);
+    }
+    for (const l of map.landmarks || []) {
+      const m = el('div', `mark ${l.key}`, l.label); m.dataset.landmark = l.key; m.dataset.at = l.at;
+      if (l.edge === 'top' || l.edge === 'bottom') { m.style.gridColumn = span(l.x); m.style.gridRow = l.edge === 'top' ? '1' : String(grid.rows + 2); }
+      else { m.style.gridColumn = span(l.x || (walk ? walk.x : [1, grid.cols])); m.style.gridRow = `2 / ${grid.rows + 2}`; m.classList.add('centre'); }
+      floor.append(m);
+    }
+    const seen = new Set();
+    for (const p of drawn) {
       const o = by[p.code] || {}; const mine = (o.your_pallets || []).length; const others = (o.occupants || []).filter((c) => c.company !== 'SHIPBAY');
       const state = p.status !== 'open' ? 'off' : mine ? 'mine' : others.length ? 'other' : 'free';
-      const c = el('div', `pos ${state}`); c.dataset.code = p.code; c.dataset.state = state; c.dataset.kind = p.kind;
+      const c = el('div', `pos ${state}`); c.dataset.code = p.code; c.dataset.state = state; c.dataset.kind = p.kind; c.dataset.x = p.x; c.dataset.y = p.y;
+      c.style.gridColumn = String(p.x); c.style.gridRow = String(p.y + 1);
+      if (seen.has(`${p.x},${p.y}`)) c.classList.add('clash'); seen.add(`${p.x},${p.y}`);
       c.append(el('b', null, p.code), el('span', null, state === 'mine' ? o.your_pallets.join(', ') : state === 'other' ? others.map((x) => `${x.company} ×${x.pallets}`).join(', ') : state === 'off' ? p.status : ''));
-      return c;
-    };
-    const block = (name, title) => {
-      const ps = map.positions.filter((p) => p.block === name); if (!ps.length) return null;
-      const cols = Math.max(...ps.map((p) => p.col)); const rows = Math.max(...ps.map((p) => p.row));
-      const b = el('div', `block ${name}`); b.dataset.block = name; b.append(el('h3', null, `${title} · ${ps.length}`));
-      const g = el('div', 'grid'); g.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
-      for (let r = 1; r <= rows; r++) for (let c = 1; c <= cols; c++) { const p = ps.find((x) => x.col === c && x.row === r); g.append(p ? cell(p) : el('div', 'pos gap')); }
-      b.append(g); return b;
-    };
-    const mark = (key) => { const l = (map.landmarks || []).find((x) => x.key === key); return el('div', `mark ${key}`, l ? l.label : ''); };
-    const left = el('div', 'side left'); left.append(mark('exit'), block('outbound', 'Outbound side') || el('div'), mark('prep'));
-    const mid = el('div', 'side mid'); mid.append(mark('walkway'));
-    const right = el('div', 'side right'); right.append(mark('dock'), block('dock', 'Dock') || el('div'), block('inbound', 'Inbound side') || el('div'), block('staging', 'Staging') || el('div'), mark('entrance'));
-    floor.append(left, mid, right);
+      floor.append(c);
+    }
     const pallets = map.positions.filter((p) => p.kind === 'pallet'); const staging = map.positions.filter((p) => p.kind === 'staging');
     const used = occ.locations.filter((l) => l.used > 0).length;
     const facts = [['Pallet positions', pallets.length], ['Staging spots', staging.length], ['Occupied', used], ['Map version', map.map_version], ['Floor', map.warehouse], ['Occupancy', map.occupancy_state]];
     $('facts').replaceChildren(...facts.map(([k, v]) => { const d = el('div'); d.append(el('b', null, String(v)), el('small', null, k)); d.dataset.fact = k; return d; }));
-    $('badge').title = `checksum ${map.checksum}`;
+    $('sum').textContent = `Map version ${map.map_version} · checksum ${map.checksum}`; $('sum').dataset.version = map.map_version; $('sum').dataset.checksum = map.checksum;
   }
   function drawCalendar(cal) {
     const body = $('cal').tBodies[0]; body.replaceChildren();
