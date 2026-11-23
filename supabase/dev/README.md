@@ -15,14 +15,15 @@ that feed billing, account linking and onboarding. No `pg_net`, `pg_cron`, `http
 1. `subset.py` cuts the warehouse subset out of a schema extract and replaces staff names, phones and emails in column defaults.
    The real-to-synthetic pairs live in `scrub.local.tsv`, which is not committed.
 2. `build_payload.py` splits the subset and the candidates into migration-sized files.
-3. Each file was applied through the Supabase connector as `dev_001` .. `dev_020`.
+3. Each file was applied through the Supabase connector as `dev_001` .. `dev_024`.
 4. `fingerprint.sql` returns hashes of tables, columns, constraints, indexes, function bodies, views, triggers, policies,
    sequences and grants. The dev database matched the locally tested build on every measure except default Supabase
    grants to `service_role` on tables the candidates create.
 
 `dev_017` is the `revoke` line now in `20261130_wms_nexus_putaway.sql`. `dev_018` copies production's current
 `wms_brands` and `wms_order_brands` (they skip brands that run their own WMS). `dev_019` is `20261201_wms_nexus_departure.sql`.
-`dev_020` is `auth-dev.sql`.
+`dev_020` is `auth-dev.sql`. `dev_021`..`dev_023` are `security-dev.sql` (plus `dev_security_check()`, which lives only in the dev database).
+`dev_024` is `20261202_wms_inventory_safeguards.sql`, applied by patching in place and checked against the tested build's fingerprints.
 
 ## Synthetic records
 
@@ -38,13 +39,18 @@ only for `test-…@example.test`. No password is set by default.
 
 ## Tests
 
-- `regression.sql`: thirteen checks as the synthetic logins; rolls itself back. Passed in the hosted database.
+- `regression.sql`: fourteen checks as the synthetic logins; rolls itself back. All fourteen pass locally. The hosted database passed the first thirteen before the safeguards and a separate short check of the safeguards after.
 - `local-check.sh`: rebuilds the local database, applies every candidate, seeds twice, runs the regression.
 - `../tests/deno/run.sh`: type-checks the Edge Function and runs it under Deno against the local database.
-- `hosted-smoke.sh`: read-only checks of the deployed function with movement off. Not yet run.
+- `hosted-smoke-disabled.sh`: the deployed function with everything off; needs no login. Not yet run.
+- `hosted-smoke.sh`: read-only checks once the connection is on and movement is still off. Not yet run.
 
 See `DEPLOY.md` for the deployment steps and `PRODUCTION-DIFFERENCES.md` for the four functions that differ from production.
 
+## Deployed
+
+`nexus-bridge` version 1 is deployed to this project with JWT verification on and NO secrets: connection off, movement off, calendar and registry writes off. See `SECURITY-FINDINGS.md` for the review done before it.
+
 ## Not done here
 
-The bridge is not deployed, no Nexus credential is installed, and there is no WMS development site.
+No Nexus credential is installed, and there is no WMS development site.

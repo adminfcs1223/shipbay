@@ -1,6 +1,6 @@
 -- Database regression test for the isolated development database (shipbay-nexus-dev).
--- Runs as the synthetic logins, checks thirteen behaviours, and always ends by raising an exception so that
--- everything it did is rolled back. A pass ends with:  ROLLBACK-OK 13 checks passed: ...
+-- Runs as the synthetic logins, checks fourteen behaviours, and always ends by raising an exception so that
+-- everything it did is rolled back. A pass ends with:  ROLLBACK-OK 14 checks passed: ...
 -- A failure ends with:  FAIL <n>: ...   Either way the database is left exactly as it was.
 -- Needs the synthetic records (two brands, four logins, SYN-PO-1001..1003, one pallet on HOLD) and the v4 registry.
 -- Never run this against production.
@@ -32,8 +32,11 @@ begin
   ok := ok || 'receiving creates pallets and cartons with PSKU labels, is idempotent per request key, refuses a reused key, and posts no stock'::text;
 
   -- 2 existing put-away path and stock trigger: stock posts once, as one receipt
-  perform set_config('role', 'authenticated', true); perform nexus_putaway(pa.psku, 'P-01');
-  begin perform nexus_putaway(pa.psku, 'P-05'); raise exception 'FAIL 2: stored twice';
+  perform set_config('role', 'authenticated', true);
+  begin perform nexus_putaway(pa.psku, 'P-01'); raise exception 'FAIL 2: the old direct put-away stored a pallet in a shared position';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%shared Nexus position%' then raise exception 'FAIL 2: %', sqlerrm; end if; end;
+  j := wms_putaway_begin(pa.psku, 'P-01'); perform set_config('role', 'service_role', true); perform wms_nexus_op_commit((j ->> 'op')::uuid); perform set_config('role', 'authenticated', true);
+  begin perform wms_putaway_begin(pa.psku, 'P-05'); raise exception 'FAIL 2: stored twice';
   exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%already put away%' then raise exception 'FAIL 2: %', sqlerrm; end if; end;
   perform set_config('role', 'postgres', true);
   if (select coalesce(sum(qty), 0) from inventory_moves where ref_id = pa.id) <> 100 or (select count(*) from inventory_moves where ref_id = pa.id and reason = 'receive') <> 1 or (select count(*) from inventory_moves where ref_id = pa.id) <> 1 then raise exception 'FAIL 2: ledger'; end if;
@@ -43,7 +46,7 @@ begin
   -- 3 HOLD safeguard at the table
   perform set_config('role', 'authenticated', true);
   begin perform nexus_putaway(ph.psku, 'P-06'); raise exception 'FAIL 3: held pallet stored';
-  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%on HOLD%' then raise exception 'FAIL 3: %', sqlerrm; end if; end;
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%on HOLD%' and sqlerrm not like '%shared Nexus position%' then raise exception 'FAIL 3: %', sqlerrm; end if; end;
   begin perform wms_putaway_begin(ph.psku, 'P-06'); raise exception 'FAIL 3: held pallet accepted by the bridge path';
   exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%on HOLD%' then raise exception 'FAIL 3: %', sqlerrm; end if; end;
   perform set_config('role', 'postgres', true);
@@ -178,11 +181,44 @@ begin
   j := wms_release_begin(pa.psku, 'P-20', 'moved_off_shared_floor', true); perform set_config('role', 'service_role', true); perform wms_nexus_op_commit((j ->> 'op')::uuid); perform set_config('role', 'postgres', true);
   if (select status || '/' || coalesce(location_id::text, 'no position') from wms_pallets where id = pa.id) <> 'off_floor/no position' or (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'OFF-FLOOR') <> 95
      or (select coalesce(sum(m.qty), 0) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-20') <> 0 or (select sum(qty) from inventory_moves) <> n then raise exception 'FAIL 13: off the floor'; end if;
-  perform set_config('role', 'authenticated', true); j := wms_putaway_begin(pa.psku, 'P-21'); perform set_config('role', 'service_role', true); perform wms_nexus_op_commit((j ->> 'op')::uuid); perform set_config('role', 'postgres', true);
+  perform set_config('role', 'authenticated', true);
+  begin perform wms_wave_unconfirm(task); raise exception 'FAIL 13: a stop was reopened for a pallet that has left the floor';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%has left the shared floor%' then raise exception 'FAIL 13: %', sqlerrm; end if; end;
+  j := wms_putaway_begin(pa.psku, 'P-21'); perform set_config('role', 'service_role', true); perform wms_nexus_op_commit((j ->> 'op')::uuid); perform set_config('role', 'postgres', true);
   if (select l.code from wms_pallets p join locations l on l.id = p.location_id where p.id = pa.id and p.status = 'stored') is distinct from 'P-21' or (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-21') <> 95
      or (select coalesce(sum(m.qty), 0) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'OFF-FLOOR') <> 0 or (select sum(qty) from inventory_moves) <> n
      or (select count(*) from inventory_moves where ref_type = 'wms_pallet' and ref_id = pa.id and reason in ('receive', 'adjust')) <> 1 then raise exception 'FAIL 13: back on the floor'; end if;
   ok := ok || 'a part-picked pallet (95 of 100 left) moves, leaves the shared floor and comes back with 95 at each step, total unchanged, one receipt and no adjustment; floor staff cannot force a correction or read the reconciliation journal'::text;
+
+  -- 14 inventory safeguards: reopen follows the pallet; the old put-away paths cannot touch shared positions; stock without a stored pallet is not offered for picking
+  n := (select sum(qty) from inventory_moves);
+  perform set_config('request.jwt.claims', cf, true); perform set_config('role', 'authenticated', true); perform wms_wave_unconfirm(task); perform set_config('role', 'postgres', true);
+  if (select coalesce(sum(m.qty), 0) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-01') <> 0 or (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-21') <> 100
+     or (select sum(qty) from inventory_moves) <> n + 5 or (select l.code from wms_wave_tasks t join locations l on l.id = t.location_id where t.id = task) <> 'P-21' then raise exception 'FAIL 14: reopen did not follow the pallet'; end if;
+  update wms_pallets set status = 'counted', counted_at = now(), location_id = (select id from locations where code = 'P-30') where id = pd.id;   -- counted, with a suggested position: the state the old paths expect
+  perform set_config('role', 'authenticated', true);
+  begin perform nexus_putaway(pd.psku, 'P-30'); raise exception 'FAIL 14: old put-away stored a pallet in a shared position';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%shared Nexus position%' then raise exception 'FAIL 14: %', sqlerrm; end if; end;
+  begin perform wms_putaway(pd.id, pd.psku, 'P-30'); raise exception 'FAIL 14: old station put-away stored a pallet in a shared position';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%shared Nexus position%' then raise exception 'FAIL 14: %', sqlerrm; end if; end;
+  perform set_config('role', 'postgres', true);
+  begin update wms_pallets set status = 'stored', location_id = (select id from locations where code = 'P-30') where id = pd.id; raise exception 'FAIL 14: a direct write stored a pallet in a shared position';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%shared Nexus position%' then raise exception 'FAIL 14: %', sqlerrm; end if; end;
+  begin update wms_pallets set location_id = (select id from locations where code = 'P-31') where id = pa.id; raise exception 'FAIL 14: a direct write moved a pallet between shared positions';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%through Nexus%' then raise exception 'FAIL 14: %', sqlerrm; end if; end;
+  begin update wms_pallets set location_id = null, status = 'counted' where id = pa.id; raise exception 'FAIL 14: a direct write took a pallet out of a shared position';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%through Nexus%' then raise exception 'FAIL 14: %', sqlerrm; end if; end;
+  -- cancel the wave, take the pallet off the shared floor: 100 at OFF-FLOOR and 100 still on the books at P-40 (a departed pallet). None of it is offered.
+  op := (select wave_id from wms_wave_tasks where id = task); perform set_config('role', 'authenticated', true); perform wms_wave_cancel(op);
+  j := wms_release_begin(pa.psku, 'P-21', 'moved_off_shared_floor', true); perform set_config('role', 'service_role', true); perform wms_nexus_op_commit((j ->> 'op')::uuid);
+  perform set_config('role', 'authenticated', true); j := wms_wave_start(o1); perform set_config('role', 'postgres', true);
+  if jsonb_typeof(j -> 'wave') <> 'null' or (j -> 'short' -> 0 ->> 'on_file')::int <> 0 then raise exception 'FAIL 14: stock with no stored pallet was offered for picking: %', j; end if;
+  if (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where l.code in ('OFF-FLOOR', 'P-40')) <> 200 then raise exception 'FAIL 14: setup'; end if;
+  -- back on the shared floor through Nexus, it is offered again, at its new position
+  perform set_config('role', 'authenticated', true); j := wms_putaway_begin(pa.psku, 'P-23'); perform set_config('role', 'service_role', true); perform wms_nexus_op_commit((j ->> 'op')::uuid);
+  perform set_config('role', 'authenticated', true); j := wms_wave_start(o1); perform set_config('role', 'postgres', true);
+  if (select l.code from wms_wave_tasks t join locations l on l.id = t.location_id where t.id = (j -> 'wave' -> 'tasks' -> 0 ->> 'id')::uuid) is distinct from 'P-23' then raise exception 'FAIL 14: not offered after returning: %', j; end if;
+  ok := ok || 'safeguards: a reopened stop returns units to where the pallet stands now; the old put-away paths and direct writes cannot store, move or remove a pallet at a shared position; stock at OFF-FLOOR or left on the books at a vacated position is not offered for picking, and is offered again once the pallet is back through Nexus'::text;
 
   -- 12 ledger integrity
   if exists (select 1 from inventory_moves where location_id is null) or (select sum(qty) from inventory_moves) <> (select sum(on_hand) from inventory_levels) then raise exception 'FAIL 12'; end if;
