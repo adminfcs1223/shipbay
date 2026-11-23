@@ -97,7 +97,7 @@ export async function runStage(io, stage) {
       check('the stock ledger is the one receipt from the first placement', ledger(s), [1, KEEP.units]);
       check('the journal is the one put-away from the first placement', s.ops.map((o) => [o.psku, o.kind, o.state]), [[KEEP.psku, 'assign', 'done']]);
       check('the OFF-FLOOR holding location exists, is not shared and cannot be picked from', s.off_floor, { exists: true, pickable: false, shared: false });
-      check('the void safety rules are installed (candidate 20261204): the partial-failure stage depends on them', s.rules?.void_safety, true);
+      check('the void and unit-count safety rules are installed (candidate 20261204): the undo stage depends on them', [s.rules?.void_safety, s.rules?.unit_safety], [true, true]);
       check('the one synthetic order is waiting', s.orders.map((o) => [o.number, o.status, o.org]), [['SYN-ORD-1', 'new', ORG_MAILERS]]);
       const { f, at } = await floor();
       check('Nexus: test floor, map version 4, the agreed checksum, moves enabled', [f.warehouse, f.map_version, f.checksum, f.moves_enabled], ['HILLSBOROUGH-TEST', 4, MAP_CHECKSUM, true]);
@@ -272,14 +272,18 @@ export async function runStage(io, stage) {
     async undo() {
       const s1 = await keepIntact('before'); const c = cast(s1); const F2 = c.F2.psku; let s;
       check('start: the pallet is open and unplaced', [c.F2].map((p) => [p.status, p.location, p.held]), [['open', null, false]]);
+      check('start: the void and unit-count safety rules are installed, or this stage sends nothing', [s1.rules?.void_safety, s1.rules?.unit_safety], [true, true]);
       const waiting = async () => { const r = await call('admin', 'GET', '/reconcile'); return [r.status, r.in_sync, r.differences, r.waiting.map((w) => [w.pallet, w.kind, w.state, w.nexus_has_it_at])]; };
       check('ShipBay and Nexus agree before the fault', await waiting(), [200, true, [], []]);
       await lossy('floor', '/putaway', { psku: F2, location: 'P-18' });
       const sp = await snap(); const VOID = { p_id: c.F2.id, p_reason: 'Synthetic: not on the floor' };
       const nv1 = await refused(() => io.rpc('admin', 'wms_void_pallet', VOID)); ok('a void is refused while Nexus has not answered the put-away', /cannot be voided yet: it has a request for P-18/.test(String(nv1)), nv1);
+      const UNITS = { p_pallet: c.F2.id, p_item: null, p_units: 1 };
+      const nu1 = await refused(() => io.rpc('floor', 'wms_set_units', UNITS)); ok('a unit-count change is refused while Nexus has not answered', /cannot be changed yet: it has a request for P-18/.test(String(nu1)), nu1);
       await io.faultHold(F2, 'Synthetic: wrong label found while waiting for Nexus');
       const r2 = await call('floor', 'POST', '/pending/retry'); check('Nexus says yes on the retry, ShipBay cannot record a pallet on HOLD: out of sync', [r2.status, r2.results.map((x) => [x.pallet, x.kind, x.to, x.ok, x.error])], [200, [[F2, 'assign', 'P-18', false, 'out_of_sync']]]);
       const nv2 = await refused(() => io.rpc('admin', 'wms_void_pallet', VOID)); ok('a void is refused while the request is out of sync: an admin settles it first', /Nexus accepted P-18 and ShipBay has not recorded it/.test(String(nv2)), nv2);
+      const nu2 = await refused(() => io.rpc('admin', 'wms_correct_units', { ...UNITS, p_reason: 'Synthetic recount' })); ok('a count correction is refused while the request is out of sync', /Nexus accepted P-18 and ShipBay has not recorded it/.test(String(nu2)), nu2);
       s = await snap(); check('ShipBay posted no stock for it and the refused voids changed nothing', [grew(s1, s), grew(sp, s), row(s, F2)], [[0, 0], [0, 0], ['open', null, 0, 0, 0, 0, 0, 0]]);
       check('P-18 stays reserved in Nexus', (await floor()).at('P-18'), { mine: [F2], used: 1 });
       check('reconciliation shows it waiting', await waiting(), [200, false, [], [[F2, 'assign', 'out_of_sync', 'P-18']]]);

@@ -49,7 +49,10 @@ begin
     'off_floor', (select jsonb_build_object('exists', true, 'pickable', l.pickable, 'shared', coalesce(l.shared, false)) from locations l where l.code = 'OFF-FLOOR'),
     'orders', (select coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'number', o.order_number, 'status', o.status, 'org', o.org_id) order by o.order_number), '[]') from orders o),
     -- which safety rules this database has (read from the function text; the suite's preflight refuses to start without them)
-    'rules', jsonb_build_object('void_safety', exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname = 'wms_void_pallet' and prosrc like '%cannot be voided yet%'))
+    'rules', jsonb_build_object(
+      'void_safety', exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname = 'wms_void_pallet' and prosrc like '%cannot be voided yet%'),
+      'unit_safety', exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname = 'wms_set_units' and prosrc like '%cannot be changed yet%')
+        and exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname = 'wms_correct_units'))
   ) into j;
   return j;
 end $$;

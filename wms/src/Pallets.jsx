@@ -342,12 +342,16 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
 // Saving posts the stock to the pallet's position once it is put away, which is what the pick lists read.
 function Units({ p, plines, hasRows, done }) {
   const rows = hasRows ? (plines.length ? plines : []) : [{ item_no: p.item_no, item_name: p.item_name || 'This pallet', cle: true, whole: true, units_per_carton: p.units_total }];
-  const [vals, setVals] = useState({}); const [busy, setBusy] = useState(null); const [msg, setMsg] = useState(null);
+  const [vals, setVals] = useState({}); const [busy, setBusy] = useState(null); const [msg, setMsg] = useState(null); const [why, setWhy] = useState('');
   if (!rows.length) return null;
+  // a put-away pallet that already has a count: changing it changes stock, so it is a correction (admin or staff, with a reason)
+  const fixing = (ln) => p.status === 'stored' && ln.units_per_carton != null;
   const save = async (ln, i) => {
     const v = Math.round(Number(vals[i])); if (!(v >= 0) || vals[i] === '' || vals[i] == null) return;
     setBusy(i); setMsg(null);
-    const { error } = await supabase.rpc('wms_set_units', { p_pallet: p.id, p_item: p.mixed ? ln.item_no : null, p_units: v });
+    if (fixing(ln) && why.trim().length < 4) return setMsg({ kind: 'bad', text: 'Say why the count is being corrected.' });
+    const args = { p_pallet: p.id, p_item: p.mixed ? ln.item_no : null, p_units: v };
+    const { error } = fixing(ln) ? await supabase.rpc('wms_correct_units', { ...args, p_reason: why.trim() }) : await supabase.rpc('wms_set_units', args);
     if (error) { setBusy(null); return setMsg({ kind: 'bad', text: error.message }); }
     const { data } = await supabase.from('wms_pallets').select('*').eq('id', p.id).single();
     setBusy(null); setVals((x) => ({ ...x, [i]: undefined })); setMsg({ kind: 'ok', text: p.status === 'stored' ? 'Saved. Stock updated at this position.' : 'Saved. Stock posts when the pallet is put away.' });
@@ -358,6 +362,7 @@ function Units({ p, plines, hasRows, done }) {
     <section className="panel pad unitsbox">
       <div className="obhead"><h3>Units</h3><span>{missing ? `${missing} product${missing === 1 ? '' : 's'} with no units yet: not on the pick lists until entered` : 'What the pick lists count from'}</span></div>
       {msg && <div className={`strip ${msg.kind}`}><span>{msg.text}</span></div>}
+      {rows.some(fixing) && <label className="unitwhy">Reason for a count correction (admin or staff)<input value={why} onChange={(e) => setWhy(e.target.value)} placeholder="Recounted at the position…" maxLength={140} /></label>}
       <ul className="unitrows">{rows.map((ln, i) => {
         const perCarton = !ln.cle; const cur = ln.units_per_carton;
         return (

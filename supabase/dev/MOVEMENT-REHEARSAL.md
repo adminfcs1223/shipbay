@@ -1,12 +1,17 @@
 # Hosted movement rehearsal: steps 1 and 2 done, the rest not run
 
-Updated 2026-11-23, 1:50 AM ET. Step 1 (development database) and step 2 (updated bridge) are applied and verified on
+Updated 2026-11-23, 2:15 AM ET. Step 1 (development database) and step 2 (updated bridge) are applied and verified on
 `shipbay-nexus-dev`. The movement runner is NOT deployed, all switches are off, and nothing was sent to Nexus. Production and
 `main` are untouched.
 
-## Void safety (candidate 20261204): tested locally, applied nowhere
+## Pallet stock safety (candidate 20261204): void and unit count, tested locally, applied nowhere
 
-`supabase/candidates/20261204_wms_void_safety.sql` replaces `wms_void_pallet` only. Before: a void set the status, and the stock
+One candidate, `supabase/candidates/20261204_wms_pallet_stock_safety.sql`. The void part was accepted by Derek as locally tested
+(commit f08a83f), including the rule for departed pallets.
+
+### Void
+
+It replaces `wms_void_pallet`. Before: a void set the status, and the stock
 trigger then took everything the pallet had posted off the books, whatever had been picked and whatever Nexus was doing.
 Now a void is refused, with nothing changed, when:
 
@@ -14,8 +19,8 @@ Now a void is refused, with nothing changed, when:
 - a wave still has a pick planned from it;
 - units have been picked from it and not put back ("30 of PSKU-...'s units have been picked ... undo those picks first");
 - taking its units off would leave any position below zero (older picks that name no pallet);
-- it has left the building (status departed). This one was not asked for: a void there would write the departed units off with
-  the generic adjust reason, which is the deduction Derek ruled out on 2026-11-23. Say so if it should be allowed.
+- it has left the building (status departed): a void there would write the departed units off with the generic adjust reason.
+  Kept by Derek's decision, 2026-11-23 1:26 AM.
 
 A void that passes posts exactly what it posted before. Reconciliation is unchanged: record and undo for an out-of-sync
 request work as before, and the pallet can be voided once the request is settled. The void takes the same row lock every
@@ -26,13 +31,53 @@ local). They cover the 100/30 case, a wave stop planned and picked, a pick that 
 no pallet, a void during a waiting put-away and a waiting move, both out-of-sync resolutions, a correction whose own answer was
 lost, departed and off-floor pallets, totals, one receipt per pallet, and no position below zero.
 
-The rehearsal no longer uses a void to produce its second partial failure. Both now use the HOLD fault; the second one also
-checks that a void is refused while the request is waiting and while it is out of sync, and accepted after the admin's
-correction. That part is its own stage, `undo`. Preflight refuses to start unless the database has the void rules (read from
-the snapshot). The suite is 9 stages, 328 checks.
+### Unit count
 
-**Before the rehearsal, with separate approval:** apply 20261204 and the updated `movement-dev.sql` (snapshot reports the rule,
-the run-once record knows the `undo` stage) to `shipbay-nexus-dev`. Until then preflight fails on purpose.
+Reproduced first on the database without the fix, with `wms_set_units` as any floor login:
+
+| Case | Result before the fix |
+|---|---|
+| 100 received, 30 picked, count set to 2 per carton | P-02 at minus 10 |
+| Wave has 12 planned, count set to 0 | Position empty, stop still planned for 12; the picker is told "Only 0 on file" |
+| Move waiting on Nexus, count set to 5 per carton | Accepted: 50 written off under an unsettled move (it ended consistent at the new position, by luck of ordering) |
+| Departed pallet, count set to 1 per carton | Cartons say 10, ledger says 100: they disagree from then on |
+
+Now there are two functions:
+
+- `wms_set_units` (same name and arguments, any floor login): entering the count before the pallet holds stock, and the first
+  count of a put-away pallet that never had one. Refused for a put-away pallet that already has a count, while a Nexus request
+  is not settled, and for a pallet off the shared floor or departed.
+- `wms_correct_units(pallet, item, units, reason)` (new; ShipBay admin or staff; reason required): changing the count of a
+  put-away pallet. Refused while a Nexus request is not settled. It posts the same difference the old function posted, then
+  takes everything back if the pallet would hold less than what was picked from it plus what waves still plan to pick from it,
+  or if any position would end below what waves have planned there (so never below zero). The reason goes on the ledger row
+  and into the activity log (`pallet_units_corrected`) with the old count, the new count, the change and who did it.
+
+The Pallets screen asks for the reason and calls the new function for a put-away, counted pallet. That form compiles; it was
+not run in a browser (the Pallets screen is switched off in the build).
+
+Tests: `supabase/tests/staging/units.test.mjs`, 5 tests: clean changes before and after put-away, authorization and reason,
+partial pick, unpick, a moved pallet, a planned wave stop, a packed order, an older pick with no pallet, a waiting put-away and
+move, an out-of-sync request and its reconciliation, departed and off-floor pallets, one receipt per pallet, no position below
+zero.
+
+### The rehearsal
+
+It no longer uses a void to produce its second partial failure: the only `wms_void_pallet` calls left in the suite are two that
+must be refused and one made after the request is settled. Both partial failures use the HOLD fault. The second is its own
+stage, `undo`, and also checks that a void and a count change are refused while the request is waiting and while it is out of
+sync. Preflight, and the `undo` stage before it sends anything, refuse to go on unless the database has both rules (read from
+the snapshot). The suite is 9 stages, 331 checks.
+
+### Combined development migration (prepared, NOT applied)
+
+`supabase/dev/pending/dev_032_pallet_stock_safety.sql`, generated by `build.sh` next to it: the candidate (three functions
+replaced or added) and the two dev helpers that changed since dev_029 (`dev_movement_snapshot` reports the rules,
+`dev_runner_begin` knows the `undo` stage). No table, row, pallet, stock entry or journal entry is touched, and there is no DROP.
+Tested locally: a database built the way dev is today (candidates to 20261203, helpers as of dev_029), then dev_032 in one
+transaction. Every function in the public schema then has the same body and grants as a full build (one fingerprint over 153
+functions), and the dev regression (15), the workflow check (6) and the whole suite (331) pass on it. On a database without
+dev_032 preflight fails and `undo` stops at its start check.
 
 ## Bridge deployed to shipbay-nexus-dev (step 2)
 
@@ -100,9 +145,9 @@ stored at P-01 with its one journal entry and its one 100-unit receipt, byte-for
 |---|---|
 | Workflow repairs | `supabase/candidates/20261203_wms_inventory_workflow.sql`. Applied to the dev database only. |
 | Regression tests for the repairs | `supabase/tests/staging/workflow.test.mjs`, 6 tests, all pass locally (real Nexus service code). |
-| Hosted suite | `supabase/tests/hosted/suite.js`: 9 stages, 328 checks. Passes locally under Node and through the runner under Deno. |
+| Hosted suite | `supabase/tests/hosted/suite.js`: 9 stages, 331 checks. Passes locally under Node and through the runner under Deno. |
 | Lost answers | Produced by the bridge's own dev-only test fault. The runner no longer holds bridge code or reads the Nexus key. |
-| Void safety | `supabase/candidates/20261204_wms_void_safety.sql` and `supabase/tests/staging/void.test.mjs` (6 tests). Local only. |
+| Void and unit-count safety | `supabase/candidates/20261204_wms_pallet_stock_safety.sql`, `void.test.mjs` (6 tests), `units.test.mjs` (5 tests). Local only. Dev migration prepared: `supabase/dev/pending/dev_032_pallet_stock_safety.sql`. |
 | Existing tests | Bridge 16, Edge wrapper 4, waves/receiving/dock/registry/activity unchanged and passing, dev regression 15 checks, WMS unit 56, put-away browser test 29. |
 
 ## What the repairs change (20261203)
@@ -156,9 +201,12 @@ Reproduced on the local database, or read from the code where stated. None of th
 1. **Voiding a stored pallet after picks left a negative position.** FIXED in candidate 20261204 (local only): refused.
 2. **Voiding while a request is waiting.** FIXED in candidate 20261204 (local only): refused until the request is settled.
    Neither fix is on the hosted dev database or in production yet.
-6. **Changing a stored pallet's unit count has the same two gaps the void had** (from the code, not reproduced):
-   `wms_set_units` re-posts the pallet's stock with no check for picks or for a waiting Nexus request. Setting a
-   part-picked pallet's count below what was picked leaves the position below zero. Not changed: it was not in the request.
+6. **Changing a stored pallet's unit count had the same gaps.** FIXED in candidate 20261204 (local only).
+7. **Opening a carton is a second way to change a put-away pallet's stock, and it has none of these checks** (from the code,
+   not reproduced): `wms_open_box` takes the carton's units off the pallet's position and puts a freely entered number (1 to
+   500) on the open-box shelf. Any floor login, no reason, no check for picks, planned stops or a waiting Nexus request. On a
+   heavily picked pallet it can leave the position below zero, and the number entered need not match the carton's count. Not
+   changed here: the request was the unit-count function. It needs the same rules before real inventory.
 3. **There is no cycle-count transaction.** No function posts a count. Stock corrections today are direct ledger entries by
    ShipBay logins (the table's own access rule allows them), with no pallet, at any position including shared ones, and with no
    check for a waiting movement. A correction at a shared position does not travel with the pallet when it moves (from the code).
@@ -194,8 +242,8 @@ state first and stops at the first failed check. Nothing is retried, repaired or
 
 1. **Dev database. DONE 2026-11-23** (approved by Derek). See "Applied to shipbay-nexus-dev" above.
 2. **Bridge. DONE 2026-11-23** (approved by Derek). See "Bridge deployed to shipbay-nexus-dev" above.
-3. **Dev database again, then the runner (approval for each).** Apply 20261204 and the updated `movement-dev.sql` to dev. Then
-   `bundle.sh`, set the one-hour gate, deploy the runner into the existing `bridge-smoke` slot in dev. The stages now fit the
+3. **Dev database again, then the runner (approval for each).** Apply `supabase/dev/pending/dev_032_pallet_stock_safety.sql`
+   to dev and check the function fingerprints and the two rolled-back checks there. Then `bundle.sh`, set the one-hour gate, deploy the runner into the existing `bridge-smoke` slot in dev. The stages now fit the
    call limit observed in step 2.
 4. **Switches (Derek, by hand, dev only).** `NEXUS_BRIDGE_MODE` = `staging`, `NEXUS_PALLET_MOVES` = `on`, `NEXUS_TEST_FAULTS` = `on`.
 5. **`preflight`** (read-only, 23 checks).
@@ -203,7 +251,7 @@ state first and stops at the first failed check. Nothing is retried, repaired or
 7. **`release`** (53). Nexus: release R1 from P-13, put R1 back, put-away R2 at P-14, release R2 from P-14.
 8. **`lost`** (48). Nexus: put-away L at P-15, move L to P-16, each answer dropped once and recovered.
 9. **`partial`** (39). Nexus: put-away F1 at P-17; the admin records it.
-10. **`undo`** (39). Nexus: put-away F2 at P-18, one corrective release of P-18. Voids refused while unsettled, accepted after.
+10. **`undo`** (42). Nexus: put-away F2 at P-18, one corrective release of P-18. Voids refused while unsettled, accepted after.
 11. **`picks`** (24). Nexus: put-away G at P-19, move G to P-20.
 12. **`stops`** (40). Nexus: G moves P-20 to P-19, back to P-20, to P-19, back to P-20; two of those answers dropped and recovered.
 13. **`final`** (read-only, 21).
