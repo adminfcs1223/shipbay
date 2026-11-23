@@ -4,6 +4,14 @@ Updated 2026-11-23, 2:40 AM ET. Step 1 (development database), step 2 (updated b
 are applied and verified on `shipbay-nexus-dev`. The movement runner is NOT deployed, no switch was set, and nothing was sent to
 Nexus. Production and `main` are untouched.
 
+**P-01 HOLD in force (Derek, 2026-11-23 1:48 AM), until he releases it explicitly:** PSKU-000001 is not moved or released, no
+movement switch is enabled, the hosted suite is not started, and nothing is sent to Nexus, so that Souled can make one
+conflicting assignment attempt at occupied P-01. Read directly at 06:49:35Z by a one-off signed-in probe (bridge-smoke version
+13, 15-minute gate, about 20 seconds live, then the inert stub back as version 14 with sign-in required): connection off,
+reason `bridge_off`, pallet moves false, test faults false, registry and calendar writes false; put-away, move, release and a
+move with the lost-answer header all 503 `bridge_off`. PSKU-000001 stored at P-01, one receipt of 100, one journal entry; no
+open requests, 0 runner runs; Nexus shows it at P-01 since 04:26:05Z with no ShipBay request after that.
+
 **Blocker before real-inventory testing (Derek, 2026-11-23):** `wms_open_box` (see "Assessed, not fixed", item 7). The dev_032
 verification below does not resolve it.
 
