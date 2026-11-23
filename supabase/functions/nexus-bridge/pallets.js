@@ -14,7 +14,8 @@ const where = (op) => op.to || op.from;
 
 async function send(ctx, op) {
   const { nx, service } = ctx;
-  const r = await nx.call('POST', `/v1/pallets/${op.kind}`, { idem: op.key, body: nexusBody(op) });
+  const lose = !!(ctx.fault && ctx.fault.lose); if (lose) ctx.fault.lose = false;   // a test fault drops one answer, once (see core.js)
+  const r = await nx.call('POST', `/v1/pallets/${op.kind}`, { idem: op.key, body: nexusBody(op), lose });
   if (r.status === 200 && r.body.ok) {
     try {
       const done = await service.rpc('wms_nexus_op_commit', { p_op: op.op });
@@ -28,7 +29,7 @@ async function send(ctx, op) {
   }
   if (r.status === 0 || r.status === 429 || r.status >= 500) {
     await service.rpc('wms_nexus_op_note', { p_op: op.op, p_state: 'pending', p_http: r.status, p_error: r.body.error || 'no_answer' });
-    return { status: 503, body: { ok: false, error: 'nexus_no_answer', pending: true, op: op.op, message: `Nexus did not answer. Nothing is confirmed for ${op.pallet} at ${where(op)}. Send it again.` } };
+    return { status: 503, body: { ok: false, error: 'nexus_no_answer', pending: true, op: op.op, message: `Nexus did not answer. Nothing is confirmed for ${op.pallet} at ${where(op)}. Send it again.`, ...(r.lost ? { test_fault: 'answer_lost' } : {}) } };
   }
   await service.rpc('wms_nexus_op_note', { p_op: op.op, p_state: 'refused', p_http: r.status, p_error: r.body.error || 'refused' });
   return { status: r.status, body: { ok: false, error: r.body.error || 'refused', message: inWords(r.body.error, { pallet: op.pallet, to: where(op) }) } };
@@ -63,7 +64,9 @@ async function reconcile({ nx, user, send: out, fail }) {
     if (!w && j.pallet_row !== j.journal) differences.push({ pallet: j.pallet, kind: 'pallet_row_differs', shipbay: j.journal, pallet_row: j.pallet_row });
   }
   for (const [id, code] of nexus) if (!seen.has(id) && !waiting.has(id)) differences.push({ pallet: id, kind: 'nexus_only', shipbay: null, nexus: code });
-  return out({ ok: true, as_of: o.body.as_of || null, warehouse: o.body.warehouse, in_sync: differences.length === 0 && open.length === 0, placed_in_nexus: nexus.size, differences,
+  // what an admin must act on in ShipBay's own records (departed pallets with units on the books, positions held in ShipBay only, ...). Not part of in_sync: that compares positions.
+  let exceptions = null; try { exceptions = await user.rpc('wms_nexus_exceptions', {}); } catch { /* the report is not installed on this database */ }
+  return out({ ok: true, exceptions, needs_action: exceptions ? Number(exceptions.needs_action || 0) : null, as_of: o.body.as_of || null, warehouse: o.body.warehouse, in_sync: differences.length === 0 && open.length === 0, placed_in_nexus: nexus.size, differences,
     waiting: open.map((x) => ({ op: x.op, kind: x.kind, pallet: x.pallet, to: x.to, from: x.from, state: x.state, problem: x.problem || null, nexus_has_it_at: nexus.get(String(x.pallet).toUpperCase()) || null })) });
 }
 

@@ -77,7 +77,7 @@ create or replace function public.dev_runner_begin(p_stage text) returns bigint 
 declare v bigint;
 begin
   perform _dev_synthetic_only();
-  if p_stage not in ('preflight', 'move', 'release', 'lost', 'partial', 'picks', 'final') then raise exception 'Unknown stage.'; end if;
+  if p_stage not in ('preflight', 'move', 'release', 'lost', 'partial', 'picks', 'stops', 'final') then raise exception 'Unknown stage.'; end if;
   if exists (select 1 from dev_runner_runs where finished_at is null and started_at > now() - interval '10 minutes') then raise exception 'A stage is still running. Nothing was started.'; end if;
   if p_stage not in ('preflight', 'final') and exists (select 1 from dev_runner_runs where stage = p_stage) then raise exception 'Stage % was already started once. Nothing was started.', p_stage; end if;
   insert into dev_runner_runs (stage) values (p_stage) returning id into v; return v;

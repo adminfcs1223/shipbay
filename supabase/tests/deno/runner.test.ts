@@ -3,6 +3,7 @@
 // the local test database (build-local.sh), and the real Nexus service code with its own local database.
 // Stand-ins: Supabase Auth and the REST layer (one small server: it issues a token per login and runs functions as that
 // login, as the public key, or as the service login) and the network path to Nexus (in-process instead of the internet).
+// Lost answers come from the bridge's own dev-only test fault, asked for by the runner with a header: the runner holds no Nexus key.
 // Nothing here reaches the network: only 127.0.0.1.
 // deno-lint-ignore-file no-explicit-any
 import pg from 'npm:pg@8';
@@ -61,19 +62,21 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init: any = {}) => {
   const url = new URL(typeof input === 'string' ? input : input.url);
   if (url.hostname === '127.0.0.1') return realFetch(input, init);
+  // the dev project's address is answered locally: its bridge function by the real index.ts, everything else by the stand-in
+  if (url.hostname === 'gdoaonsasbsperqjuurm.supabase.co') return realFetch(`http://127.0.0.1:${url.pathname.startsWith('/functions/v1/nexus-bridge') ? 54392 : 54391}${url.pathname}${url.search}`, init);
   if (url.hostname !== 'ankoqruedjujyefhrmtw.supabase.co' || !url.pathname.startsWith('/functions/v1/nexus/')) throw new Error(`UNEXPECTED OUTBOUND CALL to ${url.hostname}`);
   const path = url.pathname.replace('/functions/v1/nexus', ''); if (init.method === 'POST') out.posts.push(`${path} ${init.body}`);
   return nexus(new Request(`http://nexus.local${path}${url.search}`, { method: init.method, headers: init.headers, body: init.body }));
 }) as typeof fetch;
 
 // --- the deployed bridge, exactly as deployed, and the runner in front of it ---
-const ENV: Record<string, string> = { SUPABASE_URL: 'http://127.0.0.1:54391', SUPABASE_ANON_KEY: ANON, SUPABASE_SERVICE_ROLE_KEY: SERVICE, NEXUS_BRIDGE_MODE: 'staging', NEXUS_STAGING_API_KEY: NEXUS_KEY, NEXUS_PALLET_MOVES: 'on', DENO_SERVE_ADDRESS: 'tcp:127.0.0.1:54392' };
+const ENV: Record<string, string> = { SUPABASE_URL: 'https://gdoaonsasbsperqjuurm.supabase.co', SUPABASE_ANON_KEY: ANON, SUPABASE_SERVICE_ROLE_KEY: SERVICE, NEXUS_BRIDGE_MODE: 'staging', NEXUS_STAGING_API_KEY: NEXUS_KEY, NEXUS_PALLET_MOVES: 'on', NEXUS_TEST_FAULTS: 'on', DENO_SERVE_ADDRESS: 'tcp:127.0.0.1:54392' };
 for (const [k, v] of Object.entries(ENV)) Deno.env.set(k, v);
 await import('../../functions/nexus-bridge/index.ts');
 const BRIDGE = 'http://127.0.0.1:54392/functions/v1/nexus-bridge';
 const TOKEN = `one-time-${rnd()}`; const hex = async (s: string) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, '0')).join('');
 const background: Promise<unknown>[] = [];
-const runnerWith = (over: Record<string, unknown> = {}) => makeRunner({ env: ENV, fetchImpl: fetch, gate: { sha256: '', notAfter: Date.now() + 3600000 }, defer: (p: Promise<unknown>) => { background.push(p); }, devHost: '127.0.0.1:54391', bridgeBase: BRIDGE, ...over } as any);
+const runnerWith = (over: Record<string, unknown> = {}) => makeRunner({ env: ENV, fetchImpl: fetch, gate: { sha256: '', notAfter: Date.now() + 3600000 }, defer: (p: Promise<unknown>) => { background.push(p); }, ...over } as any);
 const GATE = { sha256: await hex(TOKEN), notAfter: Date.now() + 3600000 };
 const runner = runnerWith({ gate: GATE });
 const get = async (h: (r: Request) => Promise<Response>, q: string, method = 'GET') => { const r = await h(new Request(`https://x.test/functions/v1/bridge-smoke${q}`, { method })); const text = await r.text(); return { status: r.status, text, ...(JSON.parse(text || '{}')) }; };
@@ -85,8 +88,8 @@ Deno.test('the gate: closed as shipped, closed without the token, closed after i
   assert.deepEqual((await get(runnerWith({ gate: { sha256: 'CLOSED', notAfter: 0 } }), q)).status, 404, 'as shipped in the repository');
   assert.deepEqual((await get(runnerWith({ gate: { ...GATE, notAfter: Date.now() - 1 } }), q)).status, 404, 'expired');
   assert.deepEqual((await get(runner, '?stage=preflight')).status, 404); assert.deepEqual((await get(runner, '?t=wrong&stage=preflight')).status, 404); assert.deepEqual((await get(runner, q, 'POST')).status, 404);
-  const prod = await get(runnerWith({ gate: GATE, env: { ...ENV, SUPABASE_URL: 'https://poxlczzkpztmoiixyrth.supabase.co' }, devHost: undefined }), q); assert.deepEqual([prod.status, prod.error], [503, 'not_the_dev_database']);
-  const other = await get(runnerWith({ gate: GATE, devHost: undefined }), q); assert.deepEqual([other.status, other.error], [503, 'not_the_dev_database'], 'the real runner accepts only shipbay-nexus-dev');
+  const prod = await get(runnerWith({ gate: GATE, env: { ...ENV, SUPABASE_URL: 'https://poxlczzkpztmoiixyrth.supabase.co' } }), q); assert.deepEqual([prod.status, prod.error], [503, 'not_the_dev_database']);
+  const other = await get(runnerWith({ gate: GATE, env: { ...ENV, SUPABASE_URL: 'http://127.0.0.1:54391' } }), q); assert.deepEqual([other.status, other.error], [503, 'not_the_dev_database'], 'the real runner accepts only shipbay-nexus-dev');
   assert.deepEqual((await get(runner, `?t=${TOKEN}&stage=everything`)).status, 400);
   assert.deepEqual([seen.issued, seen.asService.length, out.posts.length], [0, 0, 0], 'none of that signed anyone in, touched the database or reached Nexus');
 });
@@ -114,6 +117,7 @@ Deno.test('who did what: floor rules as the signed-in login, recording as the br
   assert.ok(seen.asUser.includes('test-floor:wms_move_begin') && seen.asUser.includes('test-floor:wms_release_begin') && seen.asUser.includes('test-admin:wms_nexus_resolve_record') && seen.asUser.includes('test-admin:wms_nexus_fix_begin'));
   const service = [...new Set(seen.asService)].sort(); assert.deepEqual(service, ['dev_fault_hold', 'dev_movement_snapshot', 'dev_runner_begin', 'dev_runner_finish', 'dev_runner_read', 'wms_nexus_op_commit', 'wms_nexus_op_note', 'wms_nexus_ops_pending'], 'the service login ran only the bridge\'s own three steps and the dev helpers');
   assert.ok(seen.asUser.every((x) => !x.startsWith('test-client:') || /is_wms_staff|wms_wave_start/.test(x)), 'the client login got no further than the staff check');
+  const src = await Deno.readTextFile(new URL('../../dev/runner/runner.js', import.meta.url)); assert.ok(!/NEXUS_STAGING_API_KEY|makeBridge|ankoqruedjujyefhrmtw/.test(src), 'the runner holds no bridge code, no Nexus address and never reads the Nexus key');
   assert.deepEqual(out.posts.some((p) => p.includes(KEEP.psku) || /"P-01"/.test(p)), false, 'no write to Nexus named PSKU-000001 or P-01');
   const k = (await ndb.query(`select (select count(*)::int from nexus.moves m join nexus.pallets p on p.id = m.pallet_id where p.external_id = $1) moves, (select l.code from nexus.occupancy o join nexus.pallets p on p.id = o.pallet_id join nexus.locations l on l.id = o.location_id where p.external_id = $1) at`, [KEEP.psku])).rows[0];
   assert.deepEqual(k, { moves: 1, at: 'P-01' });

@@ -108,7 +108,7 @@ function Brand({ me, brand, back }) {
   const leave = () => { setWave(null); setShort(null); loadSum(); };
   const resolve = async (line) => { const { error } = await supabase.rpc('wms_resolve_problem', { p_lines: [line] }); if (error) setErr(error.message); loadSum(); };
 
-  if (wave?.status === 'picking') return <Pick brand={brand} wave={wave} setWave={setWave} leave={leave} />;
+  if (wave?.status === 'picking') return <Pick brand={brand} wave={wave} setWave={setWave} leave={leave} manager={!!sum?.manager} />;
   if (wave?.status === 'packing') return <Pack brand={brand} wave={wave} setWave={setWave} leave={leave} />;
   if (wave?.status === 'done') return <WaveDone brand={brand} wave={wave} next={start} busy={busy} leave={leave} err={err} />;
   return (
@@ -143,12 +143,24 @@ function Brand({ me, brand, back }) {
 }
 
 /* PICK: one stop at a time, in route order. Stock leaves the position only when the exact units are confirmed. */
-function Pick({ brand, wave, setWave, leave }) {
+function Pick({ brand, wave, setWave, leave, manager }) {
   const cur = wave.tasks.find((t) => !t.confirmed) || null;
   const [qty, setQty] = useState(''); const [scan, setScan] = useState(''); const [err, setErr] = useState(null); const [busy, setBusy] = useState(false);
   useEffect(() => { setQty(cur ? String(cur.qty_planned) : ''); setScan(''); setErr(null); }, [cur?.id]);
   const done = wave.tasks.filter((t) => t.confirmed);
-  const call = async (fn, args) => { setBusy(true); setErr(null); const { data, error } = await supabase.rpc(fn, args); setBusy(false); if (error) { beep('bad'); setErr(error.message); return false; } beep('ok'); setWave(data); return true; };
+  const [fix, setFix] = useState(null);   // a stop that cannot be reopened because its pallet left the floor: { task, to, why }
+  const call = async (fn, args) => { setBusy(true); setErr(null); const { data, error } = await supabase.rpc(fn, args); setBusy(false);
+    if (error) { beep('bad'); setErr(error.message); if (fn === 'wms_wave_unconfirm' && /pick correction/.test(error.message)) setFix({ task: args.p_task, to: '', why: '' }); return false; } beep('ok'); setWave(data); return true; };
+  const correct = async () => { setBusy(true); setErr(null); const { data, error } = await supabase.rpc('wms_pick_correct', { p_kind: 'wave_stop', p_id: fix.task, p_to_location: fix.to, p_reason: fix.why }); setBusy(false);
+    if (error) { beep('bad'); return setErr(error.message); } beep('ok'); setFix(null); setWave(data.wave); };
+  const fixForm = fix && (manager
+    ? <section className="panel pad" data-testid="pick-correct">
+        <div className="panelhead"><h3>Manager correction</h3><span>The pallet has left the floor. The picked units go back onto a ShipBay shelf, and the stop is picked again from there.</span></div>
+        <label style={{ display: 'block', marginBottom: 8 }}>Shelf the units are going back to <input value={fix.to} onChange={(e) => setFix({ ...fix, to: e.target.value })} placeholder="A-01" data-testid="fix-to" /></label>
+        <label style={{ display: 'block', marginBottom: 12 }}>Why <input value={fix.why} onChange={(e) => setFix({ ...fix, why: e.target.value })} placeholder="Order changed after the pallet shipped" data-testid="fix-why" style={{ minWidth: 320 }} /></label>
+        <button className="btn sm" disabled={busy || !fix.to.trim() || fix.why.trim().length < 5} onClick={correct} data-testid="fix-go">Return the units to the shelf</button> <button className="swap" disabled={busy} onClick={() => setFix(null)}>Cancel</button>
+      </section>
+    : <div className="strip" data-testid="pick-correct-ask"><span>Leave the picked units to one side and ask a manager: they return them to a shelf from this screen.</span></div>);
   const confirm = (code) => { const n = Number(qty); if (qty === '' || !Number.isInteger(n) || n < 0) return setErr('Enter how many units you picked.'); return call('wms_wave_confirm', { p_task: cur.id, p_qty: n, p_scan: (typeof code === 'string' ? code : scan) || null }); };
   const handBack = async () => { setBusy(true); const { error } = await supabase.rpc('wms_wave_cancel', { p_wave: wave.id }); setBusy(false); if (error) return setErr(error.message); leave(); };
   const problems = wave.orders.filter((o) => o.pack_state === 'problem');
@@ -160,6 +172,7 @@ function Pick({ brand, wave, setWave, leave }) {
       <p className="lead">Take everything back to your pack station.</p>
       {problems.length > 0 && <div className="strip bad"><span>{plural(problems.length, 'order')} came up short and went to a manager ({problems.map((o) => o.order_number).join(', ')}). Keep {problems.length === 1 ? 'its' : 'their'} items to one side.</span></div>}
       {err && <div className="strip bad"><span>{err}</span></div>}
+      {fixForm}
       <button className="btn big go" data-testid="to-pack" disabled={busy} onClick={() => call('wms_wave_to_pack', { p_wave: wave.id })}>I’m at my pack station · start packing</button>
       <button className="swap" disabled={busy} onClick={() => call('wms_wave_unconfirm', { p_task: done[done.length - 1].id })}>Go back to the last stop</button>
     </div>
@@ -172,6 +185,7 @@ function Pick({ brand, wave, setWave, leave }) {
         <div className="glance"><div><b className="hot">{done.length + 1}</b><small>of {wave.tasks.length} stops</small></div><div><b>{wave.orders.length}</b><small>Orders</small></div></div>
       </header>
       {err && <div className="strip bad" data-testid="pick-err"><span>{err}</span><button className="x" onClick={() => setErr(null)} aria-label="Dismiss">×</button></div>}
+      {fixForm}
       <section className="wv-stop" data-testid="stop">
         <div className="wv-where"><small>Go to</small><b>{cur.location}</b>{cur.psku && <span>Pallet {cur.psku}{cur.mixed ? ' · mixed pallet' : ''}</span>}{sameSpot > 1 && <em>{sameSpot} items to pick here</em>}</div>
         <div className="wv-what">{cur.image_url && <img src={cur.image_url} alt="" />}<div><b>{cur.name}</b><span className="code">{cur.sku}</span><span>for {plural(cur.orders, 'order')}</span></div><div className="wv-need"><small>Pick</small><b>{num(cur.qty_planned)}</b></div></div>

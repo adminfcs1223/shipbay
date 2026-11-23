@@ -12,18 +12,16 @@
 //   4. Runs the stage from tests/hosted/suite.js against the DEPLOYED bridge over HTTPS.
 //   5. Stores the result (dev_runner_finish) and returns it.  GET ?t=...&read=<stage> reads stored results back.
 //
-// The one thing it does that the deployed bridge cannot: a LOST ANSWER. For those steps only, it runs the same bridge
-// code (core.js, pallets.js, postgrest.js: byte-identical copies, checked at deploy) inside this function, with the same
-// settings and the same Nexus key, and throws away Nexus's answer to one write after Nexus has applied it. Everything
-// that follows (the re-scan, the retry run, the reconciliation) goes through the deployed bridge.
+// Lost answers are produced by the DEPLOYED bridge itself (its dev-only NEXUS_TEST_FAULTS setting, asked for with the header
+// x-nexus-test-fault: lose-answer on a signed-in staff request). This runner holds no bridge code and never reads the Nexus key.
 //
 // It never logs, returns or stores a key or a token: the result is searched for every secret it handled before it leaves.
-import { makeBridge, STAGING_HOST, PRODUCTION_DB_REF } from '../../functions/nexus-bridge/core.js';
-import { palletRoutes } from '../../functions/nexus-bridge/pallets.js';
 import { postgrest } from '../../functions/nexus-bridge/postgrest.js';
 import { runStage, STAGES } from '../../tests/hosted/suite.js';
 
 export const DEV_HOST = 'gdoaonsasbsperqjuurm.supabase.co';
+const PRODUCTION_DB_REF = 'poxlczzkpztmoiixyrth';
+const FAULT_HEADER = 'x-nexus-test-fault';
 const LOGINS = {
   floor: ['test-floor@example.test', '5b000000-0000-4000-8000-000000000002'],
   admin: ['test-admin@example.test', '5b000000-0000-4000-8000-000000000001'],
@@ -39,11 +37,10 @@ const equal = (a, b) => { if (a.length !== b.length) return false; let d = 0; fo
  *   fetchImpl  fetch
  *   gate       { sha256, notAfter }: set in index.ts at deploy. Left as shipped, every request gets 404.
  *   defer      how a started stage keeps running after the answer is sent (EdgeRuntime.waitUntil)
- *   devHost / bridgeBase   only the local test overrides these
  */
-export function makeRunner({ env, fetchImpl, gate, defer = (_work) => {}, now = Date.now, devHost = DEV_HOST, bridgeBase = null }) {
+export function makeRunner({ env, fetchImpl, gate, defer = (_work) => {}, now = Date.now }) {
   const url = String(env.SUPABASE_URL || '').replace(/\/+$/, ''); const anonKey = env.SUPABASE_ANON_KEY, serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
-  const bridge = bridgeBase || `${url}/functions/v1/nexus-bridge`;
+  const bridge = `${url}/functions/v1/nexus-bridge`;
   const db = postgrest({ url, anonKey, serviceKey, fetchImpl });
 
   async function signIn() {
@@ -63,25 +60,13 @@ export function makeRunner({ env, fetchImpl, gate, defer = (_work) => {}, now = 
 
   function makeIo(tokens, count) {
     const bearer = (who) => (who === null ? null : who === 'public' ? anonKey : tokens[who]);
-    const headers = (who, body) => { const b = bearer(who); if (who !== null && !b) throw new Error(`no session for ${who}`); return { ...(b ? { authorization: `Bearer ${b}`, apikey: anonKey } : {}), ...(body ? { 'content-type': 'application/json' } : {}) }; };
+    const headers = (who, body, extra = {}) => { const b = bearer(who); if (who !== null && !b) throw new Error(`no session for ${who}`); return { ...(b ? { authorization: `Bearer ${b}`, apikey: anonKey } : {}), ...(body ? { 'content-type': 'application/json' } : {}), ...extra }; };
     const read = async (r) => { const text = await r.text(); let j = {}; try { j = text ? JSON.parse(text) : {}; } catch { /* not JSON */ } return { ...(j && typeof j === 'object' ? j : {}), status: r.status }; };
     // the deployed bridge, over HTTPS
-    const call = async (who, method, path, body) => { count.deployed++; return read(await fetchImpl(bridge + path, { method, headers: headers(who, body), body: body ? JSON.stringify(body) : undefined })); };
-    // the same bridge code in this function, losing the answer to its next Nexus write
-    const fault = { armed: false, lost: 0 };
-    const lossyFetch = async (input, init = {}) => {
-      const target = new URL(typeof input === 'string' ? input : input.url);
-      if (target.host !== new URL(url).host && target.host !== STAGING_HOST) throw new Error('unexpected address');
-      const r = await fetchImpl(input, init);
-      if (target.host === STAGING_HOST && fault.armed && init.method === 'POST') { await r.arrayBuffer().catch(() => {}); fault.armed = false; fault.lost++; throw new Error('answer lost'); }
-      return r;
-    };
-    const inside = makeBridge({ env, fetchImpl: lossyFetch, db: postgrest({ url, anonKey, serviceKey, fetchImpl }), routes: palletRoutes });
-    const lossy = async (who, method, path, body) => {
-      count.lossy++; const before = fault.lost; fault.armed = true;
-      try { const r = await read(await inside(new Request(`https://runner.invalid/functions/v1/nexus-bridge${path}`, { method, headers: headers(who, body), body: body ? JSON.stringify(body) : undefined }))); return { ...r, lost: fault.lost === before + 1 }; }
-      finally { fault.armed = false; }
-    };
+    const send = async (who, method, path, body, extra) => read(await fetchImpl(bridge + path, { method, headers: headers(who, body, extra), body: body ? JSON.stringify(body) : undefined }));
+    const call = (who, method, path, body) => { count.deployed++; return send(who, method, path, body); };
+    // the same deployed bridge, asked to drop Nexus's answer to this one write (it says so in its reply)
+    const lossy = async (who, method, path, body) => { count.lossy++; const r = await send(who, method, path, body, { [FAULT_HEADER]: 'lose-answer' }); return { ...r, lost: r.test_fault === 'answer_lost' }; };
     return { call, lossy, rpc: (who, fn, args) => { count.rpc++; return db.user(bearer(who)).rpc(fn, args); },
       snapshot: () => db.service.rpc('dev_movement_snapshot', {}), faultHold: (psku, reason) => db.service.rpc('dev_fault_hold', { p_psku: psku, p_reason: reason }) };
   }
@@ -91,14 +76,14 @@ export function makeRunner({ env, fetchImpl, gate, defer = (_work) => {}, now = 
     if (req.method !== 'GET' || !gate || !/^[0-9a-f]{64}$/.test(String(gate.sha256)) || !(now() < Number(gate.notAfter))) return inert();
     if (!equal(await sha256(u.searchParams.get('t') || ''), gate.sha256)) return inert();
     let host = ''; try { host = new URL(url).host; } catch { /* no address */ }
-    if (host !== devHost || url.includes(PRODUCTION_DB_REF) || !anonKey || !serviceKey) return json({ ok: false, error: 'not_the_dev_database', message: 'This runner only works on shipbay-nexus-dev. Nothing was done.' }, 503);
+    if (host !== DEV_HOST || url.includes(PRODUCTION_DB_REF) || !anonKey || !serviceKey) return json({ ok: false, error: 'not_the_dev_database', message: 'This runner only works on shipbay-nexus-dev. Nothing was done.' }, 503);
 
     if (u.searchParams.has('read')) { try { return json({ ok: true, runs: await db.service.rpc('dev_runner_read', { p_stage: u.searchParams.get('read') || null }) }); } catch (e) { return json({ ok: false, error: 'not_read', message: String(e?.message || e).slice(0, 200) }, 500); } }
     const stage = u.searchParams.get('stage'); if (!STAGES.includes(stage)) return json({ ok: false, error: 'unknown_stage', stages: STAGES }, 400);
     let run; try { run = await db.service.rpc('dev_runner_begin', { p_stage: stage }); } catch (e) { return json({ ok: false, error: 'not_started', message: String(e?.message || e).slice(0, 200) }, 409); }
 
     const work = (async () => {
-      const started = now(); const count = { deployed: 0, lossy: 0, rpc: 0 }; let out; const secrets = [serviceKey, anonKey, env.NEXUS_STAGING_API_KEY].filter(Boolean);
+      const started = now(); const count = { deployed: 0, lossy: 0, rpc: 0 }; let out; const secrets = [serviceKey, anonKey].filter(Boolean);
       try {
         const { tokens, proof } = await signIn(); secrets.push(...Object.values(tokens));
         const result = await runStage(makeIo(tokens, count), stage);

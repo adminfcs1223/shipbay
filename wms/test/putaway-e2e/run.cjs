@@ -5,7 +5,8 @@ const { chromium } = require('playwright'); const fs = require('fs'); const path
 const BUILD = process.env.BUILD; let pass = 0, fail = 0; const ok = (c, w) => { c ? pass++ : fail++; console.log(`${c ? 'ok  ' : 'FAIL'} ${w}`); };
 const norm = (t) => t.replace(/\s+/g, ' ').trim();
 (async () => {
-  const st = { status: { ok: true, connection: 'staging', floor: 'HILLSBOROUGH-TEST', pallet_moves: true, calendar_writes: false }, at: { 'P-02': 'SOULED' }, mine: {}, open: [], p04: 0, seen: [] };
+  const st = { status: { ok: true, connection: 'staging', floor: 'HILLSBOROUGH-TEST', pallet_moves: true, calendar_writes: false }, at: { 'P-02': 'SOULED' }, mine: {}, open: [], p04: 0, seen: [], exc: null, rpc: [] };
+  const none = () => ({ departed_with_stock: [], off_floor: [], held_in_shipbay_only: [], stops_without_pallet: [], picks_without_pallet: [], needs_action: 0 });
   const floor = () => ({ ok: true, warehouse: 'HILLSBOROUGH-TEST', map_version: 4, moves_enabled: true, locations: ['P-01', 'P-02', 'P-03', 'P-04', 'P-05', 'P-06', 'STG-01'].map((c) => ({ code: c, kind: c.startsWith('STG') ? 'staging' : 'pallet', status: 'open', capacity: 1, used: st.at[c] ? 1 : 0, free: st.at[c] ? 0 : 1, your_pallets: st.at[c] === 'SHIPBAY' ? [st.mine[c]] : [] })).concat([{ code: 'RCV-DOCK', kind: 'dock', status: 'open', capacity: null, used: 0, free: null, your_pallets: [] }]) });
   const place = (b, move) => {
     if (st.at[b.location]) return [409, { ok: false, error: 'location_full', message: `${b.location} is taken in Nexus. Pick another position.` }];
@@ -23,10 +24,12 @@ const norm = (t) => t.replace(/\s+/g, ' ').trim();
     if (p.startsWith('/functions/v1/nexus-bridge')) {
       let raw = ''; req.on('data', (c) => { raw += c; }); req.on('end', () => {
         const r = p.replace('/functions/v1/nexus-bridge', ''); const body = raw ? JSON.parse(raw) : null; st.seen.push({ m: req.method, r, body, auth: req.headers.authorization });
-        const [code, out] = r === '/status' ? [200, st.status] : r === '/floor' ? [200, floor()] : r === '/pending' ? [200, { ok: true, open: st.open }] : r === '/putaway' ? place(body, false) : r === '/move' ? place(body, true) : r === '/release' ? release(body) : r === '/reconcile/record' ? fix(body, 'record') : r === '/reconcile/undo' ? fix(body, 'undo') : [404, { ok: false }];
+        const [code, out] = r === '/status' ? [200, st.status] : r === '/floor' ? [200, floor()] : r === '/pending' ? [200, { ok: true, open: st.open }] : r === '/putaway' ? place(body, false) : r === '/move' ? place(body, true) : r === '/release' ? release(body) : r === '/reconcile' ? [200, { ok: true, in_sync: true, differences: [], waiting: [], exceptions: st.exc || none() }] : r === '/reconcile/record' ? fix(body, 'record') : r === '/reconcile/undo' ? fix(body, 'undo') : [404, { ok: false }];
         res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(out));
       }); return;
     }
+    if (p === '/rest/v1/rpc/wms_departed_stock_close') { let raw = ''; req.on('data', (c) => { raw += c; }); req.on('end', () => { const b = JSON.parse(raw); st.rpc.push({ b, auth: req.headers.authorization });
+      const x = st.exc.departed_with_stock[0]; st.exc = none(); res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ pallet: x.pallet, units_closed: x.units, reference: b.p_ref })); }); return; }
     const f = path.resolve(BUILD, '.' + p); const file = f.startsWith(BUILD + path.sep) && fs.existsSync(f) && fs.statSync(f).isFile() ? f : path.join(BUILD, 'putaway.html');
     res.setHeader('Content-Type', { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff' }[path.extname(file)] || 'application/octet-stream'); fs.createReadStream(file).pipe(res);
   }).listen(4630, '127.0.0.1');
@@ -63,9 +66,20 @@ const norm = (t) => t.replace(/\s+/g, ' ').trim();
   await p.reload(); await p.waitForSelector('[data-testid=pa-broken]'); const bt = norm(await p.locator('[data-testid=pa-broken]').innerText());
   ok(/positions stay reserved/.test(bt) && /PSKU-000130 at P-05/.test(bt) && /on HOLD/.test(bt), `an out-of-sync placement is listed with its reason and says the position stays reserved: ${bt.slice(0, 160)}`);
   const recBtn = p.getByRole('button', { name: 'The pallet is there: record it' }); const undoBtn = p.getByRole('button', { name: 'It is not there: free the position' });
-  ok(await recBtn.isDisabled() && await undoBtn.isDisabled() && !st.seen.some((s) => s.r.startsWith('/reconcile')), 'neither correction can be sent before the admin ticks that they went and checked');
+  ok(await recBtn.isDisabled() && await undoBtn.isDisabled() && !st.seen.some((s) => s.r.startsWith('/reconcile/')), 'neither correction can be sent before the admin ticks that they went and checked');
   await p.locator('[data-testid=pa-broken] input[type=checkbox]').check(); await undoBtn.click(); r = await result('ok');
   ok(/P-05 is free/.test(r.text) && st.seen.filter((s) => s.r === '/reconcile/undo').length === 1 && st.seen.find((s) => s.r === '/reconcile/undo').body.confirmed === true, `the confirmed correction frees the position: ${r.text}`);
+  // ShipBay's own records to settle: a departed pallet with units still on the books is listed, and closing it out needs a reference
+  st.exc = { ...none(), needs_action: 1, departed_with_stock: [{ pallet: 'PSKU-000077', pallet_id: '7f000000-0000-4000-8000-000000000077', brand: 'Synthetic Records', left_from: 'P-06', reason: 'shipped_out', units: 94, lines: [{ sku: 'SYN-LP-001', position: 'P-06', units: 94 }] }],
+    off_floor: [{ pallet: 'PSKU-000078', pallet_id: '7f000000-0000-4000-8000-000000000078', brand: 'Synthetic Records', left_from: 'P-05', units: 70, lines: [], action: 'Still in ShipBay custody and not pickable.' }] };
+  await p.reload(); await p.waitForSelector('[data-testid=pa-exceptions]'); const ex = norm(await p.locator('[data-testid=pa-exceptions]').innerText());
+  ok(/1 need action/.test(ex) && /PSKU-000077 left P-06 with 94 units still on the books/.test(ex) && /94 × SYN-LP-001 at P-06/.test(ex) && /The release did not deduct them/.test(ex), 'the departed pallet is listed with what is still on the books and where');
+  ok(/PSKU-000078 is off the shared floor with 70 units/.test(ex), 'a pallet off the floor is listed too');
+  const closeBtn = p.locator('[data-testid=exc-departed] button'); ok(await closeBtn.isDisabled() && st.rpc.length === 0, 'it cannot be closed out without a reference');
+  await p.locator('[data-testid=exc-departed] input').fill('BOL SYN-778'); await closeBtn.click(); await p.waitForFunction(() => /is closed out/.test(document.querySelector('[data-testid=pa-result]')?.innerText || ''));
+  ok(st.rpc.length === 1 && st.rpc[0].b.p_pallet === '7f000000-0000-4000-8000-000000000077' && st.rpc[0].b.p_ref === 'BOL SYN-778', 'the close-out was sent once, for that pallet, with the reference typed');
+  const said = norm(await p.locator('[data-testid=pa-result]').innerText()); await p.waitForFunction(() => !document.querySelector('[data-testid=pa-exceptions]'), null, { timeout: 5000 }).catch(() => {});
+  ok(/94 units taken off the books against BOL SYN-778/.test(said) && await p.locator('[data-testid=pa-exceptions]').count() === 0, 'the screen says what was closed and the list is empty again');
   st.status = { ok: true, connection: 'off', pallet_moves: false, calendar_writes: false }; await p.reload(); await p.waitForSelector('[data-testid=pa-closed]');
   ok(/Put-away through Nexus is off/.test(await p.locator('[data-testid=pa-closed]').innerText()), 'when the bridge is off the screen says nothing here will store a pallet');
   const js = fs.readdirSync(path.join(BUILD, 'assets')).filter((f) => f.endsWith('.js')).map((f) => fs.readFileSync(path.join(BUILD, 'assets', f), 'utf8')).join('\n');

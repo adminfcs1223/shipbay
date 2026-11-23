@@ -14,7 +14,7 @@ const NX = process.env.NEXUS_NEUTRAL; if (!NX || !fs.existsSync(path.join(NX, '0
 const base = 'postgres://postgres@127.0.0.1:54317';
 const db = new pg.Client(`${base}/staging`); await db.connect();
 { const g = (await db.query(`select current_setting('cluster_name') c, split_part(pg_read_file('SHIPBAY_LOCAL_STAGING'),' ',1) m`).catch(() => ({ rows: [{}] }))).rows[0]; if (g.c !== 'shipbay-local-staging' || g.m !== 'shipbay-local-staging' || (await db.query('select count(*) n from orgs')).rows[0].n !== '0') { await db.end(); throw new Error('REFUSED'); } }
-for (const f of ['20261123_wms_booking_receiving', '20261124_nexus', '20261124_nexus_map', '20261124_nexus_shared_controls', '20261125_wms_activity', '20261126_nexus_dock', '20261127_wms_waves', '20261128_nexus_registry_sync', '20261129_wms_calendar_publish', '20261130_wms_nexus_putaway', '20261201_wms_nexus_departure', '20261202_wms_inventory_safeguards']) await db.query(fs.readFileSync(path.join(here, '../../candidates', f + '.sql'), 'utf8'));
+for (const f of ['20261123_wms_booking_receiving', '20261124_nexus', '20261124_nexus_map', '20261124_nexus_shared_controls', '20261125_wms_activity', '20261126_nexus_dock', '20261127_wms_waves', '20261128_nexus_registry_sync', '20261129_wms_calendar_publish', '20261130_wms_nexus_putaway', '20261201_wms_nexus_departure', '20261202_wms_inventory_safeguards', '20261203_wms_inventory_workflow']) await db.query(fs.readFileSync(path.join(here, '../../candidates', f + '.sql'), 'utf8'));
 
 // ---- the real Nexus, local ----
 await db.query('drop database if exists nexus_bridge_test'); await db.query('create database nexus_bridge_test');
@@ -57,7 +57,7 @@ const port = { user: (token) => ({ rpc: (fn, args) => { if (!U[token]) throw new
   service: { rpc: async (fn, args) => { if (fn === 'wms_nexus_op_commit' && hooks.beforeCommit) { const h = hooks.beforeCommit; hooks.beforeCommit = null; await h(); } return run('service_role', null, fn, args); } } };
 const ON = { NEXUS_BRIDGE_MODE: 'staging', NEXUS_STAGING_API_KEY: KEYS.shipbay, NEXUS_PALLET_MOVES: 'on', NEXUS_REGISTRY_WRITES: 'on', NEXUS_CALENDAR_WRITES: 'on', SUPABASE_URL: 'https://dev-project.supabase.co' };
 const bridgeWith = (env) => { const h = makeBridge({ env, fetchImpl: nexusFetch, db: port, routes: [...calendarRoutes, ...palletRoutes], timeoutMs: 2000 });
-  return async (who, method, p, body) => { const r = await h(new Request(`https://x.test/functions/v1/nexus-bridge${p}`, { method, headers: who ? { authorization: `Bearer ${who}`, 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined })); return { status: r.status, ...(await r.json()) }; }; };
+  return async (who, method, p, body, extra = {}) => { const r = await h(new Request(`https://x.test/functions/v1/nexus-bridge${p}`, { method, headers: { ...(who ? { authorization: `Bearer ${who}`, 'content-type': 'application/json' } : {}), ...extra }, body: body ? JSON.stringify(body) : undefined })); return { status: r.status, ...(await r.json()) }; }; };
 const bridge = bridgeWith(ON);
 
 const shipment = async (ref, day) => run('authenticated', U.admin, 'nexus_shipment_create', { p_org: A, p_reference: ref, p_origin: 'Vendor', p_expected: day, p_pallets: 2, p_cartons: 20, p_notes: 'PRIVATE NOTE', p_lines: JSON.stringify([{ sku_id: SKU, qty: 500 }]) });
@@ -281,4 +281,30 @@ test('calendar: a confirmed time is published once under the shipment\'s own boo
   assert.equal((await asSouled('GET', '/v1/calendar?from=2026-12-01T00:00:00Z&to=2026-12-31T00:00:00Z')).events.find((e) => e.company === 'SHIPBAY').status, 'cancelled');
   // Nexus down: ShipBay's own shipments still load
   net.mode = 'down'; const offline = await bridge('floor', 'GET', '/calendar?from=2026-12-01&to=2026-12-31'); net.mode = 'ok'; assert.equal(offline.ok, true); assert.equal(offline.nexus.ok, false); assert.ok(offline.shipments.length >= 2);
+});
+
+test('the lost-answer test fault: only on the dev database with its own switch on, only for a signed-in staff request, one answer, once; everywhere else the request is not run', async () => {
+  const F = { 'x-nexus-test-fault': 'lose-answer' }; const DEV = 'https://gdoaonsasbsperqjuurm.supabase.co'; const p = await pallet(); const posts = () => net.calls.filter((c) => c.startsWith('POST')).length;
+  const tryIt = async (env, who = 'floor', extra = F, method = 'POST') => { const n = posts(); const r = await bridgeWith(env)(who, method, method === 'POST' ? '/putaway' : '/floor', method === 'POST' ? { psku: p.psku, location: 'P-20' } : undefined, extra); return [r.status, r.error, posts() - n, (await ops(p.psku)).length]; };
+  assert.equal((await bridgeWith(ON)(null, 'GET', '/status')).test_faults, false);
+  assert.deepEqual(await tryIt(ON), [403, 'test_faults_off', 0, 0], 'switch not set');
+  assert.deepEqual(await tryIt({ ...ON, NEXUS_TEST_FAULTS: 'on' }), [403, 'test_faults_off', 0, 0], 'switch on, but not the dev database');
+  assert.deepEqual(await tryIt({ ...ON, SUPABASE_URL: DEV }), [403, 'test_faults_off', 0, 0], 'the dev database, switch not set');
+  assert.deepEqual(await tryIt({ ...ON, SUPABASE_URL: 'https://gdoaonsasbsperqjuurm.supabase.co.example.net', NEXUS_TEST_FAULTS: 'on' }), [403, 'test_faults_off', 0, 0], 'a look-alike address');
+  assert.deepEqual(await tryIt({ ...ON, SUPABASE_URL: 'https://poxlczzkpztmoiixyrth.supabase.co', NEXUS_TEST_FAULTS: 'on' }), [503, 'wrong_database', 0, 0], 'production: the connection itself refuses');
+  const DEVON = { ...ON, SUPABASE_URL: DEV, NEXUS_TEST_FAULTS: 'on' }; assert.equal((await bridgeWith(DEVON)(null, 'GET', '/status')).test_faults, true);
+  assert.deepEqual(await tryIt(DEVON, null), [401, 'sign_in', 0, 0]); assert.deepEqual(await tryIt(DEVON, 'client'), [403, 'not_staff', 0, 0], 'sign-in and the staff check come first');
+  assert.deepEqual(await tryIt(DEVON, 'floor', { 'x-nexus-test-fault': 'drop-database' }), [400, 'bad_request', 0, 0]); assert.deepEqual((await tryIt(DEVON, 'floor', F, 'GET')).slice(0, 3), [400, 'bad_request', 0]);
+  const pre = await makeBridge({ env: { ...DEVON, BRIDGE_ALLOWED_ORIGINS: 'https://wms-dev.example.test' }, fetchImpl: nexusFetch, db: port, routes: palletRoutes })(new Request('https://x.test/functions/v1/nexus-bridge/putaway', { method: 'OPTIONS', headers: { origin: 'https://wms-dev.example.test' } }));
+  assert.ok(!String(pre.headers.get('access-control-allow-headers')).includes('x-nexus-test-fault'), 'a browser on the WMS site is not allowed to send the header');
+  const dev = bridgeWith(DEVON); const s0 = await stock();
+  const lost = await dev('floor', 'POST', '/putaway', { psku: p.psku, location: 'P-20' }, F); assert.deepEqual([lost.status, lost.error, lost.pending, lost.test_fault], [503, 'nexus_no_answer', true, 'answer_lost']);
+  assert.equal((await at('P-20')).used, 1, 'Nexus applied it'); assert.deepEqual([(await row(p.id)).code, await stock()], [null, s0], 'ShipBay stored nothing');
+  const done = await dev('floor', 'POST', '/putaway', { psku: p.psku, location: 'P-20' }); assert.deepEqual([done.status, done.replayed, done.test_fault], [200, true, undefined]); assert.equal(await stock(), s0 + 100);
+  assert.deepEqual((await ops(p.psku)).map((o) => [o.state, o.attempts]), [['done', 2]], 'one request, one key, sent twice');
+  const plain = await dev('floor', 'POST', '/move', { psku: p.psku, location: 'P-21' }); assert.deepEqual([plain.status, plain.test_fault], [200, undefined], 'without the header nothing is dropped');
+});
+
+test('reconciliation carries the exceptions report for an admin', async () => {
+  const rec = await bridge('admin', 'GET', '/reconcile'); assert.equal(rec.status, 200); assert.ok(rec.exceptions && Array.isArray(rec.exceptions.departed_with_stock) && Array.isArray(rec.exceptions.off_floor)); assert.equal(typeof rec.needs_action, 'number');
 });

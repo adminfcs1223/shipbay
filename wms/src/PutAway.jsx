@@ -5,6 +5,7 @@
 //   Nothing else on this screen, and nothing in the bridge, frees a position.
 import { useEffect, useState } from 'react';
 import { bridge } from './nexusBridge.js';
+import { supabase } from './lib';
 import { ScanBox, beep, normPsku } from './parts.jsx';
 
 const loc = (s) => String(s || '').trim().toUpperCase().replace(/^LOC-/, '');
@@ -20,10 +21,12 @@ export default function PutAway() {
   const [floor, setFloor] = useState(null); const [status, setStatus] = useState(null); const [open, setOpen] = useState([]);
   const [rel, setRel] = useState({ at: null, reason: '', sure: false });   // release: the position scanned, why, and the confirmation
   const [sure, setSure] = useState({});                  // per out-of-sync request: the admin's confirmation tick
+  const [exc, setExc] = useState(null); const [refs, setRefs] = useState({});   // admin only: ShipBay's own exceptions, and the reference typed for each close-out
 
   const refresh = async () => {
     const [s, f, p] = await Promise.all([bridge('/status'), bridge('/floor'), bridge('/pending')]);
     setStatus(s); setFloor(f.ok ? f : { ok: false, message: f.message }); if (p.ok) setOpen(p.open || []);
+    if (s.ok && s.connection !== 'off') { const r = await bridge('/reconcile'); setExc(r.ok ? r.exceptions || null : null); }   // 403 for floor staff: the section simply does not show
   };
   useEffect(() => { refresh(); const t = setInterval(refresh, 60000); return () => clearInterval(t); }, []);
   const pick = (m) => { setMode(m); setPsku(null); setLast(null); setRel({ at: null, reason: '', sure: false }); };
@@ -43,6 +46,10 @@ export default function PutAway() {
   const resolve = (o, how) => call(how === 'record' ? '/reconcile/record' : '/reconcile/undo', { op: o.op, confirmed: true },
     (r) => (how === 'record' ? { title: `${r.psku} is recorded at ${r.location}.`, text: 'ShipBay now matches Nexus.' } : { title: `${o.to} is free.`, text: `Nexus no longer holds ${o.pallet} there. ShipBay's record was not changed.` }));
 
+  const closeOut = async (x) => { setBusy(true); setLast(null); const { data, error } = await supabase.rpc('wms_departed_stock_close', { p_pallet: x.pallet_id, p_ref: refs[x.pallet_id] || '' }); setBusy(false);
+    if (error) { beep('bad'); setLast({ tone: 'bad', title: 'Not done.', text: error.message }); } else { beep('ok'); setLast({ tone: 'ok', title: `${data.pallet} is closed out.`, text: `${num(data.units_closed)} units taken off the books against ${data.reference}.` }); }
+    refresh(); };
+  const lines = (x) => (x.lines || []).map((l) => `${num(l.units)} × ${l.sku} at ${l.position || 'no position'}`).join(' · ');
   const pallets = floor?.ok ? floor.locations.filter((l) => l.kind === 'pallet' || l.kind === 'staging') : [];
   const free = pallets.filter((l) => l.status === 'open' && l.free > 0);
   const here = rel.at ? pallets.find((l) => l.code === rel.at) : null;
@@ -87,6 +94,19 @@ export default function PutAway() {
         <ul className="sc-list">{broken.map((o) => <li key={o.op} className="sc-row"><div><b>{o.pallet} at {o.to || o.from}</b><span>{o.problem || 'ShipBay could not record it.'}</span>
           <label className="sc-check"><input type="checkbox" checked={!!sure[o.op]} onChange={(e) => setSure({ ...sure, [o.op]: e.target.checked })} /> I have been to {o.to || o.from} and checked.</label></div>
           <div className="r"><button className="btn sm" disabled={busy || !sure[o.op]} onClick={() => resolve(o, 'record')}>The pallet is there: record it</button>{o.kind !== 'release' && <button className="btn sm" disabled={busy || !sure[o.op]} onClick={() => resolve(o, 'undo')}>It is not there: free the position</button>}</div></li>)}</ul>
+      </section>}
+
+      {exc && exc.needs_action + exc.off_floor.length > 0 && <section className="panel pad" data-testid="pa-exceptions">
+        <header className="panelhead"><h3>ShipBay records to settle</h3><span>{num(exc.needs_action)} need action</span></header>
+        <ul className="sc-list">
+          {exc.departed_with_stock.map((x) => <li key={x.pallet_id} className="sc-row" data-testid="exc-departed"><div><b>{x.pallet} left {x.left_from} with {num(x.units)} units still on the books</b><span>{x.brand} · {lines(x)}. The release did not deduct them.</span>
+            <label className="sc-check">Shipment or disposal reference <input value={refs[x.pallet_id] || ''} onChange={(e) => setRefs({ ...refs, [x.pallet_id]: e.target.value })} placeholder="BOL or order number" /></label></div>
+            <div className="r"><button className="btn sm" disabled={busy || (refs[x.pallet_id] || '').trim().length < 3} onClick={() => closeOut(x)}>Close out {num(x.units)} units</button></div></li>)}
+          {exc.held_in_shipbay_only.map((x) => <li key={x.pallet_id} className="sc-row"><div><b>{x.pallet} shows {x.position} in ShipBay only</b><span>{x.action}</span></div></li>)}
+          {exc.stops_without_pallet.map((x) => <li key={x.task} className="sc-row"><div><b>Wave {x.wave}: {num(x.units)} planned from {x.pallet} at {x.stop_position}</b><span>The pallet is {x.pallet_position ? `at ${x.pallet_position}` : 'off the floor'}. {x.action}</span></div></li>)}
+          {exc.picks_without_pallet.map((x) => <li key={x.position + x.sku} className="sc-row"><div><b>{x.position}: {num(x.units)} × {x.sku} picked with no pallet named</b><span>{x.action}</span></div></li>)}
+          {exc.off_floor.map((x) => <li key={x.pallet_id} className="sc-row"><div><b>{x.pallet} is off the shared floor with {num(x.units)} units</b><span>{x.brand} · left {x.left_from}. {x.action}</span></div></li>)}
+        </ul>
       </section>}
 
       {waiting.length > 0 && <section className="panel pad" data-testid="pa-open">

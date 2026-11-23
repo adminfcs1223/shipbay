@@ -1,6 +1,6 @@
 -- Database regression test for the isolated development database (shipbay-nexus-dev).
--- Runs as the synthetic logins, checks fourteen behaviours, and always ends by raising an exception so that
--- everything it did is rolled back. A pass ends with:  ROLLBACK-OK 14 checks passed: ...
+-- Runs as the synthetic logins, checks fifteen behaviours, and always ends by raising an exception so that
+-- everything it did is rolled back. A pass ends with:  ROLLBACK-OK 15 checks passed: ...
 -- A failure ends with:  FAIL <n>: ...   Either way the database is left exactly as it was.
 -- Needs the synthetic records (two brands, four logins, SYN-PO-1001..1003, one pallet on HOLD) and the v4 registry.
 -- Never run this against production.
@@ -195,12 +195,17 @@ begin
   perform set_config('request.jwt.claims', cf, true); perform set_config('role', 'authenticated', true); perform wms_wave_unconfirm(task); perform set_config('role', 'postgres', true);
   if (select coalesce(sum(m.qty), 0) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-01') <> 0 or (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-21') <> 100
      or (select sum(qty) from inventory_moves) <> n + 5 or (select l.code from wms_wave_tasks t join locations l on l.id = t.location_id where t.id = task) <> 'P-21' then raise exception 'FAIL 14: reopen did not follow the pallet'; end if;
-  update wms_pallets set status = 'counted', counted_at = now(), location_id = (select id from locations where code = 'P-30') where id = pd.id;   -- counted, with a suggested position: the state the old paths expect
+  update wms_pallets set status = 'counted', counted_at = now() where id = pd.id;   -- counted: the state the old paths expect
+  -- a counted pallet cannot be given a shared position from ShipBay's side at all (20261203): not by a direct write, not by the old screen
+  begin update wms_pallets set location_id = (select id from locations where code = 'P-30') where id = pd.id; raise exception 'FAIL 14: a counted pallet reserved a shared position';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%shared Nexus position%' then raise exception 'FAIL 14: %', sqlerrm; end if; end;
   perform set_config('role', 'authenticated', true);
+  begin perform wms_assign_location(pd.id, (select id from locations where code = 'P-30')); raise exception 'FAIL 14: the old screen reserved a shared position';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%shared Nexus position%' then raise exception 'FAIL 14: %', sqlerrm; end if; end;
   begin perform nexus_putaway(pd.psku, 'P-30'); raise exception 'FAIL 14: old put-away stored a pallet in a shared position';
   exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%shared Nexus position%' then raise exception 'FAIL 14: %', sqlerrm; end if; end;
   begin perform wms_putaway(pd.id, pd.psku, 'P-30'); raise exception 'FAIL 14: old station put-away stored a pallet in a shared position';
-  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%shared Nexus position%' then raise exception 'FAIL 14: %', sqlerrm; end if; end;
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%has no position yet%' then raise exception 'FAIL 14: %', sqlerrm; end if; end;
   perform set_config('role', 'postgres', true);
   begin update wms_pallets set status = 'stored', location_id = (select id from locations where code = 'P-30') where id = pd.id; raise exception 'FAIL 14: a direct write stored a pallet in a shared position';
   exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%shared Nexus position%' then raise exception 'FAIL 14: %', sqlerrm; end if; end;
@@ -219,6 +224,33 @@ begin
   perform set_config('role', 'authenticated', true); j := wms_wave_start(o1); perform set_config('role', 'postgres', true);
   if (select l.code from wms_wave_tasks t join locations l on l.id = t.location_id where t.id = (j -> 'wave' -> 'tasks' -> 0 ->> 'id')::uuid) is distinct from 'P-23' then raise exception 'FAIL 14: not offered after returning: %', j; end if;
   ok := ok || 'safeguards: a reopened stop returns units to where the pallet stands now; the old put-away paths and direct writes cannot store, move or remove a pallet at a shared position; stock at OFF-FLOOR or left on the books at a vacated position is not offered for picking, and is offered again once the pallet is back through Nexus'::text;
+
+  -- 15 workflow repairs (20261203): a planned stop and its pallet; an unsettled move; the exceptions report and the one close-out
+  task := (j -> 'wave' -> 'tasks' -> 0 ->> 'id')::uuid; n := (select sum(qty) from inventory_moves);
+  perform set_config('request.jwt.claims', cf, true); perform set_config('role', 'authenticated', true);
+  begin perform wms_release_begin(pa.psku, 'P-23', 'shipped_out', true); raise exception 'FAIL 15: a pallet was released under a planned pick';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%still has a pick planned%' then raise exception 'FAIL 15: %', sqlerrm; end if; end;
+  j := wms_move_begin(pa.psku, 'P-24');   -- asked, not yet answered by Nexus
+  begin perform wms_wave_confirm(task, 1, null); raise exception 'FAIL 15: a stop was picked while its pallet''s move was not settled';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%waiting for Nexus%' then raise exception 'FAIL 15: %', sqlerrm; end if; end;
+  begin perform wms_assign_location(pa.id, (select id from locations where code = 'A-01')); raise exception 'FAIL 15: reserved while not settled';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; end;
+  perform set_config('role', 'service_role', true); perform wms_nexus_op_commit((j ->> 'op')::uuid); perform set_config('role', 'postgres', true);
+  if (select l.code from wms_wave_tasks t join locations l on l.id = t.location_id where t.id = task) is distinct from 'P-24' then raise exception 'FAIL 15: the planned stop did not follow the pallet to P-24'; end if;
+  if (select sum(qty) from inventory_moves) <> n or (select count(*) from inventory_moves where ref_id = pa.id and reason = 'receive') <> 1 then raise exception 'FAIL 15: the move changed a quantity or made a receipt'; end if;
+  perform set_config('role', 'authenticated', true);
+  begin perform wms_nexus_exceptions(); raise exception 'FAIL 15: the floor login read the exceptions report';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%Only ShipBay admin or staff%' then raise exception 'FAIL 15: %', sqlerrm; end if; end;
+  perform set_config('request.jwt.claims', ca, true); fx := wms_nexus_exceptions();
+  if jsonb_array_length(fx -> 'departed_with_stock') <> 1 or (fx -> 'departed_with_stock' -> 0 ->> 'units')::int <> 100 or jsonb_array_length(fx -> 'stops_without_pallet') <> 0 or jsonb_array_length(fx -> 'held_in_shipbay_only') <> 0 then raise exception 'FAIL 15: report %', fx; end if;
+  begin perform wms_departed_stock_close((fx -> 'departed_with_stock' -> 0 ->> 'pallet_id')::uuid, ' '); raise exception 'FAIL 15: closed out without a reference';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%reference%' then raise exception 'FAIL 15: %', sqlerrm; end if; end;
+  perform wms_departed_stock_close((fx -> 'departed_with_stock' -> 0 ->> 'pallet_id')::uuid, 'SYN-BOL-1');
+  if (select sum(qty) from inventory_moves) <> n - 100 or jsonb_array_length(wms_nexus_exceptions() -> 'departed_with_stock') <> 0 then raise exception 'FAIL 15: the close-out did not take exactly the 100 units off the books'; end if;
+  begin perform wms_departed_stock_close((fx -> 'departed_with_stock' -> 0 ->> 'pallet_id')::uuid, 'SYN-BOL-1'); raise exception 'FAIL 15: closed out twice';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%Nothing is left on the books%' then raise exception 'FAIL 15: %', sqlerrm; end if; end;
+  perform set_config('request.jwt.claims', cf, true); perform set_config('role', 'postgres', true);
+  ok := ok || 'workflow: a pallet with a planned pick cannot be released; while its move is not settled the stop cannot be picked and it cannot be reserved; once Nexus confirms, the planned stop follows the pallet and no quantity changes; the exceptions report is admin-only and lists the departed pallet with its 100 units; the close-out takes exactly those units off the books, with a reference, once'::text;
 
   -- 12 ledger integrity
   if exists (select 1 from inventory_moves where location_id is null) or (select sum(qty) from inventory_moves) <> (select sum(on_hand) from inventory_levels) then raise exception 'FAIL 12'; end if;

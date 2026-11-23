@@ -246,11 +246,13 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
 
           {p.status === 'counted' && (
             <section className="panel pad">
-              <div className="goto"><small>Take {p.psku} to</small><b>{loc ? loc.code : 'No free position'}</b>{loc?.zone && <span>{loc.zone}</span>}</div>
+              <div className="goto"><small>Take {p.psku} to</small><b>{loc ? loc.code : (locations || []).some((l) => l.shared) ? 'The shared floor' : 'No free position'}</b>{loc?.zone && <span>{loc.zone}</span>}</div>
               {loc ? <>
                 <ScanBox value={scanV} onChange={setScanV} onScan={scanPutaway} placeholder={`At ${loc.code}: scan the position label and the pallet label`} autoFocus />
                 <div className="checks"><span className={got.loc ? 'in' : ''}>{got.loc ? '✓' : '1'} Position label {loc.code}</span><span className={got.psku ? 'in' : ''}>{got.psku ? '✓' : '2'} Pallet label {p.psku}</span></div>
-              </> : <div className="hold">Every pallet position is taken. Pick a floor area on the map, or add positions under Locations.</div>}
+              </> : (locations || []).some((l) => l.shared)
+                ? <div className="hold" data-testid="goto-nexus">Shared positions are confirmed by Nexus, not here. Stand the pallet in a position, open Put away, and scan the pallet and the position: Nexus accepts it or tells you it is taken.</div>
+                : <div className="hold">Every pallet position is taken. Pick a floor area on the map, or add positions under Locations.</div>}
               <FloorMap locations={locations} pallets={pallets} brandName={brandName} target={p.location_id} onPick={pick} onOpen={onOpen} />
             </section>
           )}

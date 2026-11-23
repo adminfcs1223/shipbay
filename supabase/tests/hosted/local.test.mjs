@@ -26,12 +26,11 @@ const n1 = async (sql, p) => Object.values((await ndb.query(sql, p)).rows[0])[0]
 const SHIPBAY = await n1(`insert into nexus.companies (code, name) values ('SHIPBAY','ShipBay3PL') returning id`);
 // the same grant the hosted movement key has: SHIPBAY, the test floor, read + move, no calendar
 const NEXUS_KEY = await n1(`select nexus.integration_create('test', $1, 'shipbay-nexus-dev-bridge', 'HILLSBOROUGH-TEST', $2)`, [SHIPBAY, ['read', 'move']]);
-const net = { lose: false, lost: 0, posts: [] };
+const net = { posts: [] };
 const nexusFetch = async (url, init = {}) => {
   const u = new URL(url); assert.equal(u.host, STAGING_HOST, 'the bridge only ever calls the staging host');
   const p = u.pathname.replace('/functions/v1/nexus', ''); if (init.method === 'POST') net.posts.push(`${p} ${init.body}`);
   const res = await nexus(new Request(`http://nexus.local${p}${u.search}`, { method: init.method, headers: init.headers, body: init.body }));
-  if (net.lose && init.method === 'POST') { net.lose = false; net.lost++; throw new Error('answer lost'); }   // Nexus applied it; the answer never arrives
   return res;
 };
 
@@ -44,11 +43,12 @@ async function run(role, uid, fn, args) {
   } catch (e) { await db.query('rollback'); throw e; }
 }
 const port = { user: (token) => ({ rpc: (fn, args) => { if (token === 'public') return run('anon', null, fn, args); if (!U[token]) throw new Error('bad token'); return run('authenticated', U[token], fn, args); } }), service: { rpc: (fn, args) => run('service_role', null, fn, args) } };
-const handle = makeBridge({ env: { NEXUS_BRIDGE_MODE: 'staging', NEXUS_STAGING_API_KEY: NEXUS_KEY, NEXUS_PALLET_MOVES: 'on', SUPABASE_URL: 'https://gdoaonsasbsperqjuurm.supabase.co' }, fetchImpl: nexusFetch, db: port, routes: palletRoutes, timeoutMs: 2000 });
-const bridge = async (who, method, p, body) => { const r = await handle(new Request(`https://x.test/functions/v1/nexus-bridge${p}`, { method, headers: who ? { authorization: `Bearer ${who}`, 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined })); return { ...(await r.json()), status: r.status }; };
+const handle = makeBridge({ env: { NEXUS_BRIDGE_MODE: 'staging', NEXUS_STAGING_API_KEY: NEXUS_KEY, NEXUS_PALLET_MOVES: 'on', NEXUS_TEST_FAULTS: 'on', SUPABASE_URL: 'https://gdoaonsasbsperqjuurm.supabase.co' }, fetchImpl: nexusFetch, db: port, routes: palletRoutes, timeoutMs: 2000 });
+const bridge = async (who, method, p, body, extra = {}) => { const r = await handle(new Request(`https://x.test/functions/v1/nexus-bridge${p}`, { method, headers: { ...(who ? { authorization: `Bearer ${who}`, 'content-type': 'application/json' } : {}), ...extra }, body: body ? JSON.stringify(body) : undefined })); return { ...(await r.json()), status: r.status }; };
 const io = {
   call: bridge,
-  lossy: async (who, method, p, body) => { const before = net.lost; net.lose = true; const r = await bridge(who, method, p, body); net.lose = false; return { ...r, lost: net.lost === before + 1 }; },
+  // the lost answer comes from the bridge's own dev-only test fault, exactly as it will on the hosted run
+  lossy: async (who, method, p, body) => { const r = await bridge(who, method, p, body, { 'x-nexus-test-fault': 'lose-answer' }); return { ...r, lost: r.test_fault === 'answer_lost' }; },
   rpc: (who, fn, args) => run('authenticated', U[who], fn, args),
   snapshot: () => run('service_role', null, 'dev_movement_snapshot', {}),
   faultHold: (psku, reason) => run('service_role', null, 'dev_fault_hold', { p_psku: psku, p_reason: reason }),
@@ -68,7 +68,7 @@ test('the suite protects itself', async () => {
   const k = (await ndb.query(`select (select count(*)::int from nexus.moves m join nexus.pallets p on p.id = m.pallet_id where p.external_id = $1) moves, (select l.code from nexus.occupancy o join nexus.pallets p on p.id = o.pallet_id join nexus.locations l on l.id = o.location_id where p.external_id = $1) at`, [KEEP.psku])).rows[0];
   assert.deepEqual(k, { moves: 1, at: 'P-01' }, 'Nexus has one move for PSKU-000001, the first placement, and it stands at P-01');
   const n = (await ndb.query(`select m.kind, m.result, count(*)::int n from nexus.moves m join nexus.pallets p on p.id = m.pallet_id join nexus.companies c on c.id = p.company_id where c.code = 'SHIPBAY' group by 1, 2 order by 1, 2`)).rows;
-  assert.deepEqual(n.map((r) => [r.kind, r.result, r.n]), [['assign', 'ok', 9], ['move', 'location_full', 1], ['move', 'ok', 3], ['release', 'ok', 3]], 'what the whole suite changes in Nexus: 8 put-aways (plus the first placement), 3 moves, 3 releases, and one refused move on record');
+  assert.deepEqual(n.map((r) => [r.kind, r.result, r.n]), [['assign', 'ok', 9], ['move', 'location_full', 1], ['move', 'ok', 7], ['release', 'ok', 3]], 'what the whole suite changes in Nexus: 8 put-aways (plus the first placement), 7 moves, 3 releases, and one refused move on record');
   // a stage refuses to run twice: its pallets are no longer in the state it expects, and it stops before sending a write
   for (const stage of ['move', 'release', 'lost', 'partial', 'picks']) { const before = net.posts.length; const r = await runStage(io, stage); assert.equal(r.ok, false, stage); assert.match(r.stopped_at, /^start:/, stage); assert.equal(net.posts.length, before, `${stage} sent nothing`); }
   // a request naming the protected pallet or position never leaves the suite

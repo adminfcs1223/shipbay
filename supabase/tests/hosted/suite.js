@@ -3,7 +3,7 @@
 //   - inside the temporary dev-only runner (supabase/dev/runner/index.ts: the deployed bridge over HTTPS, genuine sign-ins).
 // It decides nothing about HOW the bridge is reached. It is given five things (io) and only uses those:
 //   io.call(who, method, path, body)   the bridge, as that synthetic login ('floor' | 'admin' | 'client'), 'public' (the public key only) or null (no sign-in)
-//   io.lossy(who, method, path, body)  the same bridge code, but the answer to its next Nexus write is thrown away AFTER Nexus applied it
+//   io.lossy(who, method, path, body)  the same bridge, asked (dev-only test fault) to throw away Nexus's answer to this one write AFTER Nexus applied it
 //   io.rpc(who, fn, args)              one of ShipBay's own floor functions, as that login, with that login's rights
 //   io.snapshot()                      dev_movement_snapshot(): read-only
 //   io.faultHold(psku, reason)         dev_fault_hold(): the one injected fault ShipBay has no floor function for
@@ -25,10 +25,10 @@ export const CAST = {
   L: ['syn-move-1', 3, 200, 'SYN-LP-002'],    // P-15 -> P-16: both answers from Nexus are lost
   F1: ['syn-move-1', 4, 200, 'SYN-LP-002'],   // P-17: Nexus accepted, ShipBay could not record; the pallet IS there
   F2: ['syn-move-2', 1, 1000, 'SYN-MLR-S'],   // P-18: Nexus accepted, ShipBay could not record; the pallet is NOT there
-  G: ['syn-move-2', 2, 1000, 'SYN-MLR-S'],    // P-19 -> P-20: part-picked, moved, the pick reopened
+  G: ['syn-move-2', 2, 1000, 'SYN-MLR-S'],    // P-19 -> P-20: part-picked, moved, the pick reopened; then its planned stop follows it P-20 <-> P-19
 };
 export const POSITIONS = ['P-11', 'P-12', 'P-13', 'P-14', 'P-15', 'P-16', 'P-17', 'P-18', 'P-19', 'P-20'];
-export const STAGES = ['preflight', 'move', 'release', 'lost', 'partial', 'picks', 'final'];
+export const STAGES = ['preflight', 'move', 'release', 'lost', 'partial', 'picks', 'stops', 'final'];
 const ORG_MAILERS = '5a000000-0000-4000-8000-0000000000a2';
 const MAP_CHECKSUM = 'be3cc8f3e9134cb4dfe7d3ac41773bc5d231ed56b4a42c05f5939467d67c8c4f';
 
@@ -87,6 +87,7 @@ export async function runStage(io, stage) {
     async preflight() {
       const st = await call('floor', 'GET', '/status');
       check('status: staging connection, test floor, pallet movement on, calendar and position-list writes off', [st.status, st.connection, st.floor, st.pallet_moves, st.calendar_writes, st.registry_writes], [200, 'staging', 'HILLSBOROUGH-TEST', true, false, false]);
+      check('the dev-only test fault (lost answers) is switched on', st.test_faults, true);
       check('GET /floor with no sign-in is refused (401)', (await call(null, 'GET', '/floor')).status, 401);
       ok('GET /floor with only the public key is refused', [401, 403].includes((await call('public', 'GET', '/floor')).status));
       check('GET /floor as the client login is refused (403)', short(await call('client', 'GET', '/floor'), 'error'), [403, 'not_staff']);
@@ -193,6 +194,9 @@ export async function runStage(io, stage) {
     async lost() {
       const s0 = await keepIntact('before'); const c = cast(s0); const L = c.L.psku;
       check('start: the pallet is open and unplaced', [c.L.status, c.L.location, Number(c.L.ledger_rows)], ['open', null, 0]);
+      check('a test fault asked for by the client login is refused before anything runs (403)', short(await io.lossy('client', 'POST', '/putaway', { psku: L, location: 'P-15' }), 'error'), [403, 'not_staff']);
+      ok('and with only the public key', [401, 403].includes((await io.lossy('public', 'POST', '/putaway', { psku: L, location: 'P-15' })).status));
+      check('neither left a request behind', [ops(await snap(), L).length, (await floor()).at('P-15').used], [0, 0]);
       const lost = await lossy('floor', '/putaway', { psku: L, location: 'P-15' }); check('put-away, answer lost: the bridge reports that nothing is confirmed (503, pending)', short(lost, 'error', 'pending'), [503, 'nexus_no_answer', true]);
       let s = await snap(); check('ShipBay stored nothing and posted no stock', [grew(s0, s), row(s, L)], [[0, 0], ['open', null, 0, 0, 0, 0, 0, 0]]);
       const key = ops(s, L)[0]?.key; check('one request is on record, waiting', ops(s, L).map((o) => [o.kind, o.state, o.to, o.attempts, o.http]), [['assign', 'pending', 'P-15', 1, 0]]);
@@ -303,7 +307,43 @@ export async function runStage(io, stage) {
       ledgerRules(s3, 'after the pick stage'); await keepIntact('after');
     },
 
-    // ---- 6. read-only: the end state, in ShipBay and in Nexus ----
+    // ---- 6. a planned pick follows its pallet; nothing is picked, reopened or released while Nexus has not settled a move ----
+    async stops() {
+      const s0 = await keepIntact('before'); const c = cast(s0); const G = c.G.psku;
+      check('start: the pallet stands at P-20 with all 1000 units', [c.G.status, c.G.location, stock(s0, 'SYN-MLR-S')], ['stored', 'P-20', { 'P-20': 1000 }]);
+      const wave = async () => (await io.rpc('floor', 'wms_wave_start', { p_org: ORG_MAILERS })).wave;
+      const stopNow = async () => (await wave()).tasks.map((t) => [t.location, t.qty_planned, t.psku, t.confirmed]);
+      const w = await wave(); check('start: the reopened pick is planned at P-20 and not yet picked', w.tasks.map((t) => [t.location, t.qty_planned, t.psku, t.confirmed]), [['P-20', 40, G, false]]); const task = w.tasks[0].id;
+      const rel = await call('floor', 'POST', '/release', { psku: G, location: 'P-20', reason: 'moved_off_shared_floor', confirmed: true });
+      ok('a pallet with a pick planned from it cannot be released (ShipBay refuses, Nexus is not asked)', rel.status === 409 && rel.error === 'refused_by_shipbay' && /still has a pick planned/.test(rel.message), rel);
+      check('Nexus still holds P-20 for it', (await floor()).at('P-20'), { mine: [G], used: 1 });
+      const mv = await call('floor', 'POST', '/move', { psku: G, location: 'P-19' }); check(`move ${G} P-20 to P-19 with the pick still planned`, short(mv, 'ok', 'from', 'location'), [200, true, 'P-20', 'P-19']);
+      check('the planned stop followed the pallet to P-19', await stopNow(), [['P-19', 40, G, false]]);
+      let s = await snap(); check('all 1000 units are at P-19', [stock(s, 'SYN-MLR-S'), grew(s0, s)], [{ 'P-19': 1000 }, [2, 0]]);
+      // a move Nexus has applied but ShipBay has not heard about: nothing may be picked from the pallet until it is settled
+      const back = await lossy('floor', '/move', { psku: G, location: 'P-20' }); check('move back, answer lost (503, pending)', short(back, 'error', 'pending'), [503, 'nexus_no_answer', true]);
+      const early = await refused(() => io.rpc('floor', 'wms_wave_confirm', { p_task: task, p_qty: 40, p_scan: c.G.carton })); ok('the stop cannot be picked while the move is not settled', /waiting for Nexus/.test(String(early)), early);
+      const s1 = await snap(); check('nothing was picked and nothing moved in ShipBay', [stock(s1, 'SYN-MLR-S'), grew(s, s1)], [{ 'P-19': 1000 }, [0, 0]]);
+      const r1 = await call('floor', 'POST', '/pending/retry'); check('the retry run settles the move', [r1.status, r1.results.map((x) => [x.pallet, x.kind, x.to, x.ok])], [200, [[G, 'move', 'P-20', true]]]);
+      check('the planned stop followed the pallet back to P-20', await stopNow(), [['P-20', 40, G, false]]);
+      await io.rpc('floor', 'wms_wave_confirm', { p_task: task, p_qty: 40, p_scan: c.G.carton });
+      s = await snap(); check('40 picked at P-20: 960 left there', stock(s, 'SYN-MLR-S'), { 'P-20': 960 });
+      const away = await lossy('floor', '/move', { psku: G, location: 'P-19' }); check('move again, answer lost (503, pending)', short(away, 'error', 'pending'), [503, 'nexus_no_answer', true]);
+      const reopen = await refused(() => io.rpc('floor', 'wms_wave_unconfirm', { p_task: task })); ok('the pick cannot be reopened while the move is not settled', /waiting for Nexus/.test(String(reopen)), reopen);
+      const s2 = await snap(); check('nothing was put back', [stock(s2, 'SYN-MLR-S'), grew(s, s2)], [{ 'P-20': 960 }, [0, 0]]);
+      const r2 = await call('floor', 'POST', '/pending/retry'); check('the retry run settles it', [r2.status, r2.results.map((x) => [x.pallet, x.kind, x.to, x.ok])], [200, [[G, 'move', 'P-19', true]]]);
+      s = await snap(); check('the move carried the 960 really left; nothing remains at P-20', stock(s, 'SYN-MLR-S'), { 'P-19': 960 });
+      const home = await call('floor', 'POST', '/move', { psku: G, location: 'P-20' }); check(`move ${G} back to P-20`, short(home, 'ok', 'from', 'location'), [200, true, 'P-19', 'P-20']);
+      await io.rpc('floor', 'wms_wave_unconfirm', { p_task: task });
+      const s3 = await snap();
+      check('reopened: the 40 are back at P-20, where the pallet stands, and the stop is planned there again', [stock(s3, 'SYN-MLR-S'), s3.by_sku['SYN-MLR-S'], await stopNow()], [{ 'P-20': 1000 }, 1000, [['P-20', 40, G, false]]]);
+      check(`${G}: still one receipt of 1000, no adjustment, transfers net to zero, 1000 on the books`, [pal(s3, G).status, pal(s3, G).location, Number(pal(s3, G).receipts), Number(pal(s3, G).received_units), Number(pal(s3, G).adjustments), Number(pal(s3, G).transfer_net), Number(pal(s3, G).on_books)], ['stored', 'P-20', 1, 1000, 0, 0, 1000]);
+      const fl = await floor(); check('Nexus: P-19 free, P-20 held by the pallet', [fl.at('P-19'), fl.at('P-20')], [{ mine: [], used: 0 }, { mine: [G], used: 1 }]);
+      check('nothing is waiting for Nexus', (await call('floor', 'GET', '/pending')).open, []);
+      ledgerRules(s3, 'after the planned-stop stage'); await keepIntact('after');
+    },
+
+    // ---- 7. read-only: the end state, in ShipBay and in Nexus ----
     async final() {
       const s = await keepIntact('at the end'); const c = cast(s); const { f } = await floor();
       check('every pallet is where the suite left it', Object.fromEntries(Object.entries(c).map(([k, p]) => [k, [p.status, p.location, p.held]])),
