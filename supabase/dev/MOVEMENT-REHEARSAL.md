@@ -1,16 +1,220 @@
-# Hosted movement rehearsal: dev database and bridge ready, runner and stages not run
+# Hosted movement rehearsal: dev database and bridge ready, screens validated, runner and stages not run
 
-Updated 2026-11-23, 3:10 AM ET. Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
-and dev_033 are applied and verified on `shipbay-nexus-dev`. The movement runner is NOT deployed, no switch was set, and nothing was sent to
-Nexus. Production and `main` are untouched.
+Updated 2026-11-23, 3:55 AM ET. Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
+and dev_033 are applied and verified on `shipbay-nexus-dev`. The three correction forms have now been run in a browser and the
+correction endpoints called over HTTP with real sessions (below). The movement runner is NOT deployed, no switch was set, and
+nothing was sent to Nexus. Production and `main` are untouched.
 
-**P-01 hold released (Derek, 2026-11-23 2:06 AM):** Souled's conflict test at occupied P-01 passed (Nexus answered 409
-`location_full`; ShipBay's pallet and stock unchanged). PSKU-000001 still stays at P-01 until a separately authorized movement
-rehearsal changes that. The switches were read as off at 06:49:35Z by a one-off signed-in probe; the inert stub is back.
+**Hold (Derek, 2026-11-23 2:30 AM):** the hosted rehearsal does not start yet. Souled's P-02 placement is being prepared and
+Nexus has a destination-safety deployment pending. PSKU-000001 stays at P-01.
 
-**Open-box stock safety (candidate 20261205) is on the dev database as `dev_033` (approved by Derek, 2026-11-23 2:20 AM) and
-verified there.** It is not in production. Before real inventory: the production-only billing function could not be checked
-(below), and the two screen forms have not been run in a browser.
+## Screens and HTTP: validated 2026-11-23 (Derek's assignment of 2:30 AM)
+
+### In a browser (local stack, the whole WMS app)
+
+`wms/test/corrections-e2e/` (`run.sh`): a local database built the way dev is (every candidate through 20261205, the dev seed,
+PSKU-000001 put away at P-01), real PostgREST checking every token, the four synthetic logins, and the whole WMS app built with
+the Pallets screen switched on for that build only (the deployed build keeps it off). Chromium drives the real screens; every
+request that is not to 127.0.0.1 is blocked (none was). **113 checks, 113 passed**, after one defect was fixed (below).
+
+| Form | What was shown |
+|---|---|
+| Open box, reason field | Floor: a different count with no reason is stopped on the screen and nothing is sent; with a reason the database refuses ("Only ShipBay admin or staff...") and the screen shows it; the carton's own count opens normally (one transfer pair, 10 off P-60, 10 onto OB-01). Admin and staff: a reason under four letters is stopped on the screen; a short carton (8 of 10) posts the transfer pair and ONE adjustment of -2 at the position; a carton holding more (12 of 10) posts ONE adjustment of +2 on the shelf; each names the login, the pallet and the reason, with an activity entry. A carton opened twice is refused in plain words. |
+| Pallet count correction | Floor: no reason is stopped on the screen; with a reason the database refuses. Admin: a three-letter reason is stopped; a real one saves ("Saved. Stock updated at this position."), the page shows the new count, the ledger has ONE adjustment (-10 at P-61) naming admin, pallet and reason, with an activity entry; the same count again posts nothing. Staff: the same, +9 for nine unopened cartons, the opened carton's loose units untouched. |
+| Pick correction | Floor (own wave, pallet then left the building): "Go back to the last stop" is refused, the screen says to ask a manager, no form is offered, nothing sent. Admin and staff (own waves): the form appears; the button is locked with no shelf, or a reason under five letters; a shared position as the shelf is refused ("P-65 is a shared Nexus position..."), a shelf not on file is refused, nothing posted; a ShipBay shelf is accepted: ONE row, +6 on the shelf, naming the manager and the reason, with an activity entry; the stop reopens at the shelf and is picked again (with the barcode scan). |
+| Refusals | With a Nexus request waiting on the pallet, both the count correction and the open box are refused and explained on the screen; nothing posted. |
+| Client login | Turned away by the app ("This login isn't set up for the WMS"); no function called. |
+
+Every function call from a browser carried the token of the login that browser was signed in as.
+
+### Over HTTP (local stack, real PostgREST)
+
+Floor and client: the three corrections refused (400, role message), the internal `_wms_open_box_do` not callable (also not by
+admin or staff), a direct ledger insert refused, a direct update of a carton or pallet row changes nothing. No token, the public
+key alone, and a token signed with the wrong secret: refused before any function runs (401). Admin and staff pass the role check
+and are then held to the reason rule. After all of it the ledger, unit labels, activity log and carton counts were identical.
+
+### Over HTTP on shipbay-nexus-dev (real Supabase Auth sessions)
+
+A one-off probe (`supabase/dev/probe/corrections.ts`; not the movement runner) sat in the `bridge-smoke` slot for about 15 seconds
+behind a 15-minute token gate at 07:45:33Z, then the inert stub went back (version 16, sign-in required, checked). It signed the
+four synthetic logins in through Supabase Auth and called the hosted database's API. Every call named a pallet, carton and stop
+that do not exist, so none could change a row. **35 checks, 35 passed:**
+
+- Auth issued and confirmed a session for each of the four logins, and each login's profile role is the one expected (4).
+- Floor and client: count correction, open-box correction and pick correction refused; the internal function not callable;
+  a direct ledger write refused by the access rule; a direct carton update touches no row (12).
+- No token, the public key, a made-up token: refused before anything runs (3).
+- Admin and staff: each of the three corrections passes the role check, asks for the reason, and with a reason gets as far
+  as "not on file"; the internal function is not callable even by them (14).
+- The bridge's `/status`, read once as the admin login: connection off (`bridge_off`), pallet moves, registry writes, calendar
+  writes and test faults all false (2). This is a direct reading of the three switches at 07:45:33Z.
+
+Not done on hosted, on purpose: a correction that succeeds. A successful correction writes to the dev ledger, and the rehearsal's
+preflight expects that ledger exactly as it is (one row of 100). Successful corrections were made in the browser on the local
+stack, and at the hosted database in the rolled-back checks of the dev_033 verification.
+
+Hosted dev before and after the probe: pallets, cartons, ledger and journal fingerprints identical (9 pallets, 90 cartons, 1
+ledger row of 100, 1 journal entry), 0 unit labels, 0 waves, 0 open requests, 0 runner runs, 30 migrations, PSKU-000001 stored
+at P-01. Nexus staging (read-only, 07:47:56Z): the only pallet standing anywhere is PSKU-000001 at P-01; ShipBay's movement key
+was last used at 04:26:05Z, so the probe's status read did not reach Nexus.
+
+### Inventory integrity after the browser and HTTP run (local)
+
+One ledger: 600 received (six pallets, one receipt of 100 each, none twice), -3 corrected, -6 picked net = 591 on the books,
+and the stock view agrees. Four opened cartons = four transfer pairs, each netting to zero. Five adjustments, each by admin or
+staff with its reason and its pallet. Three returned picks, +6 each onto a private shelf, each naming the manager, the stop and
+the reason, none tied to the pallet that left. Picks from pallets name their pallet and position. No position below zero. 37
+unit labels for 37 loose units. No request left open. PSKU-000001: its row, its receipt, its journal entry and its cartons
+byte-for-byte unchanged.
+
+### Defects found
+
+1. **FIXED in the source (not deployed anywhere): the Units box locked itself.** After "Say why the count is being corrected."
+   the Save button stayed on "Saving..." and locked until the page was reloaded. The reason is now checked before the button is
+   locked (`wms/src/Pallets.jsx`). Only matters once the Pallets screen is switched back on.
+2. **OPEN: a manager cannot reach a floor picker's stop.** The pick-correction form appears only on the wave of the login that
+   picked it. The floor picker is told "ask a manager: they return them to a shelf from this screen", but a manager who signs
+   in sees only their own wave (the floor picker's is listed as "Wave 1: Test Floor (picking)" with nothing to open). The
+   function itself corrects that stop when an admin calls it (checked over HTTP; the floor screen then sends the picker to the
+   shelf). It needs a way in for the manager; not built, because it is a new screen path and needs Derek's say.
+3. **OPEN, minor: the put-away receipt carries no person on the ledger row.** The bridge commits a put-away under the service
+   login after Nexus accepts, and the stock function stamps the row with the caller, which is nobody. Hosted PSKU-000001's
+   receipt has an empty `created_by`; so do the six put-aways of a local suite run. Who scanned is on the journal entry and on
+   the pallet, so nothing is lost, but the ledger row alone does not say. Moves, picks, corrections and open boxes do carry the
+   person. A fix is a small change to a function the rehearsal exercises, so it needs its own approval and re-verification.
+4. **Known, unchanged:** admin and staff logins can still write a ledger row directly (the table's own access rule), with no
+   reason and no check. The floor and client logins cannot (checked local and hosted). See "Assessed, not fixed" item 3.
+5. **Known, unchanged:** the Billing activity page shows `open_box_corrected`, `pallet_units_corrected` and `pick_corrected`
+   under their raw names.
+
+### Not covered, stated plainly
+
+- The browser run is on the local stack, not on a hosted site: there is no hosted WMS build with the Pallets screen on, and the
+  cloud browser cannot hold a dev session. Tokens there are signed locally and checked by real PostgREST; sessions issued by
+  Supabase Auth were exercised on hosted by the probe, at the API only.
+- Mixed pallets (more than one product), NCC pallets and the older pick list's order-line correction were not driven through a
+  screen; their functions are covered by the database tests (`units`, `openbox`, `workflow`).
+- Phone width was not run for these forms.
+
+## Rehearsal readiness (prepared, NOT executed)
+
+### 1. The runner and the dev database
+
+| Check | Result |
+|---|---|
+| Dev migrations | 30, the last two `dev_032_pallet_stock_safety` and `dev_033_open_box_safety` |
+| Warehouse functions on dev against a full local build of every candidate | 149 compared by body: 147 identical; `wms_brands` and `wms_order_brands` differ as documented (dev_018 copies production's) |
+| The five dev helpers the runner calls (`dev_runner_begin`, `dev_runner_finish`, `dev_runner_read`, `dev_movement_snapshot`, `dev_fault_hold`) | Body on dev = body in the repository, 5 of 5 |
+| `dev_movement_snapshot().rules` on dev | `void_safety` true, `unit_safety` true (preflight and the `undo` stage refuse to go on without them) |
+| dev_033 | Not reported by the snapshot (the suite opens no box). Confirmed from the migration list and the three function bodies; to be confirmed again in the pre-run check |
+| The suite on a local database built with dev_032 and dev_033, real Nexus service code | 331 of 331, nine stages |
+| The runner under Deno, same database | 13 of 13; most bridge calls in one stage: 22 (limit observed 30, test fails above 25) |
+| Other suites, same build | void 6, units 5, open box 5, workflow 6, bridge 16, WMS unit 56: all pass |
+| Runner bundle (`bundle.sh`) | Builds and type-checks; gate closed as committed; holds no bridge code, no Nexus key, no Nexus address |
+
+### 2. The nine stages and what Nexus will see
+
+Unchanged from "Proposed sequence" below: `preflight` (23, read-only), `move` (41), `release` (53), `lost` (48), `partial` (39),
+`undo` (42), `picks` (24), `stops` (40), `final` (21, read-only). From ShipBay Nexus sees 8 put-aways, 7 moves and 3 releases,
+plus one refused move on record; the three releases free positions the suite itself took (P-13, P-14, P-18). End state: ShipBay
+holds P-01, P-12, P-13, P-16, P-17 and P-20.
+
+### 3. Floor, preflight, stop, idempotency, reconciliation
+
+- **Floor.** Every request goes to `HILLSBOROUGH-TEST` (synthetic; the bridge accepts no other address than Nexus staging, and
+  ShipBay's movement key is scoped to that floor). Positions P-11 to P-20 only. The live floor `HILLSBOROUGH` is not
+  initialized and has moves off (read 07:47:56Z). P-01 is never named in a request.
+- **Preflight** (sends nothing): status is staging / test floor / moves on / calendar and position-list writes off; the three
+  refusals for no sign-in, public key and client; Nexus reports the test floor, map version 4, the agreed checksum, moves
+  enabled; P-11 to P-20 empty for every company; PSKU-000001 as it is in ShipBay and in Nexus; both stock rules present.
+- **Stopping.** A stage checks its starting state and stops at the first failed check; nothing is retried, repaired or released
+  to tidy up. A writing stage can be started once. Between stages nothing runs. To stop for good: Derek deletes
+  `NEXUS_PALLET_MOVES` (the bridge then answers 503 before asking Nexus) and the stub goes back into `bridge-smoke`. There is
+  no way to interrupt a stage half-way from outside other than those two; a stage makes at most 22 bridge calls. How long a
+  stage takes on hosted is not known until `move` has run.
+- **Idempotency.** Each ShipBay request carries one key, kept on its journal row; a repeat (re-scan, retry run, lost answer) sends
+  the same key and Nexus answers from its record of the first. Proven locally in the `release`, `lost` and `stops` stages
+  (answers dropped by the test fault, then recovered by re-scan or the retry run). Not yet seen on hosted.
+- **Reconciliation.** "Nexus accepted, ShipBay did not record" is produced by the HOLD fault in `partial` and `undo`; the admin
+  records it (pallet is there) or undoes it (pallet is not, with one corrective release); the position is never released
+  automatically. While a request is unsettled the void, the count change and the open box are refused.
+
+### 4. Deployment and rollback sequence (each numbered step needs its own go)
+
+1. **Pre-run check, read-only (me).** Dev: migrations, function bodies, fingerprints, 0 open requests, 0 runner runs, PSKU-000001.
+   Nexus staging: occupancy, P-11 to P-20 empty, map version and function fingerprint, ShipBay key state. Stop if anything
+   differs from this note.
+2. **Runner (me, on approval).** `bundle.sh` into an empty folder; set a one-hour gate (hash of a fresh token); deploy into
+   `bridge-smoke` with sign-in off. Read the deployed files back.
+3. **Switches (Derek, by hand, dev only).** `NEXUS_BRIDGE_MODE` = `staging`, `NEXUS_PALLET_MOVES` = `on`, `NEXUS_TEST_FAULTS` = `on`.
+4. **`preflight`.** Read-only. Report. Derek's go for each writing stage after that, one at a time, with the result and the
+   Nexus-side read-only check between stages.
+5. **After `final`, or at any stop:** Derek deletes the three switches; the stub goes back; a signed-in status read confirms
+   off; dev and Nexus staging are read and reported.
+
+Rollback, by what has happened:
+
+| Stopped at | State | What is done |
+|---|---|---|
+| Before step 3 | Runner deployed, bridge off | Stub back. Nothing else to undo. |
+| After `preflight` | Nothing written | Switches off, stub back. |
+| A writing stage finished and passed | Dev and Nexus agree; synthetic pallets stand at test positions | Switches off, stub back. Nothing is released to tidy up: the pallets stay as the record of the stage. A later run starts from the next stage. |
+| A writing stage stopped at a failed check | Possibly a request waiting or out of sync | Switches stay as they are until it is read: `/pending` and `/reconcile` (read-only) show every open request; each is settled by the bridge's own retry, record or undo, with Derek's go per action. Then switches off, stub back. The dev database is not reset. |
+| The bridge itself misbehaves | | Switches off first. The previous bridge version's files are in git (commit 2656215 is the one deployed); redeploying an older version is a separate approval. |
+
+Never part of a rollback: touching P-01 or PSKU-000001, releasing a position the suite did not take, editing Nexus rows, or
+resetting the dev database.
+
+### 5. What must be read fresh immediately before execution
+
+1. **Nexus's code.** The suite was proven against the Nexus service code of branch `nexus-neutral` at commit `b4d3053`. Nexus has
+   a destination-safety deployment pending. If it lands first, the local suite must be rerun against the new service code
+   before any hosted stage: it may change refusal codes (`location_full`), the map version or checksum (preflight pins version
+   4 and one checksum), or what a put-away must send. Nexus staging's function fingerprint at 07:47:56Z:
+   33 functions, `7782edb9...`. A different value means "retest first".
+2. **Occupancy.** P-11 to P-20 empty for every company (they were at 07:47:56Z). Souled's P-02 placement does not touch them and
+   the suite never names P-02, but preflight only protects the moment it runs: Souled must stay off P-11 to P-20 for the whole
+   window, or a stage will meet `location_full` half-way and stop.
+3. **PSKU-000001 at P-01** in both systems, and whether Souled's P-02 test expects anything of P-01 during the window.
+4. **Switches**: read off before step 3, on after it, off again at the end, each by a signed-in status call.
+5. **ShipBay's movement key**: active, scoped to the test floor, no error on record (last used 04:26:05Z).
+6. **The call limit**: 30 calls from one function to another were observed; whether that is per request or per minute is not
+   known. `move` (17 calls) is the first real test; stages should not be started back to back within a minute until that is seen.
+7. **Dev database**: one ledger row of 100, 0 open requests, 0 waves, 0 runner runs; the six seeded pallets open. Any dev check
+   run between now and then must be a rolled-back one.
+
+## Production-only billing functions: NOT verified
+
+They exist only in production (applied 2026-11-20). Their SQL is not in the repository (`supabase/candidates/20261125_billing_rates.md`
+is a two-line note) and they are not on dev. Production was not read for this: one read-only look at its function list was
+refused by the session's access rules earlier today and was not retried or worked around.
+
+| Object | Called from | What is known | What is not |
+|---|---|---|---|
+| `billing_estimate(p_org, p_month)` | Portal, Billing page | Returns one row per billing setting: code, label, source, qty, rate, unit, note | How `qty` is counted for each source |
+| `billing_rates_list(p_org)` | Portal, Billing settings | Lists a brand's rates | Body |
+| `billing_rate_save(...)` | Portal, Billing settings (admin) | Saves a rate with a source | Body; which sources it accepts |
+| `billing_rates` (table) | The three above | Vinyl Moon has the 12 rates of its signed agreement | Columns, rules, policies |
+| Anything else in production that is not in the repository's migrations | | | Not listed, not checked |
+
+The sources a rate can count from, as the portal lists them: by hand, pallets received, stored pallets x 53 cu ft, shipments,
+units picked, units pack-checked, carton scans, pallet labels printed, pallets put away, cycle-count scans. Four specific
+questions the function's text has to answer before these repairs reach production:
+
+1. **Units picked.** A pick correction puts the units back as a ledger row with reason `pick` and a POSITIVE quantity, and logs
+   `pick_corrected`. If the estimate adds up pick rows by size, or counts pick events, a corrected-and-repicked stop bills twice
+   (6 + 6) or three times; if it adds signed quantities it bills once. Not known which.
+2. **Stored pallets.** Pallets can now be `off_floor` or `departed`. If the estimate counts pallets "not void" rather than
+   "stored", a pallet that left keeps being billed for storage; if it counts `stored` only, an off-floor pallet still in
+   ShipBay's custody stops being billed. Not known which.
+3. **Ledger reasons.** Opening a box on a put-away pallet now writes `transfer` rows where it wrote `adjust` and `receive`
+   rows. If any charge counts `receive` rows (as "units received") or `adjust` rows, its numbers change. Not known.
+4. **Pallets put away.** A pallet taken off the shared floor and put back is put away twice (the rehearsal does exactly this
+   with one pallet). If the charge counts put-away events, that is two charges for one pallet. Not known.
+
+To close this: Derek (or a session he authorizes for a read-only look at production) pastes or exports the text of
+`billing_estimate`; the four questions are answered by reading it. Nothing in production billing is changed either way.
 
 ## dev_033 applied to shipbay-nexus-dev and verified
 

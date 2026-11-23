@@ -352,8 +352,8 @@ function Units({ p, plines, hasRows, done }) {
   const fixing = (ln) => p.status === 'stored' && ln.units_per_carton != null;
   const save = async (ln, i) => {
     const v = Math.round(Number(vals[i])); if (!(v >= 0) || vals[i] === '' || vals[i] == null) return;
+    if (fixing(ln) && why.trim().length < 4) return setMsg({ kind: 'bad', text: 'Say why the count is being corrected.' });   // checked before the button is locked: a missing reason must leave the form usable
     setBusy(i); setMsg(null);
-    if (fixing(ln) && why.trim().length < 4) return setMsg({ kind: 'bad', text: 'Say why the count is being corrected.' });
     const args = { p_pallet: p.id, p_item: p.mixed ? ln.item_no : null, p_units: v };
     const { error } = fixing(ln) ? await supabase.rpc('wms_correct_units', { ...args, p_reason: why.trim() }) : await supabase.rpc('wms_set_units', args);
     if (error) { setBusy(null); return setMsg({ kind: 'bad', text: error.message }); }

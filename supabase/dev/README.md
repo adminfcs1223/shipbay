@@ -49,6 +49,8 @@ only for `test-…@example.test`. No password is set by default.
 - `openbox-check.sql`: fourth rolled-back check (8 checks). 8 of 8 on hosted, 2026-11-23.
 - `stock-safety-check.sql`: third rolled-back check, for the void and unit-count rules. 7 of 7 on hosted, 2026-11-23.
 - `probe/index.ts`: one-off disabled-mode probe with genuine sessions (gate closed as committed). Run once on 2026-11-23 against bridge version 7; see MOVEMENT-REHEARSAL.md.
+- `probe/corrections.ts`: one-off probe of the three correction endpoints with genuine sessions for all four logins (gate closed as committed). Every call names things that do not exist, so none can write. Run once on 2026-11-23, 35 of 35; see MOVEMENT-REHEARSAL.md.
+- `../../wms/test/corrections-e2e/`: the three correction forms in a real browser on a local stack built like this database (`run.sh`, 113 checks). Local only.
 - `hosted-smoke.sh`: read-only checks once the connection is on and movement is still off. Not yet run.
 
 - `../tests/hosted/local.test.mjs` (after `../tests/hosted/build-local.sh`): the hosted movement suite on the local database with the real Nexus service code. 306 checks pass (the original 261 plus the planned-stop stage and the test-fault checks).
