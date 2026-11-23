@@ -6,3 +6,6 @@ dist/
 .netlify/
 .DS_Store
 portal/shots/
+supabase/dev/scrub.local.tsv
+supabase/dev/subset/
+supabase/dev/payload/

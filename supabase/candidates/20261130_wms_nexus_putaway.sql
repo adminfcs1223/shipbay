@@ -42,6 +42,7 @@ create unique index if not exists wms_nexus_ops_one_open on public.wms_nexus_ops
 create unique index if not exists wms_nexus_ops_one_fix on public.wms_nexus_ops (fixes) where state = 'pending';
 create index if not exists wms_nexus_ops_pallet on public.wms_nexus_ops (pallet_id, created_at);
 alter table public.wms_nexus_ops enable row level security;   -- no policies: reached only through the functions below
+revoke all on table public.wms_nexus_ops from public, anon, authenticated;   -- hosted Supabase grants new tables to these roles by default
 
 create or replace function public.wms_nexus_admin() returns boolean language sql stable security definer set search_path to 'public' as $$
   select exists (select 1 from profiles where id = auth.uid() and active is not false and role in ('shipbay_admin', 'shipbay_staff'));
