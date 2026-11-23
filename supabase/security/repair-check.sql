@@ -70,12 +70,15 @@ begin
   perform set_config('request.jwt.claims', '{"role":"anon"}', true); perform set_config('role', 'anon', true); t0 := clock_timestamp();
   begin insert into orders (org_id, order_number, status) values (o1, 'HACK', 'new'); raise exception 'FAIL D: not signed in, order written';
   exception when insufficient_privilege then null; when others then if sqlerrm like 'FAIL%' then raise; end if; raise exception 'FAIL D: expected a permission refusal, got %', sqlerrm; end;
+  begin update orders set status = 'cancelled'; raise exception 'FAIL D: not signed in, update allowed'; exception when insufficient_privilege then null; when others then if sqlerrm like 'FAIL%' then raise; end if; raise exception 'FAIL D: %', sqlerrm; end;
+  begin delete from orders; raise exception 'FAIL D: not signed in, delete allowed'; exception when insufficient_privilege then null; when others then if sqlerrm like 'FAIL%' then raise; end if; raise exception 'FAIL D: %', sqlerrm; end;
+  begin truncate orders cascade; raise exception 'FAIL D: not signed in, truncate allowed'; exception when insufficient_privilege then null; when others then if sqlerrm like 'FAIL%' then raise; end if; raise exception 'FAIL D: %', sqlerrm; end;
   perform set_config('request.jwt.claims', json_build_object('sub', x, 'role', 'authenticated')::text, true); perform set_config('role', 'authenticated', true);
   begin insert into orders (org_id, order_number, status) values (o1, 'HACK', 'new'); raise exception 'FAIL D: untrusted login wrote an order'; exception when others then if sqlerrm like 'FAIL%' then raise; end if; end;
   begin insert into orders (org_id, order_number, status) values (gen_random_uuid(), 'HACK', 'new'); raise exception 'FAIL D: order for a brand that does not exist'; exception when others then if sqlerrm like 'FAIL%' then raise; end if; end;
   perform set_config('role', 'postgres', true);
   if clock_timestamp() - t0 > interval '1 second' then raise exception 'FAIL D: the refusals took % (the loop is still there)', clock_timestamp() - t0; end if;
-  r := r || ('D order writes: not signed in -> permission refused; untrusted login -> refused; all three refusals took ' || round(extract(epoch from clock_timestamp() - t0)::numeric * 1000) || ' ms');
+  r := r || ('D order writes: not signed in -> insert, update, delete and truncate all refused for lack of permission; untrusted login -> refused; all six refusals took ' || round(extract(epoch from clock_timestamp() - t0)::numeric * 1000) || ' ms');
   -- the cut-off is computed exactly as before for real orders: Friday before the cut-off, Friday after it, Saturday
   insert into orders (org_id, order_number, channel, source, status, total_units, received_at) values (o1, 'CUT-1', 'manual', 'manual', 'new', 1, ('2026-11-20'::date + (o.cutoff_time - interval '1 hour')) at time zone o.timezone) returning cutoff_at into v_c;
   if v_c is distinct from ('2026-11-20'::date + o.cutoff_time) at time zone o.timezone then raise exception 'FAIL D: cut-off before the hour: %', v_c; end if;

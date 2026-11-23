@@ -18,6 +18,11 @@ Target: ShipBay production `poxlczzkpztmoiixyrth`. Nothing here has been run the
 
 No table is altered. No row is read or written. No existing login, password, role, PIN or brand link is touched.
 
+Each replacement keeps its function's security mode, `search_path=public` setting, signature, owner and execute permissions. The migration
+checks text AND those properties before it changes anything and again before it commits, and checks that the not-signed-in role is left with no
+insert, update, delete or truncate on `orders` by any route. The rollback restores each function from production's full definition and runs the same checks.
+(Revision 2, 2026-11-22: the first draft's `set_order_cutoff` dropped `SET search_path TO 'public'`. Derek caught it. Fixed, and the property checks were added so it cannot recur.)
+
 ## Why Admin -> Users keeps working
 The three deployed functions that create logins were read on 2026-11-22 (production copies, not just the repository):
 `admin-users` v3, `wms-employees` v1, `portal-access` v2. Each creates the login and then writes the profile itself with the
@@ -37,13 +42,15 @@ sets the real role a moment later, exactly as it does today.
   any brand through the client function, and sales, setter and floor could read any brand's key list. No key was ever created that way.
 
 ## Tests
-- Apply, re-apply (refused by its own check), rollback, on a bare copy of production's warehouse schema: pass; rollback restores the exact original text.
+- Apply, re-apply (refused by its own check), rollback, on a bare copy of production's warehouse schema: pass; rollback restores the exact original text, properties, owner, permissions and the orders grant (compared line for line).
+- Atomic: with the closing check forced to fail, all four functions and the grant were left exactly as they were.
 - Local, full build with the repair applied first: `repair-check.sql` passes (A sign-up data grants nothing; B the admin screens' way of creating
   staff, sales, client and floor logins still gives the right role, brand, sales flag, employee number and PIN; C keys; D orders; E receiving),
   and the 14-check warehouse regression passes on top of it.
 - Negative control: with the repair rolled back, `repair-check.sql` fails at A.
-- Hosted `shipbay-nexus-dev`: its four functions are byte-identical to the repair's (checked by fingerprint, dev_025), the permission change is applied,
-  `repair-check.sql` passes, and the 50-attempt untrusted-login check passes.
+- Hosted `shipbay-nexus-dev` (revision 2): rolled back to production's original definitions, then the migration applied from that state; both runs' own checks passed.
+  After it: text, security mode, `search_path=public`, signature, owner and permissions as expected; the not-signed-in role has no write on `orders`;
+  the repair check passes (`dev_repair_check()`), and the 50-attempt untrusted-login check passes.
 - Not tested: the real Admin -> Users screen against a repaired database (dev has no portal and none of those edge functions). The database half of
   that flow is what B tests. First real proof is creating one login in production after the repair.
 
@@ -53,6 +60,7 @@ sets the real role a moment later, exactly as it does today.
 3. Verify, read-only:
    `select proname, md5(prosrc) from pg_proc where pronamespace = 'public'::regnamespace and proname in ('handle_new_user','wms_org_create_key','wms_org_connector','set_order_cutoff');`
    expect `ecc05dbe…`, `b20b5f55…`, `adbc0800…`, `422df316…`; and `select has_table_privilege('anon','public.orders','insert');` expect `false`.
+   (The migration's own closing check already proves both, plus every function's properties, before it commits.)
 4. Derek, in the portal: Admin -> Users, create a throwaway staff login, confirm it lists as staff, switch it off. About two minutes.
 5. If step 4 fails: apply the rollback file (sign-up stays off), and report.
 

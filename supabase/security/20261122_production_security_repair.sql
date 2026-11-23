@@ -9,16 +9,21 @@
 --   4. set_order_cutoff     an order naming a brand the caller cannot see looped until the statement timeout. Two guard lines.
 --   5. orders               the public (not signed in) role loses insert, update, delete and truncate. No policy ever let it
 --                           write a row, so nothing that works today stops working.
--- It first checks that the four functions are exactly the text this repair was written against, and stops if not.
+-- It first checks that the four functions are exactly the text AND properties this repair was written against, and stops if not.
+-- Each replacement keeps its function's security mode, search_path setting, signature, owner and execute permissions; the
+-- closing check proves that, and proves the not-signed-in role is left with no way to write to orders.
 -- It runs in one transaction: either all of it applies or none of it.
 begin;
 do $chk$
-declare r record;
+declare r record; v_body text; v_props text;
 begin
-  for r in select * from (values ('handle_new_user', '07b84cd343cefae1c34fe8c683005875'), ('set_order_cutoff', 'fd0767aa9324307b77115d0aa63c2649'), ('wms_org_connector', '968cf1b355af9da6942453769be455db'), ('wms_org_create_key', 'e5f60e74a5fca184f8c1fe32f0ad0d63')) v(name, want) loop
-    if (select md5(prosrc) from pg_proc where pronamespace = 'public'::regnamespace and proname = r.name) is distinct from r.want then
-      raise exception 'Before: % is not the expected text (found %). Nothing was changed.', r.name, (select md5(prosrc) from pg_proc where pronamespace = 'public'::regnamespace and proname = r.name);
-    end if;
+  for r in select * from (values ('handle_new_user', '07b84cd343cefae1c34fe8c683005875', 'true|search_path=public|v||trigger|postgres|false,false,true'), ('wms_org_create_key', 'e5f60e74a5fca184f8c1fe32f0ad0d63', 'true|search_path=public|v|p_org uuid, p_label text DEFAULT NULL::text|text|postgres|false,true,true'), ('wms_org_connector', '968cf1b355af9da6942453769be455db', 'true|search_path=public|s|p_org uuid|jsonb|postgres|false,true,true'), ('set_order_cutoff', 'fd0767aa9324307b77115d0aa63c2649', 'false|search_path=public|v||trigger|postgres|false,false,true')) v(name, want_body, want_props) loop
+    select md5(p.prosrc), p.prosecdef::text || '|' || coalesce(array_to_string(p.proconfig, ','), '') || '|' || p.provolatile::text || '|' || pg_get_function_arguments(p.oid) || '|' || pg_get_function_result(p.oid) || '|' || o.rolname::text || '|' ||
+           has_function_privilege('anon', p.oid, 'execute')::text || ',' || has_function_privilege('authenticated', p.oid, 'execute')::text || ',' || has_function_privilege('service_role', p.oid, 'execute')::text
+      into v_body, v_props from pg_proc p join pg_roles o on o.oid = p.proowner where p.pronamespace = 'public'::regnamespace and p.proname = r.name;
+    if v_body is distinct from r.want_body then raise exception 'Before: the text of % is not what was expected (found %). Nothing was changed.', r.name, v_body; end if;
+    -- security mode | settings | volatility | arguments | returns | owner | who may run it (not signed in, signed in, service role)
+    if v_props is distinct from r.want_props then raise exception 'Before: the properties of % are not what was expected (found %). Nothing was changed.', r.name, v_props; end if;
   end loop;
 end $chk$;
 
@@ -53,7 +58,7 @@ begin
                       from wms_api_keys k where k.org_id = p_org and (k.label is distinct from 'Demo reset' or k.revoked_at is null)), '[]'::jsonb));
 end $function$;
 
-create or replace function public.set_order_cutoff() returns trigger language plpgsql as $function$
+create or replace function public.set_order_cutoff() returns trigger language plpgsql set search_path to 'public' as $function$
 declare
   o orgs%rowtype;
   local_placed timestamp;
@@ -78,12 +83,21 @@ end $function$;
 revoke insert, update, delete, truncate on table public.orders from anon;
 
 do $chk$
-declare r record;
+declare r record; v_body text; v_props text;
 begin
-  for r in select * from (values ('handle_new_user', 'ecc05dbe173362d88da1dc7af485e022'), ('wms_org_create_key', 'b20b5f55afe0f3236f49406b78e4b229'), ('wms_org_connector', 'adbc0800a472551bb1a48b621d10f181'), ('set_order_cutoff', '422df3169deba5891817313d22febd11')) v(name, want) loop
-    if (select md5(prosrc) from pg_proc where pronamespace = 'public'::regnamespace and proname = r.name) is distinct from r.want then
-      raise exception 'After: % is not the expected text (found %). Nothing was changed.', r.name, (select md5(prosrc) from pg_proc where pronamespace = 'public'::regnamespace and proname = r.name);
-    end if;
+  for r in select * from (values ('handle_new_user', 'ecc05dbe173362d88da1dc7af485e022', 'true|search_path=public|v||trigger|postgres|false,false,true'), ('wms_org_create_key', 'b20b5f55afe0f3236f49406b78e4b229', 'true|search_path=public|v|p_org uuid, p_label text DEFAULT NULL::text|text|postgres|false,true,true'), ('wms_org_connector', 'adbc0800a472551bb1a48b621d10f181', 'true|search_path=public|s|p_org uuid|jsonb|postgres|false,true,true'), ('set_order_cutoff', '422df3169deba5891817313d22febd11', 'false|search_path=public|v||trigger|postgres|false,false,true')) v(name, want_body, want_props) loop
+    select md5(p.prosrc), p.prosecdef::text || '|' || coalesce(array_to_string(p.proconfig, ','), '') || '|' || p.provolatile::text || '|' || pg_get_function_arguments(p.oid) || '|' || pg_get_function_result(p.oid) || '|' || o.rolname::text || '|' ||
+           has_function_privilege('anon', p.oid, 'execute')::text || ',' || has_function_privilege('authenticated', p.oid, 'execute')::text || ',' || has_function_privilege('service_role', p.oid, 'execute')::text
+      into v_body, v_props from pg_proc p join pg_roles o on o.oid = p.proowner where p.pronamespace = 'public'::regnamespace and p.proname = r.name;
+    if v_body is distinct from r.want_body then raise exception 'After: the text of % is not what was expected (found %). Nothing was changed.', r.name, v_body; end if;
+    -- security mode | settings | volatility | arguments | returns | owner | who may run it (not signed in, signed in, service role)
+    if v_props is distinct from r.want_props then raise exception 'After: the properties of % are not what was expected (found %). Nothing was changed.', r.name, v_props; end if;
   end loop;
+end $chk$;
+do $chk$
+begin
+  if has_table_privilege('anon', 'public.orders', 'insert') or has_table_privilege('anon', 'public.orders', 'update') or has_table_privilege('anon', 'public.orders', 'delete') or has_table_privilege('anon', 'public.orders', 'truncate') then
+    raise exception 'After: the not-signed-in role can still write to orders (through a grant to another role or to everyone). Nothing was changed.';
+  end if;
 end $chk$;
 commit;

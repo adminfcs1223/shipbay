@@ -27,7 +27,7 @@ revoke all on function public.dev_no_signup() from anon, authenticated;
 
 -- 3. set_order_cutoff: when the caller cannot see the brand on the order, every value was null and the weekday loop never ended;
 --    the insert spun until the statement timeout (3 seconds with the public key alone, 8 with a login). Two added lines.
-create or replace function public.set_order_cutoff() returns trigger language plpgsql as $function$
+create or replace function public.set_order_cutoff() returns trigger language plpgsql set search_path to 'public' as $function$
 declare
   o orgs%rowtype;
   local_placed timestamp;
