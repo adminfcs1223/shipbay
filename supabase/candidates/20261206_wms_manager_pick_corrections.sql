@@ -1,0 +1,89 @@
+-- CANDIDATE. Not applied to production, and not applied to shipbay-nexus-dev. Additive: three new functions, nothing replaced,
+-- no table, no row, no grant on any existing object.
+--
+-- The gap: a floor picker whose pallet left the shared floor after the pick is told to ask a manager, but a manager who signs in
+-- sees only their own wave. wms_pick_correct already corrects that stop when it is given the stop; nothing let a manager find it.
+--
+--   wms_manager_stops(brand)                         ShipBay admin or staff. For ONE brand: every pick, on any picker's open
+--                                                    wave, that was taken from a pallet which has since left the shared floor,
+--                                                    with either "can be corrected" or the reason it cannot.
+--   wms_manager_stop_correct(brand, stop, shelf, reason)   ShipBay admin or staff. The stop must belong to the brand named.
+--                                                    Refuses every state it does not support, in words, with nothing changed.
+--                                                    Where it is supported it calls wms_pick_correct unchanged: the units go
+--                                                    back onto a private ShipBay shelf as ONE ledger row naming the manager and
+--                                                    the reason, and the picker's stop reopens at that shelf.
+--   _wms_stop_correct_block(stop)                    internal: the one place that says why a stop cannot be corrected.
+--
+-- Supported: a stop with a confirmed pick of at least one unit (full or short), on a wave still being picked, whose pallet is
+-- off the shared floor or departed and has no Nexus request waiting.
+-- Refused, explicitly: a stop not picked yet; a stop where nothing was picked; a pallet still on the floor (the picker reopens
+-- it); a shelf pick; a Nexus request waiting; a wave at the pack station; a packed, shipped, closed or cancelled order; a
+-- finished or cancelled wave. Packed and shipped stock is never rewritten here.
+begin;
+
+create or replace function public._wms_stop_correct_block(p_task uuid) returns text
+language plpgsql stable security definer set search_path to 'public' as $$
+declare t wms_wave_tasks; w wms_waves; p wms_pallets; v_order text; v_at text;
+begin
+  select * into t from wms_wave_tasks where id = p_task; if t.id is null then return 'That stop is not on file.'; end if;
+  select * into w from wms_waves where id = t.wave_id;
+  if w.status = 'cancelled' then return format('Wave %s was cancelled. There is no pick on it to correct.', w.seq); end if;
+  select o.order_number into v_order from wms_wave_task_lines x join order_lines ol on ol.id = x.line_id join orders o on o.id = ol.order_id
+    where x.task_id = t.id and (o.status = 'shipped' or o.shipped_at is not null) order by o.order_number limit 1;
+  if v_order is not null then return format('Order %s has shipped. Shipped stock is not rewritten by a pick correction.', v_order); end if;
+  select o.order_number into v_order from wms_wave_task_lines x join order_lines ol on ol.id = x.line_id join orders o on o.id = ol.order_id
+    left join wms_wave_orders wo on wo.wave_id = t.wave_id and wo.order_id = o.id
+    where x.task_id = t.id and (o.status = 'packed' or o.packed_at is not null or wo.pack_state = 'packed') order by o.order_number limit 1;
+  if v_order is not null then return format('Order %s is packed. Packed stock is not rewritten by a pick correction.', v_order); end if;
+  select o.order_number into v_order from wms_wave_task_lines x join order_lines ol on ol.id = x.line_id join orders o on o.id = ol.order_id
+    where x.task_id = t.id and (o.status = 'cancelled' or o.closed_at is not null) order by o.order_number limit 1;
+  if v_order is not null then return format('Order %s is closed or cancelled. Its pick is not corrected here.', v_order); end if;
+  if w.status = 'done' then return format('Wave %s is finished. A finished wave is not rewritten by a pick correction.', w.seq); end if;
+  if w.status = 'packing' then return format('Wave %s is at the pack station. A pick cannot be returned to a shelf from there; nothing was changed.', w.seq); end if;
+  if w.status <> 'picking' then return format('Wave %s is not being picked.', w.seq); end if;
+  if t.confirmed_at is null then return 'That stop has not been picked yet. There is nothing to return.'; end if;
+  if coalesce(t.qty_picked, 0) = 0 then return 'Nothing was picked at that stop. There is nothing to return.'; end if;
+  if t.pallet_id is null then return 'That stop was picked from a ShipBay shelf. The picker reopens it on their own screen.'; end if;
+  select * into p from wms_pallets where id = t.pallet_id;
+  if _wms_pallet_busy(p.id) then return format('%s is waiting for Nexus to confirm where it stands. Correct this pick after that is settled.', p.psku); end if;
+  if p.status not in ('departed', 'off_floor') then
+    select code into v_at from locations where id = p.location_id;
+    return format('%s is still on the floor%s. The picker reopens this stop on their own screen.', p.psku, coalesce(' at ' || v_at, ''));
+  end if;
+  return null;
+end $$;
+
+create or replace function public.wms_manager_stops(p_org uuid) returns jsonb
+language plpgsql stable security definer set search_path to 'public' as $$
+begin
+  if not wms_nexus_admin() then raise exception 'Only ShipBay admin or staff can see picks waiting for a manager.'; end if;
+  if p_org is null then raise exception 'Name the brand.'; end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object(
+      'task', t.id, 'wave', w.seq, 'wave_status', w.status, 'picker', w.picker_name, 'mine', w.picker = auth.uid(),
+      'sku', s.sku, 'name', s.name, 'units', t.qty_picked, 'planned', t.qty_planned, 'picked_from', l.code, 'picked_at', t.confirmed_at, 'picked_by', t.confirmed_by_name,
+      'pallet', p.psku, 'pallet_status', p.status,
+      'orders', (select coalesce(jsonb_agg(distinct o.order_number), '[]') from wms_wave_task_lines x join order_lines ol on ol.id = x.line_id join orders o on o.id = ol.order_id where x.task_id = t.id),
+      'blocked', _wms_stop_correct_block(t.id)) order by w.seq, t.seq), '[]')
+    from wms_wave_tasks t join wms_waves w on w.id = t.wave_id join wms_pallets p on p.id = t.pallet_id join skus s on s.id = t.sku_id join locations l on l.id = t.location_id
+    where w.org_id = p_org and w.status in ('picking', 'packing') and t.confirmed_at is not null and coalesce(t.qty_picked, 0) > 0 and p.status in ('departed', 'off_floor'));
+end $$;
+
+create or replace function public.wms_manager_stop_correct(p_org uuid, p_task uuid, p_to_location text, p_reason text) returns jsonb
+language plpgsql security definer set search_path to 'public' as $$
+declare w wms_waves; v_block text; r jsonb;
+begin
+  if not wms_nexus_admin() then raise exception 'Only ShipBay admin or staff can correct a pick.'; end if;
+  select w2.* into w from wms_wave_tasks t join wms_waves w2 on w2.id = t.wave_id where t.id = p_task;
+  if p_org is null or w.id is null or w.org_id is distinct from p_org then raise exception 'That stop is not one of this brand''s.'; end if;   -- the same answer whether it is another brand's or nobody's
+  if length(coalesce(trim(p_reason), '')) < 5 then raise exception 'Say why this pick is being corrected.'; end if;
+  v_block := _wms_stop_correct_block(p_task); if v_block is not null then raise exception '%', v_block; end if;
+  r := wms_pick_correct('wave_stop', p_task, p_to_location, p_reason);   -- unchanged: locks, re-checks, posts once, reopens the stop at the shelf
+  return jsonb_build_object('units_returned', r->'units_returned', 'returned_to', r->'returned_to', 'pallet', r->'pallet', 'wave', w.seq, 'picker', w.picker_name, 'stops', wms_manager_stops(p_org));
+end $$;
+
+revoke all on function public._wms_stop_correct_block(uuid) from public, anon, authenticated, service_role;
+revoke all on function public.wms_manager_stops(uuid) from public, anon;
+revoke all on function public.wms_manager_stop_correct(uuid, uuid, text, text) from public, anon;
+grant execute on function public.wms_manager_stops(uuid) to authenticated;
+grant execute on function public.wms_manager_stop_correct(uuid, uuid, text, text) to authenticated;
+commit;

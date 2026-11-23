@@ -656,6 +656,8 @@ label input.bignum { height: 59px; font-size: 26px; font-weight: 800; font-varia
 /* orders: wave → pack */
 .backlink { background: none; border: 0; padding: 0; font-weight: 700; color: var(--muted); font-size: 14px; } .wv-crumb { font-weight: 700; color: var(--muted); font-size: 14px; }
 .wv-start { display: grid; gap: 14px; margin-top: 22px; max-width: 760px; } .wv-note { color: var(--muted); font-size: 14.5px; margin: 0; } .wv-mgr { max-width: none; }
+.wv-waits { list-style: none; margin: 0; padding: 0; } .wv-waits li { display: flex; gap: 18px; align-items: center; justify-content: space-between; padding: 14px 22px; border-top: 1px solid var(--line); } .wv-waits li:first-child { border-top: 0; }
+.wv-waits li > div { min-width: 0; display: grid; gap: 3px; } .wv-waits small { color: var(--muted); font-size: 13.5px; } .wv-waits small.why { color: var(--red); } .wv-waits .btn { flex: none; }
 .wv-stop { margin-top: 20px; background: #fff; border: 2px solid var(--ink); border-radius: var(--r); overflow: hidden; }
 .wv-where { display: grid; gap: 2px; padding: 18px 20px; background: var(--ink); color: #fff; } .wv-where small { font-weight: 700; opacity: .7; font-size: 13px; } .wv-where b { font-size: 64px; line-height: 1; font-weight: 800; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .wv-where span { font-weight: 600; opacity: .85; } .wv-where em { font-style: normal; font-weight: 700; color: var(--orange); }

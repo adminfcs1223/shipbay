@@ -12,4 +12,7 @@ open(p,'w').write(head+"-- ===== 1. candidate 20261204 =====\n"+strip(c)+"\n-- =
 p='supabase/dev/pending/dev_033_open_box_safety.sql'; head=open(p).read().split('-- ===== candidate')[0]
 c=open('supabase/candidates/20261205_wms_open_box_safety.sql').read()
 open(p,'w').write(head+"-- ===== candidate 20261205 =====\n"+strip(c))
+p='supabase/dev/pending/dev_034_manager_pick_corrections.sql'; head=open(p).read().split('-- ===== candidate')[0]
+c=open('supabase/candidates/20261206_wms_manager_pick_corrections.sql').read()
+open(p,'w').write(head+"-- ===== candidate 20261206 =====\n"+strip(c))
 PY

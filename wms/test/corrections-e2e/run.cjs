@@ -208,13 +208,10 @@ const call = async (who, fn, args, { method = 'POST', table = null, query = '' }
   const fTask = await q1('select t.id from wms_wave_tasks t where t.pallet_id = $1', [F.id]);
   await shot(p, '10-floor-pick-ask-manager');
 
-  section('Pick correction: can a manager reach the floor login\'s stop from their own screen?');
+  section('Pick correction: the manager reaches the floor login\'s stop from their own Orders screen');
   const ad2 = await signIn('admin', '#orders'); p = ad2.p; await p.locator('.brandlist button', { hasText: 'Synthetic Records' }).click(); await p.waitForTimeout(900);
-  const mgr = norm(await p.locator('body').innerText());
-  const reach = await p.locator('[data-testid=pick-correct]').count() > 0 || /Return the units to the shelf/.test(mgr);
-  console.log(`     the admin's Orders screen for the brand: ${mgr.slice(mgr.indexOf('Synthetic Records.'), mgr.indexOf('Synthetic Records.') + 260)}`);
-  if (!reach) findings.push('Pick correction: the form appears only on the wave of the login that picked it. A floor picker is told to "ask a manager: they return them to a shelf from this screen", but a manager who signs in sees only their own wave; the floor picker\'s stop cannot be opened from the manager\'s screen. The correction itself works for that stop when called directly (checked below over HTTP).');
-  ok(true, `recorded, not a pass or fail: the manager ${reach ? 'CAN' : 'CANNOT'} reach the floor picker's stop from their own Orders screen`);
+  const waits = await p.locator('[data-testid=mgr-stop]').count() ? norm(await p.locator('[data-testid=mgr-stop]').first().innerText()) : '';
+  ok(new RegExp(`Test Floor \\(synthetic\\) 6 × Synthetic CE-FLOOR .*Picked from P-62, pallet ${F.psku}.*Return to a shelf`).test(waits), `the floor picker's stop is listed under "Picks waiting for a manager" with a way to correct it: ${waits.slice(0, 120)}`);
   await shot(p, '11-admin-sees-other-wave');
 
   section('Pick correction as admin, on the admin\'s own wave');

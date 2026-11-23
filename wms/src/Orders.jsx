@@ -93,7 +93,14 @@ const printPackageLabels = (brand, orders) => printPages(orders.flatMap((o) => o
 function Brand({ me, brand, back }) {
   const [sum, setSum] = useState(null); const [wave, setWave] = useState(null); const [short, setShort] = useState(null);
   const [err, setErr] = useState(null); const [busy, setBusy] = useState(false); const [ready, setReady] = useState(false);
-  const loadSum = async () => { const { data, error } = await supabase.rpc('wms_orders_summary', { p_org: brand.id }); if (error) { setErr(error.message); return null; } setSum(data); return data; };
+  const [stops, setStops] = useState([]); const [mfix, setMfix] = useState(null); const [mdone, setMdone] = useState(null);   // picks waiting for a manager, on ANY picker's wave of this brand
+  // Managers only. A database that does not have the function yet answers "not found": then there is simply no list.
+  const loadStops = async () => { const { data, error } = await supabase.rpc('wms_manager_stops', { p_org: brand.id }); if (error) { if (error.code !== 'PGRST202') setErr(error.message); return setStops([]); } setStops(data || []); };
+  const loadSum = async () => { const { data, error } = await supabase.rpc('wms_orders_summary', { p_org: brand.id }); if (error) { setErr(error.message); return null; } setSum(data); if (data?.manager) loadStops(); return data; };
+  const mcorrect = async () => { setBusy(true); setErr(null); setMdone(null);
+    const { data, error } = await supabase.rpc('wms_manager_stop_correct', { p_org: brand.id, p_task: mfix.task, p_to_location: mfix.to, p_reason: mfix.why }); setBusy(false);
+    if (error) return setErr(error.message);
+    setMfix(null); setStops(data.stops || []); setMdone(`${plural(data.units_returned, 'unit')} returned to ${data.returned_to}. ${data.picker}'s wave ${data.wave} now sends the picker to that shelf.`); };
   useEffect(() => { (async () => {
     const s = await loadSum();
     if (s?.my_wave) { const { data } = await supabase.rpc('wms_wave', { p_wave: s.my_wave }); if (data) setWave(data); }   // pick up where this login left off
@@ -108,8 +115,10 @@ function Brand({ me, brand, back }) {
   const leave = () => { setWave(null); setShort(null); loadSum(); };
   const resolve = async (line) => { const { error } = await supabase.rpc('wms_resolve_problem', { p_lines: [line] }); if (error) setErr(error.message); loadSum(); };
 
-  if (wave?.status === 'picking') return <Pick brand={brand} wave={wave} setWave={setWave} leave={leave} manager={!!sum?.manager} />;
-  if (wave?.status === 'packing') return <Pack brand={brand} wave={wave} setWave={setWave} leave={leave} />;
+  // a manager who is in the middle of their own wave still has to be able to reach the other pickers' stops
+  const waiting = sum?.manager && stops.length > 0 && <div className="strip" data-testid="mgr-waiting"><span>{plural(stops.length, 'pick')} on this brand {stops.length === 1 ? 'is' : 'are'} waiting for a manager.</span><button className="btn sm" onClick={leave}>Show</button></div>;
+  if (wave?.status === 'picking') return <>{waiting}<Pick brand={brand} wave={wave} setWave={setWave} leave={leave} manager={!!sum?.manager} /></>;
+  if (wave?.status === 'packing') return <>{waiting}<Pack brand={brand} wave={wave} setWave={setWave} leave={leave} /></>;
   if (wave?.status === 'done') return <WaveDone brand={brand} wave={wave} next={start} busy={busy} leave={leave} err={err} />;
   return (
     <>
@@ -121,11 +130,32 @@ function Brand({ me, brand, back }) {
       {!ready ? <div className="empty">Loading…</div> : (
         <div className="wv-start" data-testid="wave-start">
           {short && !wave && <div className="strip bad" data-testid="no-wave"><span>{short.length ? `No wave can be built: the stock on file does not cover ${plural(new Set(short.map((s) => s.order_number)).size, 'open order')}. A manager has the list.` : 'There are no orders to pick right now.'}</span></div>}
-          <button className="btn big go" data-testid="start-wave" onClick={start} disabled={busy || (sum && sum.to_pick === 0)}>{busy ? 'Building your wave…' : sum && sum.to_pick === 0 ? 'Nothing to pick' : 'Start the next wave'}</button>
+          <button className="btn big go" data-testid="start-wave" onClick={start} disabled={busy || (sum && sum.to_pick === 0 && !sum.my_wave)}>{busy ? 'Building your wave…' : sum?.my_wave ? 'Go back to your wave' : sum && sum.to_pick === 0 ? 'Nothing to pick' : 'Start the next wave'}</button>
           <p className="wv-note">You get one trip at a time: the stops in walking order, ending at your pack station. Then you pack what you picked.</p>
           {brand.client_code === 'DEMO' && <button className="swap" disabled={busy} onClick={async () => { setBusy(true); const problem = await resetDemo(); setBusy(false); setShort(null); if (problem) setErr(problem); loadSum(); }}>Reset the demo data</button>}
           {sum && sum.other_waves.length > 0 && <p className="wv-note">{sum.other_waves.map((w) => `Wave ${w.seq}: ${w.picker} (${w.status})`).join(' · ')}</p>}
           {sum && sum.with_manager > 0 && !sum.manager && <p className="wv-note" data-testid="with-manager">{plural(sum.with_manager, 'order')} {sum.with_manager === 1 ? 'is' : 'are'} with a manager.</p>}
+          {mdone && <div className="strip ok" data-testid="mgr-done"><span>{mdone}</span><button className="x" onClick={() => setMdone(null)} aria-label="Dismiss">×</button></div>}
+          {sum?.manager && stops.length > 0 && (
+            <section className="panel wv-mgr" data-testid="mgr-stops">
+              <div className="panelhead"><h3>Picks waiting for a manager</h3><span>{plural(stops.length, 'pick')}</span></div>
+              <ul className="wv-waits">
+                {stops.map((s) => <li key={s.task} data-testid="mgr-stop">
+                  <div><b>Wave {s.wave} · {s.picker}</b>
+                    <span>{num(s.units)}{s.units < s.planned ? ` of ${num(s.planned)}` : ''} × {s.name} <span className="code">{s.sku}</span></span>
+                    <small>Picked from <span className="code">{s.picked_from}</span>, pallet <span className="code">{s.pallet}</span>, which has {s.pallet_status === 'departed' ? 'left the building' : 'left the shared floor'} · order {s.orders.join(', ')}</small>
+                    {s.blocked && <small className="why" data-testid="mgr-blocked">{s.blocked}</small>}</div>
+                  {!s.blocked && <button className="btn sm" data-testid="mgr-open" disabled={busy} onClick={() => { setErr(null); setMdone(null); setMfix({ task: s.task, to: '', why: '', label: `Wave ${s.wave} · ${s.picker} · ${num(s.units)} × ${s.name}` }); }}>Return to a shelf</button>}
+                </li>)}
+              </ul>
+              {mfix && <div style={{ padding: '16px 22px 20px', borderTop: '1px solid var(--line, #e6e3dc)' }} data-testid="mgr-form">
+                <p className="wv-note" style={{ marginBottom: 10 }}>{mfix.label}. The picked units go back onto a ShipBay shelf, and the picker's stop is picked again from there.</p>
+                <label style={{ display: 'block', marginBottom: 8 }}>Shelf the units are going back to <input value={mfix.to} onChange={(e) => setMfix({ ...mfix, to: e.target.value })} placeholder="A-01" data-testid="mgr-to" /></label>
+                <label style={{ display: 'block', marginBottom: 12 }}>Why <input value={mfix.why} onChange={(e) => setMfix({ ...mfix, why: e.target.value })} placeholder="Order changed after the pallet shipped" data-testid="mgr-why" style={{ minWidth: 320 }} /></label>
+                <button className="btn sm" disabled={busy || !mfix.to.trim() || mfix.why.trim().length < 5} onClick={mcorrect} data-testid="mgr-go">Return the units to the shelf</button> <button className="swap" disabled={busy} onClick={() => setMfix(null)}>Cancel</button>
+              </div>}
+            </section>
+          )}
           {sum?.manager && (sum.problems.length > 0 || (short && short.length > 0)) && (
             <section className="panel wv-mgr" data-testid="manager">
               <div className="panelhead"><h3>Needs a manager</h3><span>{plural(sum.problems.length + (short || []).length, 'item')}</span></div>
@@ -160,7 +190,7 @@ function Pick({ brand, wave, setWave, leave, manager }) {
         <label style={{ display: 'block', marginBottom: 12 }}>Why <input value={fix.why} onChange={(e) => setFix({ ...fix, why: e.target.value })} placeholder="Order changed after the pallet shipped" data-testid="fix-why" style={{ minWidth: 320 }} /></label>
         <button className="btn sm" disabled={busy || !fix.to.trim() || fix.why.trim().length < 5} onClick={correct} data-testid="fix-go">Return the units to the shelf</button> <button className="swap" disabled={busy} onClick={() => setFix(null)}>Cancel</button>
       </section>
-    : <div className="strip" data-testid="pick-correct-ask"><span>Leave the picked units to one side and ask a manager: they return them to a shelf from this screen.</span></div>);
+    : <div className="strip" data-testid="pick-correct-ask"><span>Leave the picked units to one side and ask a manager. On their own login they open Orders, {brand.name}, and return them to a shelf under “Picks waiting for a manager” (wave {wave.seq}).</span></div>);
   const confirm = (code) => { const n = Number(qty); if (qty === '' || !Number.isInteger(n) || n < 0) return setErr('Enter how many units you picked.'); return call('wms_wave_confirm', { p_task: cur.id, p_qty: n, p_scan: (typeof code === 'string' ? code : scan) || null }); };
   const handBack = async () => { setBusy(true); const { error } = await supabase.rpc('wms_wave_cancel', { p_wave: wave.id }); setBusy(false); if (error) return setErr(error.message); leave(); };
   const problems = wave.orders.filter((o) => o.pack_state === 'problem');

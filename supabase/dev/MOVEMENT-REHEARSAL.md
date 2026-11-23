@@ -1,12 +1,132 @@
 # Hosted movement rehearsal: dev database and bridge ready, screens validated, runner and stages not run
 
-Updated 2026-11-23, 3:55 AM ET. Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
+Updated 2026-11-23, 1:15 PM ET (manager access to pick corrections, local only; see the next section). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
 and dev_033 are applied and verified on `shipbay-nexus-dev`. The three correction forms have now been run in a browser and the
 correction endpoints called over HTTP with real sessions (below). The movement runner is NOT deployed, no switch was set, and
 nothing was sent to Nexus. Production and `main` are untouched.
 
 **Hold (Derek, 2026-11-23 2:30 AM):** the hosted rehearsal does not start yet. Souled's P-02 placement is being prepared and
 Nexus has a destination-safety deployment pending. PSKU-000001 stays at P-01.
+
+## Manager access to pick corrections (candidate 20261206): built and tested locally, applied nowhere
+
+Derek's assignment, 2026-11-23 12:20 PM. The gap was defect 2 below: a floor picker whose pallet left after the pick is told to
+ask a manager, and a manager who signed in saw only their own wave.
+
+### What was built
+
+`supabase/candidates/20261206_wms_manager_pick_corrections.sql`: three NEW functions. Nothing existing is replaced; no table,
+row or existing grant is touched. `wms_pick_correct` is unchanged and still does the posting.
+
+- `wms_manager_stops(brand)`: ShipBay admin or staff. For one brand: every pick, on any picker's open wave, taken from a
+  pallet that has since left the shared floor: wave, picker, item, units picked and planned, position, pallet, order, and
+  either "can be corrected" or the reason it cannot.
+- `wms_manager_stop_correct(brand, stop, shelf, reason)`: ShipBay admin or staff. The stop must belong to the brand named
+  (another brand's stop and a stop that does not exist get the same answer). Reason of at least five letters. Then every
+  unsupported state is refused in words; only then does it call `wms_pick_correct`.
+- `_wms_stop_correct_block(stop)`: internal, callable by no login. The one place that says why a stop cannot be corrected.
+
+On the Orders screen (`wms/src/Orders.jsx`, `wms.css`): a manager who opens a brand sees "Picks waiting for a manager", one row
+per pick, with "Return to a shelf" (shelf and reason) or the refusal. A manager in the middle of their own wave gets a notice
+above it with "Show", and "Go back to your wave" afterwards. The floor picker's message now says where the manager finds it
+(brand and wave number). The list call is tolerant of a database that does not have the function yet (no list, no error), so
+the screen and the migration can go out in either order.
+
+### What each state does
+
+| State of the stop | Result |
+|---|---|
+| Picked in full, wave still being picked, pallet departed or off the shared floor | Corrected: the units picked go onto the private shelf named, ONE ledger row naming the manager, the stop and the reason; an activity entry; the picker's stop reopens at that shelf |
+| Picked short (4 of 6), same conditions | Corrected for exactly the 4 picked. The stop reopens for the order's 6 with 4 on the shelf; the picker can confirm no more than 4; a second order is not planned against those 4 (reported short) |
+| Not picked yet | Refused: "has not been picked yet. There is nothing to return." |
+| Confirmed with 0 | Refused: "Nothing was picked at that stop." |
+| Pallet still on the floor | Refused: "... is still on the floor at P-nn. The picker reopens this stop on their own screen." |
+| Picked from a shelf | Refused: the picker reopens it |
+| A Nexus request waiting or out of sync on the pallet | Refused until it is settled; listed once it is |
+| Wave at the pack station | Listed, with the reason, no button; refused: "... is at the pack station. A pick cannot be returned to a shelf from there; nothing was changed." |
+| Order packed | Refused: "Order ... is packed. Packed stock is not rewritten by a pick correction." |
+| Order shipped | Refused: "Order ... has shipped. Shipped stock is not rewritten by a pick correction." |
+| Order closed or cancelled; wave finished or cancelled | Refused, each in words |
+
+Unsupported and still open (item 4 under "Assessed, not fixed"): nothing returns picked units to stock once a wave is at the
+pack station. This work refuses it explicitly; it does not solve it.
+
+### "Company isolation": what is enforced, and what the roles are
+
+ShipBay admin and staff are ShipBay's own logins and work every ShipBay brand; there is no manager role scoped to one brand,
+and Souled has no login in ShipBay's database. What is enforced and tested: every call names its brand; a brand's list holds
+only that brand's picks; a stop cannot be corrected under another brand's name; a client login (tested in each of two brands,
+against its own brand and the other) can read no list, correct nothing, and cannot open a wave or the order summary; the
+ledger row of a correction belongs to the stop's brand. If a brand-scoped manager is ever wanted, that is a new role, not part
+of this.
+
+### Tests (all local, synthetic)
+
+| Test | Result |
+|---|---|
+| `supabase/tests/staging/manager.test.mjs` (real Nexus service code, bridge in-process) | 5 of 5: find and correct; authorization (floor, two clients, sales, public key, internal function); brand isolation; every refused state incl. a lost Nexus answer, pack station, packed, shipped, cancelled; short pick and reservations; ledger afterwards |
+| Browser, whole WMS app, real token checking: `SEED=manager RUNNER=run-manager.cjs wms/test/corrections-e2e/run.sh` | 79 of 79: floor message and no manager controls; admin list, form refusals, correction; second brand's own list; staff mid-wave notice, short pick, back to own wave; the picker's screen afterwards; HTTP as floor, both clients, no token, public key, forged token; a floor login trying to change its own role or create a manager profile (403, "Only the owner can change roles and access."); cross-brand over HTTP; ledger, reservations, PSKU-000001 |
+| Browser, the earlier corrections run (`run.sh`) | 113 of 113 (its "manager cannot reach the stop" record is now a check that the stop IS listed) |
+| Stock and workflow suites with 20261206 loaded | void 6, units 5, open box 5, workflow 6, bridge 16 |
+| Other database suites | activity 3, dock 1, nexus 7, registry 1, waves 1, receiving graft 10 |
+| Movement suite, nine stages, real Nexus service code | 331 of 331 |
+| Runner under Deno; Edge wrapper | 13 of 13; 4 of 4 |
+| WMS unit tests; normal WMS build | 56 of 56; builds |
+| `dev_034` on a local database in dev's state (through dev_033, PSKU-000001 stored at P-01) | Functions and grants then equal a full build (one fingerprint over 158); `manager-correct-check.sql` 5 of 5, open-box 8, stock-safety 7, regression 15, workflow 6, all rolled back; pallets, ledger (1 row of 100) and journal unchanged. Without dev_034 the new check refuses to run |
+
+"Genuine authentication" here means tokens checked by real PostgREST on the local stack, in a browser and over HTTP. Sessions
+issued by Supabase Auth cannot reach these functions until they exist on dev.
+
+### Not covered, stated plainly
+
+- Nothing is on hosted dev: no migration applied, no screen deployed. Not run with Supabase Auth sessions.
+- The correction returns units to ONE shelf per pick, typed by the manager; there is no shelf picker and no scan.
+- The manager finds picks per brand. There is no count on the brand list, so a manager has to open the brand the picker names
+  (the floor message names brand and wave).
+- A pallet off the shared floor but still in ShipBay's custody (`off_floor`) is treated like one that left the building: the
+  picked units go to a shelf, not back to the pallet. Tested for both in the database test; the browser run used `departed`.
+- Phone width was not run.
+- Seen while testing, not changed: the existing "Needs a manager" table on the same screen is wider than its panel at 1320 px
+  and its last column ("Back to the pick list") is cut off.
+
+### Proposed development deployment (each step needs its own approval)
+
+1. **Migration.** `supabase/dev/pending/dev_034_manager_pick_corrections.sql` to `shipbay-nexus-dev`, one transaction: three
+   new functions, their revokes, two grants. Verify the three bodies by md5 and every other function unchanged.
+2. **Hosted checks, rolled back.** `manager-correct-check.sql` (5), then open-box (8), stock-safety (7), regression (15),
+   workflow (6). Fingerprints of pallets, ledger and journal before and after; PSKU-000001. The new check uses P-60 to P-62 on
+   ShipBay's side only and sends nothing to Nexus.
+3. **Real sessions.** One-off probe as before (15-minute gate, stub restored): the two functions as admin, staff, floor and
+   client, with stops that do not exist, so nothing can be written.
+4. **Screen.** There is no hosted WMS build on dev. The screen reaches users only with a WMS deploy from `main`, which is a
+   production step and not proposed here. Until then the function is usable on dev by API only.
+5. **Rehearsal.** Unaffected: the suite calls none of the three functions, and 331 of 331 pass with them loaded. The pre-run
+   check then expects 31 migrations and three more functions on dev.
+
+## Later hardening: direct ledger writes by ShipBay logins (documented, NOT changed)
+
+Today the ledger table `inventory_moves` has two access rules: a client reads its own brand's rows, and
+`shipbay_all_moves` lets any login for which `is_shipbay()` is true read, insert, update and delete any row. `is_shipbay()` is
+true for `shipbay_admin`, `shipbay_staff` and also `shipbay_sales`. So those logins can post, change or remove a stock row
+through the API with no reason, no pallet, no position check and no check for a waiting Nexus request, and nothing records why.
+Every correction function built this week (count, open box, pick, void) can be bypassed that way. Floor and client logins
+cannot (checked locally and on hosted dev).
+
+Nothing in the portal, WMS or Edge Function source in the repository writes the table directly (the portal's `lib.js` only
+names it among brand-scoped tables). Production-only code was not read.
+
+Requirement for a later task, with its own approval and tests:
+
+1. Find every direct writer first: production functions and screens not in the repository, imports, and any manual practice
+   (Admin corrections typed into the table). Until that list exists, removing the write access can break something unseen.
+2. Give stock corrections one function with a required reason, the acting login, a position, and the same guards as the
+   others (no shared position without its pallet, no waiting Nexus request, never below zero or below planned picks). This is
+   also the missing cycle-count transaction (item 3 under "Assessed, not fixed").
+3. Then narrow the table rule: ShipBay logins read; insert, update and delete only through functions. Decide separately
+   whether `shipbay_sales` should read the ledger at all.
+4. Make rows append-only (no update or delete for any login), so a correction is always a new row.
+
+Not done in this task by instruction: no ledger grant or rule was altered.
 
 ## Screens and HTTP: validated 2026-11-23 (Derek's assignment of 2:30 AM)
 
@@ -73,7 +193,7 @@ byte-for-byte unchanged.
 1. **FIXED in the source (not deployed anywhere): the Units box locked itself.** After "Say why the count is being corrected."
    the Save button stayed on "Saving..." and locked until the page was reloaded. The reason is now checked before the button is
    locked (`wms/src/Pallets.jsx`). Only matters once the Pallets screen is switched back on.
-2. **OPEN: a manager cannot reach a floor picker's stop.** The pick-correction form appears only on the wave of the login that
+2. **FIXED locally in candidate 20261206 (not on dev, not deployed; see the section above): a manager cannot reach a floor picker's stop.** The pick-correction form appears only on the wave of the login that
    picked it. The floor picker is told "ask a manager: they return them to a shelf from this screen", but a manager who signs
    in sees only their own wave (the floor picker's is listed as "Wave 1: Test Floor (picking)" with nothing to open). The
    function itself corrects that stop when an admin calls it (checked over HTTP; the floor screen then sends the picker to the
