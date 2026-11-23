@@ -2,11 +2,11 @@
 # Read-only smoke test of the hosted bridge on shipbay-nexus-dev with pallet movement OFF. NOT YET RUN: the build sandbox cannot
 # reach supabase.co. Run it from a machine that can. Passwords are asked for without echo and are not stored.
 # Usage: ANON_KEY=<the dev project's public anon key> ./hosted-smoke.sh
-set -u; REF=gdoaonsasbsperqjuurm; BASE="https://$REF.supabase.co"; F="$BASE/functions/v1/nexus-bridge"; : "${ANON_KEY:?set ANON_KEY to the dev project's public anon key}"
+set -u; REF=gdoaonsasbsperqjuurm; BASE="https://$REF.supabase.co"; F="$BASE/functions/v1/nexus-bridge"; : "${ANON_KEY:?set ANON_KEY to the public anon key of the dev project}"
 pass=0; fail=0; ok() { if [ "$1" = "$2" ]; then pass=$((pass+1)); echo "ok   $3"; else fail=$((fail+1)); echo "FAIL $3 (got $1, expected $2)"; fi; }
 code() { curl -s -o /tmp/smoke.out -w '%{http_code}' "$@"; }
 token() { read -r -s -p "Password for $1: " pw; echo >&2
-  curl -s "$BASE/auth/v1/token?grant_type=password" -H "apikey: $ANON_KEY" -H 'content-type: application/json' --data-binary @<(printf '{"email":"%s","password":"%s"}' "$1" "$pw") | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'; unset pw; }
+  curl -s "$BASE/auth/v1/token?grant_type=password" -H "apikey: $ANON_KEY" -H 'content-type: application/json' --data-binary @<(printf '{"email":"%s","password":"%s"}' "$1" "$(printf '%s' "$pw" | sed 's/\\/\\\\/g; s/"/\\"/g')") | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'; unset pw; }
 ok "$(code "$F/status" -H "authorization: Bearer $ANON_KEY")" 200 "status answers"; grep -q '"connection":"staging"' /tmp/smoke.out && echo "     connection: staging" || echo "     connection is not staging: $(cat /tmp/smoke.out)"
 grep -q '"pallet_moves":false' /tmp/smoke.out; ok $? 0 "pallet movement is off"
 FLOOR=$(token test-floor@example.test); ADMIN=$(token test-admin@example.test); CLIENT=$(token test-client@example.test)
