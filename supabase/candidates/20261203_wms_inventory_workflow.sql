@@ -14,8 +14,8 @@
 --   5. While a pallet has a request Nexus has not settled (waiting, or accepted by Nexus and not recorded by ShipBay), its stock
 --      is not offered to the wave planner or the older pick list, a planned stop on it cannot be confirmed, a pick from it cannot
 --      be reopened or undone, and it cannot be reserved. A second movement was already refused.
---   6. wms_nexus_exceptions(): what an admin must act on. Departed pallets with units still on the books (with the one action
---      that closes them, wms_departed_stock_close, exactly once), pallets off the floor, positions held in ShipBay only,
+--   6. wms_nexus_exceptions(): what an admin must act on. Departed pallets with units still on the books (report only: there is
+--      no close-out or deduction action, by decision), pallets off the floor, positions held in ShipBay only,
 --      planned stops whose pallet is not where the stop says, and older picks at shared positions that carry no pallet.
 --   7. wms_pick_correct(): the manager's correction for a pick that cannot be reopened because its pallet left the floor. The
 --      units go back onto a ShipBay shelf the manager names, never onto a shared position, and the stop or line is reopened there.
@@ -488,7 +488,7 @@ begin
     where p.status in ('departed', 'off_floor'))
   select jsonb_build_object(
     'departed_with_stock', (select coalesce(jsonb_agg(jsonb_build_object('pallet', psku, 'pallet_id', id, 'brand', brand, 'left_from', from_code, 'left_at', finished_at, 'reason', reason, 'released_by', by_name, 'request', op,
-        'units', units, 'lines', lines, 'action', 'Post what happened to these units: close them out with the shipment or disposal reference. The release did not deduct them.') order by finished_at), '[]')
+        'units', units, 'lines', lines, 'action', 'The release did not deduct these units and nothing here does. They stay on the books until the confirmed outbound transaction for this pallet is posted.') order by finished_at), '[]')
       from gone where status = 'departed' and units <> 0),
     'off_floor', (select coalesce(jsonb_agg(jsonb_build_object('pallet', psku, 'pallet_id', id, 'brand', brand, 'left_from', from_code, 'left_at', finished_at, 'released_by', by_name, 'units', units, 'lines', lines,
         'action', 'Still in ShipBay custody and not pickable. Put it away again through Nexus, or release it as shipped out when it leaves.') order by finished_at), '[]')
@@ -508,27 +508,9 @@ begin
   return j || jsonb_build_object('needs_action', jsonb_array_length(j -> 'departed_with_stock') + jsonb_array_length(j -> 'held_in_shipbay_only') + jsonb_array_length(j -> 'stops_without_pallet') + jsonb_array_length(j -> 'picks_without_pallet'));
 end $$;
 
--- The one action for a departed pallet with units still on the books: an admin states what happened to them (a shipment or
--- disposal reference) and exactly those units are taken off the books at the position they are recorded at. Once. The release
--- itself never did this (Derek, 2026-11-22: "handled separately by the correct ShipBay inventory or outbound transaction, exactly once").
-create or replace function public.wms_departed_stock_close(p_pallet uuid, p_ref text) returns jsonb language plpgsql security definer set search_path to 'public' as $$
-declare p wms_pallets; v_name text; v_units int := 0; v_rows int := 0; r record;
-begin
-  if not wms_nexus_admin() then raise exception 'Only ShipBay admin or staff can close out a departed pallet.'; end if;
-  if length(coalesce(trim(p_ref), '')) < 3 then raise exception 'Give the shipment or disposal reference these units left on.'; end if;
-  select * into p from wms_pallets where id = p_pallet for update;
-  if p.id is null or p.status <> 'departed' then raise exception 'Only a pallet that has left the building can be closed out.'; end if;
-  if _wms_pallet_busy(p.id) then raise exception '% is waiting for Nexus to confirm where it stands.', p.psku; end if;
-  select coalesce(full_name, email) into v_name from profiles where id = auth.uid();
-  for r in select m.sku_id, m.location_id, sum(m.qty)::int units from inventory_moves m where (m.ref_type = 'wms_pallet' and m.ref_id = p.id) or m.pallet_id = p.id group by 1, 2 having sum(m.qty) <> 0 loop
-    insert into inventory_moves (org_id, sku_id, qty, reason, ref_type, ref_id, note, created_by, location_id, pallet_id)
-    values (p.org_id, r.sku_id, -r.units, 'adjust', 'wms_pallet_out', p.id, p.psku || ' left the building: ' || trim(p_ref), auth.uid(), r.location_id, p.id);
-    v_units := v_units + r.units; v_rows := v_rows + 1;
-  end loop;
-  if v_rows = 0 then raise exception 'Nothing is left on the books for %.', p.psku; end if;
-  insert into wms_activity (org_id, kind, qty, ref, actor, actor_name, detail) values (p.org_id, 'pallet_stock_closed', 1, p.psku, auth.uid(), v_name, jsonb_build_object('units', v_units, 'reference', trim(p_ref)));
-  return jsonb_build_object('pallet', p.psku, 'units_closed', v_units, 'reference', trim(p_ref));
-end $$;
+-- Derek, 2026-11-23: the report stays; NO deduction or close-out action exists. Units a departed pallet still has on the books are
+-- not to be taken off with the generic adjust reason. They stay on the books, listed here, until the release is connected to
+-- ShipBay's normal confirmed outbound transaction. Manager-approved stock corrections keep using the existing adjustment rules.
 
 -- ===== 7. the manager's pick correction =====
 -- For a pick that cannot be reopened the normal way because its pallet has left the shared floor (or, for an older pick that
@@ -592,9 +574,7 @@ begin
 end $$;
 
 revoke all on function public.wms_nexus_exceptions() from public, anon;
-revoke all on function public.wms_departed_stock_close(uuid, text) from public, anon;
 revoke all on function public.wms_pick_correct(text, uuid, text, text) from public, anon;
 grant execute on function public.wms_nexus_exceptions() to authenticated;
-grant execute on function public.wms_departed_stock_close(uuid, text) to authenticated;
 grant execute on function public.wms_pick_correct(text, uuid, text, text) to authenticated;
 commit;

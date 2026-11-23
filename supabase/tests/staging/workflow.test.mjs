@@ -169,7 +169,7 @@ test('3 and 4. shared positions are never reserved, suggested or shown as taken 
   await put(f, 'P-20'); assert.deepEqual([await row(f), await at(f)], [{ status: 'stored', code: 'P-20' }, { 'P-20': 100 }]); void counted;
 });
 
-test('6 and 7. the exceptions report lists what an admin must act on; a departed pallet\'s leftover units are closed out exactly once; a wave stop whose pallet left is corrected by a manager', async () => {
+test('6 and 7. the exceptions report lists what an admin must act on; a departed pallet\'s leftover units stay on the books and stay listed; a wave stop whose pallet left is corrected by a manager', async () => {
   const g = await stockPallet('WF-G'); await put(g, 'P-11'); await order('WF-1005', g, 6);
   const w = (await as('floor3', 'wms_wave_start', { p_org: A })).wave; const t = w.tasks[0]; await as('floor3', 'wms_wave_confirm', { p_task: t.id, p_qty: 6, p_scan: g.carton }); assert.deepEqual(await at(g), { 'P-11': 94 });
   assert.equal((await release(g, 'P-11', 'shipped_out')).status, 200); const t0 = await total(); assert.deepEqual([await row(g), await at(g)], [{ status: 'departed', code: null }, { 'P-11': 94 }], 'the release deducted nothing');
@@ -195,13 +195,10 @@ test('6 and 7. the exceptions report lists what an admin must act on; a departed
   assert.match(await refusal(() => as('floor4', 'wms_wave_confirm', { p_task: tk.id, p_qty: 2, p_scan: k.carton })), /no longer on the floor\. Enter 0/); assert.deepEqual(await at(k), { 'OFF-FLOOR': 100 });
   const short = await as('floor4', 'wms_wave_confirm', { p_task: tk.id, p_qty: 0, p_scan: null }); assert.equal(short.orders.find((o2) => o2.order_number === 'WF-1006').pack_state, 'problem'); assert.deepEqual(await at(k), { 'OFF-FLOOR': 100 });
   x = await as('admin', 'wms_nexus_exceptions', {}); assert.deepEqual(x.stops_without_pallet, []);
-  // 6. close out the 94 units the pallet left with: admin, with a reference, once
-  const close = (who, ref) => as(who, 'wms_departed_stock_close', { p_pallet: g.id, p_ref: ref });
-  assert.match(await refusal(() => close('floor', 'BOL 1')), /Only ShipBay admin or staff/); assert.match(await refusal(() => close('admin', ' ')), /reference/);
-  const t1 = await total(); const c = await close('admin', 'BOL SYN-778'); assert.deepEqual([c.units_closed, await at(g), await total()], [94, {}, t1 - 94]);
-  assert.match(await refusal(() => close('admin', 'BOL SYN-778')), /Nothing is left on the books/); assert.equal(await total(), t1 - 94, 'a second close-out changes nothing');
-  x = await as('admin', 'wms_nexus_exceptions', {}); assert.deepEqual(x.departed_with_stock, []);
-  const alive = await stockPallet('WF-H'); await put(alive, 'P-12'); assert.match(await refusal(() => as('admin', 'wms_departed_stock_close', { p_pallet: alive.id, p_ref: 'BOL 2' })), /Only a pallet that has left the building/);
+  // 6. the report is all there is: no close-out or deduction action exists (Derek, 2026-11-23), and the 94 units stay on the books and stay listed
+  assert.equal(await q1(`select count(*)::int from pg_proc where proname = 'wms_departed_stock_close'`), 0);
+  x = await as('admin', 'wms_nexus_exceptions', {}); assert.deepEqual(x.departed_with_stock.map((r) => [r.pallet, r.units]), [[g.psku, 94]]); assert.match(x.departed_with_stock[0].action, /nothing here does/); assert.deepEqual(await at(g), { 'P-11': 94 });
+  const alive = await stockPallet('WF-H'); await put(alive, 'P-12');
   // a position held on ShipBay's side only (possible in records written before this fix) and an older pick with no pallet are both reported
   await db.query(`set session_replication_role = replica`); const legacy = await stockPallet('WF-L');
   await db.query(`update wms_pallets set status = 'counted', location_id = (select id from locations where code = 'P-30') where id = $1`, [legacy.id]);
@@ -210,9 +207,9 @@ test('6 and 7. the exceptions report lists what an admin must act on; a departed
   await put(legacy, 'P-31'); assert.deepEqual((await as('admin', 'wms_nexus_exceptions', {})).held_in_shipbay_only, [], 'scanning it under Put away settles it: Nexus accepted P-31');
 });
 
-test('across everything above: one receipt per pallet, no adjustment except the one close-out, transfers net to zero, ShipBay and Nexus agree', async () => {
+test('across everything above: one receipt per pallet, no adjustment at all, transfers net to zero, ShipBay and Nexus agree', async () => {
   assert.equal(await q1(`select count(*)::int from (select ref_id from inventory_moves where reason = 'receive' group by 1 having count(*) > 1) x`), 0);
-  assert.deepEqual((await db.query(`select ref_type, count(*)::int n, sum(qty)::int u from inventory_moves where reason = 'adjust' group by 1`)).rows, [{ ref_type: 'wms_pallet_out', n: 1, u: -94 }]);
+  assert.equal(await q1(`select count(*)::int from inventory_moves where reason = 'adjust'`), 0);
   assert.equal(await q1(`select coalesce(sum(qty),0)::int from inventory_moves where reason = 'transfer'`), 0);
   assert.equal(await q1(`select count(*)::int from (select m.sku_id, m.location_id from inventory_moves m group by 1, 2 having sum(m.qty) < 0) x`), 0, 'no position shows a negative quantity');
   assert.equal(await q1(`select count(*)::int from wms_wave_tasks t join wms_waves w on w.id = t.wave_id and w.status = 'picking' join wms_pallets p on p.id = t.pallet_id where t.confirmed_at is null and p.location_id is distinct from t.location_id`), 0, 'no planned stop points away from its pallet');

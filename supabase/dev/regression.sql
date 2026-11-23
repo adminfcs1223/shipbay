@@ -3,6 +3,7 @@
 -- everything it did is rolled back. A pass ends with:  ROLLBACK-OK 15 checks passed: ...
 -- A failure ends with:  FAIL <n>: ...   Either way the database is left exactly as it was.
 -- Needs the synthetic records (two brands, four logins, SYN-PO-1001..1003, one pallet on HOLD) and the v4 registry.
+-- Safe on a database that already holds other synthetic pallets and stock: it leaves them alone and measures from where it starts.
 -- Never run this against production.
 do $t$
 declare
@@ -10,6 +11,7 @@ declare
   ua uuid := '5b000000-0000-4000-8000-000000000001'; uf uuid := '5b000000-0000-4000-8000-000000000002'; uc uuid := '5b000000-0000-4000-8000-000000000004';
   s1 uuid; s3 uuid; k1 uuid; ids uuid[]; pa wms_pallets; pb wms_pallets; pc wms_pallets; pd wms_pallets; ph wms_pallets;
   j jsonb; op uuid; fx jsonb; n int; plan jsonb; ord uuid; task uuid; ok text[] := '{}'; before jsonb; pk uuid;
+  base_rows bigint; base_k1 int;
   cf text := json_build_object('sub', uf, 'role', 'authenticated')::text; ca text := json_build_object('sub', ua, 'role', 'authenticated')::text; cc text := json_build_object('sub', uc, 'role', 'authenticated')::text;
 begin
   if current_database() is null or exists (select 1 from orgs where id <> all (array['5a000000-0000-4000-8000-0000000000a1', '5a000000-0000-4000-8000-0000000000a2']::uuid[])) then
@@ -17,6 +19,15 @@ begin
   end if;
   select id into s1 from inbound_shipments where reference = 'SYN-PO-1001'; select id into s3 from inbound_shipments where reference = 'SYN-PO-1003';
   select id into k1 from skus where sku = 'SYN-LP-001'; select * into ph from wms_pallets w where w.held limit 1;
+  -- The database may already hold synthetic pallets and stock (the hosted one does, and they must stay exactly as they are). This
+  -- test works only with what it creates: stock already on file is kept out of its picks, its counts are measured from where
+  -- they start, and it refuses to run if a position it uses is taken. Everything, including the next line, is rolled back.
+  select count(*) into base_rows from inventory_moves; select coalesce((select on_hand from inventory_levels where sku_id = k1), 0) into base_k1;
+  update locations set pickable = false where id in (select m.location_id from inventory_moves m group by 1 having sum(m.qty) <> 0);
+  if exists (select 1 from wms_pallets p join locations l on l.id = p.location_id where l.code = any (array['P-51', 'P-52', 'P-03', 'P-04', 'P-05', 'P-06', 'P-07', 'P-08', 'P-09', 'P-20', 'P-21', 'P-22', 'P-23', 'P-24', 'P-30', 'P-31', 'P-40', 'P-41']))
+     or exists (select 1 from inventory_moves m join locations l on l.id = m.location_id where l.code = any (array['P-51', 'P-52', 'P-03', 'P-04', 'P-05', 'P-06', 'P-07', 'P-08', 'P-09', 'P-20', 'P-21', 'P-22', 'P-23', 'P-24', 'P-30', 'P-31', 'P-40', 'P-41']) group by m.location_id having sum(m.qty) <> 0) then
+    raise exception 'FAIL 0: a position this test uses already holds a pallet or stock. Not running.';
+  end if;
 
   -- 1 receiving: pallets and cartons are created, stock is not
   perform set_config('request.jwt.claims', cf, true); perform set_config('role', 'authenticated', true);
@@ -27,20 +38,20 @@ begin
   perform set_config('role', 'postgres', true);
   select * into pa from wms_pallets where id = ids[1]; select * into pb from wms_pallets where id = ids[2]; select * into pc from wms_pallets where id = ids[3]; select * into pd from wms_pallets where id = ids[4];
   if (select count(*) from wms_pallets where batch_key = 'reg-1') <> 4 or (select count(*) from wms_cartons where pallet_id = any(ids)) <> 40 then raise exception 'FAIL 1: pallets/cartons'; end if;
-  if (select count(*) from inventory_moves) <> 0 then raise exception 'FAIL 1: stock posted at receipt'; end if;
+  if (select count(*) from inventory_moves) <> base_rows then raise exception 'FAIL 1: stock posted at receipt'; end if;
   if pa.psku !~ '^PSKU-[0-9]{6}$' then raise exception 'FAIL 1: label format %', pa.psku; end if;
   ok := ok || 'receiving creates pallets and cartons with PSKU labels, is idempotent per request key, refuses a reused key, and posts no stock'::text;
 
   -- 2 existing put-away path and stock trigger: stock posts once, as one receipt
   perform set_config('role', 'authenticated', true);
-  begin perform nexus_putaway(pa.psku, 'P-01'); raise exception 'FAIL 2: the old direct put-away stored a pallet in a shared position';
+  begin perform nexus_putaway(pa.psku, 'P-51'); raise exception 'FAIL 2: the old direct put-away stored a pallet in a shared position';
   exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%shared Nexus position%' then raise exception 'FAIL 2: %', sqlerrm; end if; end;
-  j := wms_putaway_begin(pa.psku, 'P-01'); perform set_config('role', 'service_role', true); perform wms_nexus_op_commit((j ->> 'op')::uuid); perform set_config('role', 'authenticated', true);
+  j := wms_putaway_begin(pa.psku, 'P-51'); perform set_config('role', 'service_role', true); perform wms_nexus_op_commit((j ->> 'op')::uuid); perform set_config('role', 'authenticated', true);
   begin perform wms_putaway_begin(pa.psku, 'P-05'); raise exception 'FAIL 2: stored twice';
   exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%already put away%' then raise exception 'FAIL 2: %', sqlerrm; end if; end;
   perform set_config('role', 'postgres', true);
   if (select coalesce(sum(qty), 0) from inventory_moves where ref_id = pa.id) <> 100 or (select count(*) from inventory_moves where ref_id = pa.id and reason = 'receive') <> 1 or (select count(*) from inventory_moves where ref_id = pa.id) <> 1 then raise exception 'FAIL 2: ledger'; end if;
-  if (select l.code from wms_pallets p join locations l on l.id = p.location_id where p.id = pa.id) <> 'P-01' then raise exception 'FAIL 2: position'; end if;
+  if (select l.code from wms_pallets p join locations l on l.id = p.location_id where p.id = pa.id) <> 'P-51' then raise exception 'FAIL 2: position'; end if;
   ok := ok || 'stock trigger posts 100 units exactly once, as one receive entry at the position, when a pallet is stored'::text;
 
   -- 3 HOLD safeguard at the table
@@ -55,16 +66,16 @@ begin
   ok := ok || 'a pallet on HOLD cannot be stored by either put-away path or by a direct write'::text;
 
   -- 4 bridge path: begin changes nothing; only the bridge role can commit; commit stores and posts once; safe to repeat
-  perform set_config('role', 'authenticated', true); j := wms_putaway_begin(pb.psku, 'LOC-P-02'); op := (j ->> 'op')::uuid;
-  if (wms_putaway_begin(pb.psku, 'P-02') ->> 'key') <> (j ->> 'key') then raise exception 'FAIL 4: a repeat did not reuse the key'; end if;
+  perform set_config('role', 'authenticated', true); j := wms_putaway_begin(pb.psku, 'LOC-P-52'); op := (j ->> 'op')::uuid;
+  if (wms_putaway_begin(pb.psku, 'P-52') ->> 'key') <> (j ->> 'key') then raise exception 'FAIL 4: a repeat did not reuse the key'; end if;
   begin perform wms_putaway_begin(pb.psku, 'P-07'); raise exception 'FAIL 4: second open request allowed';
-  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%already has a request for P-02%' then raise exception 'FAIL 4: %', sqlerrm; end if; end;
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%already has a request for P-52%' then raise exception 'FAIL 4: %', sqlerrm; end if; end;
   begin perform wms_nexus_op_commit(op); raise exception 'FAIL 4: a signed-in user committed';
   exception when insufficient_privilege then null; end;
   perform set_config('role', 'postgres', true);
   if (select status from wms_pallets where id = pb.id) = 'stored' or (select count(*) from inventory_moves where ref_id = pb.id) <> 0 then raise exception 'FAIL 4: begin changed the pallet'; end if;
   perform set_config('role', 'service_role', true); j := wms_nexus_op_commit(op); j := wms_nexus_op_commit(op); perform set_config('role', 'postgres', true);
-  if (select l.code from wms_pallets p join locations l on l.id = p.location_id where p.id = pb.id and p.status = 'stored') is distinct from 'P-02' then raise exception 'FAIL 4: not stored'; end if;
+  if (select l.code from wms_pallets p join locations l on l.id = p.location_id where p.id = pb.id and p.status = 'stored') is distinct from 'P-52' then raise exception 'FAIL 4: not stored'; end if;
   if (select count(*) from inventory_moves where ref_id = pb.id) <> 1 or (j ->> 'units_posted')::int <> 100 then raise exception 'FAIL 4: ledger %', j; end if;
   ok := ok || 'put-away through the journal: begin changes nothing, one open request per pallet with one key, only the bridge role can commit, commit stores and posts stock once and can be repeated safely'::text;
 
@@ -78,16 +89,16 @@ begin
   exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%Scan the barcode%' then raise exception 'FAIL 5: %', sqlerrm; end if; end;
   perform wms_wave_confirm(task, 5, '000000000011'); perform set_config('role', 'postgres', true);
   if (select sum(qty) from inventory_moves where ref_type = 'wave_task' and reason = 'pick') <> -5 then raise exception 'FAIL 5: pick ledger'; end if;
-  if (select on_hand from inventory_levels where sku_id = k1) <> 195 then raise exception 'FAIL 5: on hand %', (select on_hand from inventory_levels where sku_id = k1); end if;
+  if (select on_hand from inventory_levels where sku_id = k1) <> base_k1 + 195 then raise exception 'FAIL 5: on hand %', (select on_hand from inventory_levels where sku_id = k1); end if;
   ok := ok || 'wave pick: stock leaves the position only when the stop is confirmed with the barcode scan; on hand goes 200 to 195'::text;
 
   -- 6 move: position changes, quantity does not, nothing is received again
   n := (select count(*) from inventory_moves);
   perform set_config('role', 'authenticated', true); j := wms_move_begin(pb.psku, 'P-40'); perform set_config('role', 'service_role', true); j := wms_nexus_op_commit((j ->> 'op')::uuid); perform set_config('role', 'postgres', true);
-  if (select l.code from wms_pallets p join locations l on l.id = p.location_id where p.id = pb.id) <> 'P-40' or (j ->> 'from') <> 'P-02' then raise exception 'FAIL 6: position'; end if;
+  if (select l.code from wms_pallets p join locations l on l.id = p.location_id where p.id = pb.id) <> 'P-40' or (j ->> 'from') <> 'P-52' then raise exception 'FAIL 6: position'; end if;
   if (select count(*) from inventory_moves) <> n + 2 or (select count(*) from inventory_moves where ref_id = pb.id and reason = 'receive') <> 1 or (select count(*) from inventory_moves where ref_id = pb.id and reason = 'transfer') <> 2
-     or (select sum(qty) from inventory_moves where ref_id = pb.id) <> 100 or (select on_hand from inventory_levels where sku_id = k1) <> 195 then raise exception 'FAIL 6: ledger'; end if;
-  if (select coalesce(sum(m.qty), 0) from inventory_moves m join locations l on l.id = m.location_id where m.ref_id = pb.id and l.code = 'P-02') <> 0 or (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where m.ref_id = pb.id and l.code = 'P-40') <> 100 then raise exception 'FAIL 6: per position'; end if;
+     or (select sum(qty) from inventory_moves where ref_id = pb.id) <> 100 or (select on_hand from inventory_levels where sku_id = k1) <> base_k1 + 195 then raise exception 'FAIL 6: ledger'; end if;
+  if (select coalesce(sum(m.qty), 0) from inventory_moves m join locations l on l.id = m.location_id where m.ref_id = pb.id and l.code = 'P-52') <> 0 or (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where m.ref_id = pb.id and l.code = 'P-40') <> 100 then raise exception 'FAIL 6: per position'; end if;
   ok := ok || 'move: position changes, on-hand quantity is unchanged, stock follows as one transfer pair, still exactly one receive entry'::text;
 
   -- 7 release: only with a stated confirmation and a reason, only from where the pallet stands. It frees the position and clears it on the pallet; the ledger is untouched
@@ -173,7 +184,7 @@ begin
   if pk is distinct from pa.id then raise exception 'FAIL 13: the pick is not tied to the first-in pallet'; end if;
   n := (select sum(qty) from inventory_moves);
   perform set_config('request.jwt.claims', cf, true); perform set_config('role', 'authenticated', true); j := wms_move_begin(pa.psku, 'P-20'); perform set_config('role', 'service_role', true); perform wms_nexus_op_commit((j ->> 'op')::uuid); perform set_config('role', 'postgres', true);
-  if (select coalesce(sum(m.qty), 0) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-01') <> 0 or (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-20') <> 95 or (select sum(qty) from inventory_moves) <> n then raise exception 'FAIL 13: move of a part-picked pallet'; end if;
+  if (select coalesce(sum(m.qty), 0) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-51') <> 0 or (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-20') <> 95 or (select sum(qty) from inventory_moves) <> n then raise exception 'FAIL 13: move of a part-picked pallet'; end if;
   perform set_config('role', 'authenticated', true);
   begin perform wms_release_begin(pa.psku, 'P-20', 'correction', true); raise exception 'FAIL 13: floor staff forced a correction';
   exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%needs a ShipBay admin or staff login%' then raise exception 'FAIL 13: %', sqlerrm; end if; end;
@@ -193,7 +204,7 @@ begin
   -- 14 inventory safeguards: reopen follows the pallet; the old put-away paths cannot touch shared positions; stock without a stored pallet is not offered for picking
   n := (select sum(qty) from inventory_moves);
   perform set_config('request.jwt.claims', cf, true); perform set_config('role', 'authenticated', true); perform wms_wave_unconfirm(task); perform set_config('role', 'postgres', true);
-  if (select coalesce(sum(m.qty), 0) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-01') <> 0 or (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-21') <> 100
+  if (select coalesce(sum(m.qty), 0) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-51') <> 0 or (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-21') <> 100
      or (select sum(qty) from inventory_moves) <> n + 5 or (select l.code from wms_wave_tasks t join locations l on l.id = t.location_id where t.id = task) <> 'P-21' then raise exception 'FAIL 14: reopen did not follow the pallet'; end if;
   update wms_pallets set status = 'counted', counted_at = now() where id = pd.id;   -- counted: the state the old paths expect
   -- a counted pallet cannot be given a shared position from ShipBay's side at all (20261203): not by a direct write, not by the old screen
@@ -243,14 +254,10 @@ begin
   exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%Only ShipBay admin or staff%' then raise exception 'FAIL 15: %', sqlerrm; end if; end;
   perform set_config('request.jwt.claims', ca, true); fx := wms_nexus_exceptions();
   if jsonb_array_length(fx -> 'departed_with_stock') <> 1 or (fx -> 'departed_with_stock' -> 0 ->> 'units')::int <> 100 or jsonb_array_length(fx -> 'stops_without_pallet') <> 0 or jsonb_array_length(fx -> 'held_in_shipbay_only') <> 0 then raise exception 'FAIL 15: report %', fx; end if;
-  begin perform wms_departed_stock_close((fx -> 'departed_with_stock' -> 0 ->> 'pallet_id')::uuid, ' '); raise exception 'FAIL 15: closed out without a reference';
-  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%reference%' then raise exception 'FAIL 15: %', sqlerrm; end if; end;
-  perform wms_departed_stock_close((fx -> 'departed_with_stock' -> 0 ->> 'pallet_id')::uuid, 'SYN-BOL-1');
-  if (select sum(qty) from inventory_moves) <> n - 100 or jsonb_array_length(wms_nexus_exceptions() -> 'departed_with_stock') <> 0 then raise exception 'FAIL 15: the close-out did not take exactly the 100 units off the books'; end if;
-  begin perform wms_departed_stock_close((fx -> 'departed_with_stock' -> 0 ->> 'pallet_id')::uuid, 'SYN-BOL-1'); raise exception 'FAIL 15: closed out twice';
-  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%Nothing is left on the books%' then raise exception 'FAIL 15: %', sqlerrm; end if; end;
+  perform set_config('role', 'postgres', true);
+  if exists (select 1 from pg_proc where proname = 'wms_departed_stock_close') or (select sum(qty) from inventory_moves) <> n or exists (select 1 from inventory_moves where ref_type = 'wms_pallet_out') then raise exception 'FAIL 15: a close-out action exists or something was deducted'; end if;
   perform set_config('request.jwt.claims', cf, true); perform set_config('role', 'postgres', true);
-  ok := ok || 'workflow: a pallet with a planned pick cannot be released; while its move is not settled the stop cannot be picked and it cannot be reserved; once Nexus confirms, the planned stop follows the pallet and no quantity changes; the exceptions report is admin-only and lists the departed pallet with its 100 units; the close-out takes exactly those units off the books, with a reference, once'::text;
+  ok := ok || 'workflow: a pallet with a planned pick cannot be released; while its move is not settled the stop cannot be picked and it cannot be reserved; once Nexus confirms, the planned stop follows the pallet and no quantity changes; the exceptions report is admin-only and lists the departed pallet with its 100 units; there is no close-out or deduction action and the units stay on the books'::text;
 
   -- 12 ledger integrity
   if exists (select 1 from inventory_moves where location_id is null) or (select sum(qty) from inventory_moves) <> (select sum(on_hand) from inventory_levels) then raise exception 'FAIL 12'; end if;
