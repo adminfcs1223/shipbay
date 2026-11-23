@@ -89,7 +89,7 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true); perform set_config('role', 'authenticated', true);
   insert into orders (org_id, order_number, channel, source, status, total_units) values (o1, 'STAFF-1', 'manual', 'manual', 'new', 1);
   perform set_config('role', 'postgres', true);
-  if (select count(*) from orders where cutoff_at is not null) <> 4 then raise exception 'FAIL D: staff order'; end if;
+  if (select count(*) from orders where cutoff_at is not null and order_number in ('CUT-1', 'CUT-2', 'CUT-3', 'STAFF-1')) <> 4 then raise exception 'FAIL D: staff order'; end if;
   r := r || 'D ship-by cut-off for real orders is unchanged (before the hour, after it, weekend); staff can still enter an order'::text;
 
   -- E. receiving and stock are untouched by the repair

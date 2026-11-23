@@ -39,7 +39,7 @@ only for `test-…@example.test`. No password is set by default.
 
 ## Tests
 
-- `regression.sql`: fifteen checks as the synthetic logins; rolls itself back. All fifteen pass locally (the fifteenth covers candidate 20261203, which is NOT applied to the hosted database yet). The hosted database passed the first thirteen before the safeguards and a separate short check of the safeguards after.
+- `regression.sql`: fifteen checks as the synthetic logins; rolls itself back. All fifteen pass locally and on the hosted database (2026-11-23, with candidate 20261203 applied). The hosted database passed the first thirteen before the safeguards and a separate short check of the safeguards after.
 - `local-check.sh`: rebuilds the local database, applies every candidate, seeds twice, runs the regression.
 - `../tests/deno/run.sh`: type-checks the Edge Function and runs it under Deno against the local database.
 - `hosted-smoke-disabled.sh`: the deployed function with everything off; needs no login. Not yet run.
@@ -47,12 +47,13 @@ only for `test-…@example.test`. No password is set by default.
 
 - `../tests/hosted/local.test.mjs` (after `../tests/hosted/build-local.sh`): the hosted movement suite on the local database with the real Nexus service code. 306 checks pass (the original 261 plus the planned-stop stage and the test-fault checks).
 - `../tests/staging/workflow.test.mjs`: the seven inventory workflow repairs (candidate 20261203) on synthetic data. Six tests pass.
+- `workflow-check.sql`: six more rolled-back checks (pick, pack, labels, older pick list, manager correction, totals, authorization). Pass locally and on the hosted database.
 - `../tests/deno/run-runner.sh`: the temporary movement runner under Deno against local stand-ins. Passes.
 
 ## Movement rehearsal (prepared, not run)
 
-`MOVEMENT-REHEARSAL.md` has the workflow repairs, the plan and the proposed sequence. The bridge in this branch is ahead of the one deployed to dev (test fault, exceptions report): redeploying it is a step in that sequence. `movement-dev.sql` and
-`seed-movement.sql` are NOT applied to the hosted database; `runner/` is NOT deployed and its gate is closed as committed.
+`MOVEMENT-REHEARSAL.md` has the workflow repairs, the plan and the proposed sequence. The bridge in this branch is ahead of the one deployed to dev (test fault, exceptions report): redeploying it is a step in that sequence. Candidate 20261203, `movement-dev.sql` and `seed-movement.sql`
+ARE applied to the hosted database (dev_028a to dev_031, 2026-11-23). `runner/` is NOT deployed and its gate is closed as committed.
 
 ## Applied to the hosted database but kept only there
 
