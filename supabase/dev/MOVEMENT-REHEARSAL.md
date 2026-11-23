@@ -1,8 +1,44 @@
-# Hosted movement rehearsal: step 1 done, the rest not run
+# Hosted movement rehearsal: steps 1 and 2 done, the rest not run
 
-Updated 2026-11-23, 1 AM ET. Step 1 (development database) is applied and verified on `shipbay-nexus-dev`. The updated bridge and
-the runner are NOT deployed, the movement and test-fault switches are off, and nothing was sent to Nexus. Production and `main`
-are untouched.
+Updated 2026-11-23, 1:05 AM ET. Step 1 (development database) and step 2 (updated bridge) are applied and verified on
+`shipbay-nexus-dev`. The movement runner is NOT deployed, all switches are off, and nothing was sent to Nexus. Production and
+`main` are untouched.
+
+## Bridge deployed to shipbay-nexus-dev (step 2)
+
+`nexus-bridge` version 7 (was 6), from commit 2656215, sign-in required at the gateway, bundle hash `2e05a7ab...0dfe1092`. The five
+deployed files were read back and match the committed source by reading; no byte hash of the deployed copy can be computed
+with the tools used here. No switch was set.
+
+Disabled-mode check with genuine sessions: a one-off probe (`supabase/dev/probe/index.ts`, not the movement runner, no suite, no
+database writes) sat in the `bridge-smoke` slot for about two minutes behind a 15-minute token gate, then the inert stub went
+back (version 12, sign-in required). It signed the floor, admin and client logins in through Supabase Auth and called the
+deployed bridge. 97 checks, 96 passed:
+
+- No authorization header, or a made-up token: 401 on status, put-away, move and release (8 of 8).
+- Status, as floor, admin, client and the public key: 200, connection off, reason `bridge_off`, pallet moves, registry writes,
+  calendar writes and test faults all false (16 of 16).
+- Put-away, move, release, pending retry, reconcile record and undo, registry sync, calendar sync, floor, pending, reconcile
+  and calendar: 503 `bridge_off` for all four callers (48 of 48).
+- The lost-answer header on put-away, move and release as floor, admin and client: 503 `bridge_off`, no fault produced; status
+  still reports test faults false (10 of 10).
+- Database, same sessions: `is_wms_staff` true for floor and admin, false for client; the exceptions report refused for the
+  client and the public key (5 of 5).
+- The one failure was the probe's own expectation: it expected the floor login to read the exceptions report. The report is
+  for ShipBay admin and staff and refuses `wms_employee` by design (the local test asserts that refusal). The committed probe
+  is corrected; the corrected line and "admin can read it" were not rerun on hosted.
+
+Not observable while the bridge is off: the 403 `not_staff` answer. Every route but status answers `bridge_off` before it looks
+at the login, so the client login gets 503, not 403. The staff check itself is proven locally (bridge tests) and, on hosted,
+at the database (`is_wms_staff`). It gets its hosted proof in the suite's stages once the bridge is on.
+
+The first probe attempt stopped at 45 checks, all passing, on Supabase's limit of about 30 calls from one function to another
+per request; the probe was split into three parts and rerun in full.
+
+After the probe: `workflow-check.sql` 6 of 6 on hosted (run after the deploy). Dev database: PSKU-000001 stored at P-01, ledger one
+row of 100, one journal entry (04:26:05Z), 9 pallets, 0 waves, 0 runner runs, 28 migrations. Nexus staging: occupancy is
+PSKU-000001 at P-01 only, 12 moves in total, one of them ShipBay's, last move and the movement key's last use both 04:26:05Z,
+no audit or change entries since the deploy.
 
 ## Applied to shipbay-nexus-dev (step 1)
 
@@ -118,8 +154,7 @@ Each numbered step that changes anything needs its own go. A stage that writes c
 state first and stops at the first failed check. Nothing is retried, repaired or released to clean up.
 
 1. **Dev database. DONE 2026-11-23** (approved by Derek). See "Applied to shipbay-nexus-dev" above.
-2. **Bridge (approval).** Redeploy `nexus-bridge` to dev from this branch (adds the dev-only test fault and the exceptions report).
-   Switches stay off; repeat the disabled-mode check.
+2. **Bridge. DONE 2026-11-23** (approved by Derek). See "Bridge deployed to shipbay-nexus-dev" above.
 3. **Runner (approval).** `bundle.sh`, set the one-hour gate, deploy into the existing `bridge-smoke` slot in dev.
 4. **Switches (Derek, by hand, dev only).** `NEXUS_BRIDGE_MODE` = `staging`, `NEXUS_PALLET_MOVES` = `on`, `NEXUS_TEST_FAULTS` = `on`.
 5. **`preflight`** (read-only, 22 checks).

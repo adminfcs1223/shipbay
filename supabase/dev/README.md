@@ -43,6 +43,7 @@ only for `test-…@example.test`. No password is set by default.
 - `local-check.sh`: rebuilds the local database, applies every candidate, seeds twice, runs the regression.
 - `../tests/deno/run.sh`: type-checks the Edge Function and runs it under Deno against the local database.
 - `hosted-smoke-disabled.sh`: the deployed function with everything off; needs no login. Not yet run.
+- `probe/index.ts`: one-off disabled-mode probe with genuine sessions (gate closed as committed). Run once on 2026-11-23 against bridge version 7; see MOVEMENT-REHEARSAL.md.
 - `hosted-smoke.sh`: read-only checks once the connection is on and movement is still off. Not yet run.
 
 - `../tests/hosted/local.test.mjs` (after `../tests/hosted/build-local.sh`): the hosted movement suite on the local database with the real Nexus service code. 306 checks pass (the original 261 plus the planned-stop stage and the test-fault checks).
