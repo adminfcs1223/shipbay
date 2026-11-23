@@ -1,8 +1,54 @@
-# Hosted movement rehearsal: steps 1 and 2 done, the rest not run
+# Hosted movement rehearsal: dev database and bridge ready, runner and stages not run
 
-Updated 2026-11-23, 2:15 AM ET. Step 1 (development database) and step 2 (updated bridge) are applied and verified on
-`shipbay-nexus-dev`. The movement runner is NOT deployed, all switches are off, and nothing was sent to Nexus. Production and
-`main` are untouched.
+Updated 2026-11-23, 2:40 AM ET. Step 1 (development database), step 2 (updated bridge) and the stock safety migration dev_032
+are applied and verified on `shipbay-nexus-dev`. The movement runner is NOT deployed, no switch was set, and nothing was sent to
+Nexus. Production and `main` are untouched.
+
+**Blocker before real-inventory testing (Derek, 2026-11-23):** `wms_open_box` (see "Assessed, not fixed", item 7). The dev_032
+verification below does not resolve it.
+
+## dev_032 applied to shipbay-nexus-dev (approved by Derek, 2026-11-23 1:36 AM)
+
+Applied as migration `dev_032_pallet_stock_safety` (the 29th), the file reviewed before applying: five `create or replace
+function`, one revoke, one grant, nothing else.
+
+| Check on the hosted dev database | Result |
+|---|---|
+| Body of each of the five functions equals the committed file (md5 of the stored source) | 5 of 5 |
+| The other 152 functions in the public schema | One fingerprint, identical before and after |
+| Permissions: none of the five open to the public key; void, count entry and count correction for signed-in logins; the two dev helpers for the service login only | As intended |
+| `regression.sql` (receiving, put-away, HOLD, wave pick, move, release, out of sync, void, privileges, calendar, ledger) | 15 of 15, rolled back |
+| `workflow-check.sql` (labels, wave pick, pack station, packing, older pick list, correction, totals, authorization) | 6 of 6, rolled back |
+| `stock-safety-check.sql` (new; below) | 7 of 7, rolled back |
+| Pallets, cartons, ledger, journal: fingerprints before the migration, after it, and after the three checks | Identical each time (9 pallets, 90 cartons, 1 ledger row of 100, 1 journal entry) |
+| Positions below zero, pallets with two receipts, count-correction log rows left behind | 0, 0, 0 |
+| PSKU-000001 | Stored at P-01, one receipt of 100, one journal entry (04:26:05Z) |
+| Nexus staging (read-only) | P-01 holds PSKU-000001 for ShipBay and nothing else of ShipBay's; one ShipBay move on record; movement key last used 04:26:05Z; the real floor not initialized, moves off |
+| Functions deployed | `nexus-bridge` version 7 and `bridge-smoke` version 12 (inert stub), both unchanged |
+
+`supabase/dev/stock-safety-check.sql` runs as the synthetic logins on pallets it receives itself (P-56 to P-59), sends nothing
+to Nexus, and rolls everything back. What it showed on hosted:
+
+1. Void after a partial pick (100 received, 30 picked): refused for admin and floor; ledger, pallet, the 70 at the position
+   and the pick unchanged.
+2. Unsafe count changes: floor and client refused, below-picked and zero refused, missing reason refused; cartons, ledger and
+   activity log unchanged.
+3. A legitimate correction (admin, reason): exactly the difference posted once; the ledger row carries the reason, position
+   and who; the activity log has old count, new count, change, position and reason; the same value again posts nothing; the
+   receipt untouched.
+4. Planned wave stop: void refused; the count cannot go below picked plus the 12 planned.
+5. Unsettled Nexus movement (waiting put-away, waiting move, out of sync): void and count change refused each time.
+6. Departed pallet: void and count change refused; its 100 units stay on the books.
+7. Afterwards: nothing below zero, no double receipt, transfers net to zero, the stock view equals the ledger, and everything
+   on file before the check is byte-for-byte unchanged.
+
+Stated plainly:
+- The switches cannot be read from here without a signed-in call, and none was made (no probe was deployed for this step).
+  They were read as off by the probe at 1:01 AM; nothing in this session has set one since; the bridge function is unchanged
+  and Nexus shows no ShipBay request since 04:26:05Z.
+- The rolled-back checks consume label numbers: the pallet, carton and package counters do not roll back, so the next real
+  synthetic pallet will have a higher PSKU number than the last one on file. No row was left behind.
+- The count-correction form on the Pallets screen was not run in a browser.
 
 ## Pallet stock safety (candidate 20261204): void and unit count, tested locally, applied nowhere
 
@@ -69,7 +115,7 @@ stage, `undo`, and also checks that a void and a count change are refused while 
 sync. Preflight, and the `undo` stage before it sends anything, refuse to go on unless the database has both rules (read from
 the snapshot). The suite is 9 stages, 331 checks.
 
-### Combined development migration (prepared, NOT applied)
+### Combined development migration (applied to dev 2026-11-23; see above)
 
 `supabase/dev/pending/dev_032_pallet_stock_safety.sql`, generated by `build.sh` next to it: the candidate (three functions
 replaced or added) and the two dev helpers that changed since dev_029 (`dev_movement_snapshot` reports the rules,
@@ -147,7 +193,7 @@ stored at P-01 with its one journal entry and its one 100-unit receipt, byte-for
 | Regression tests for the repairs | `supabase/tests/staging/workflow.test.mjs`, 6 tests, all pass locally (real Nexus service code). |
 | Hosted suite | `supabase/tests/hosted/suite.js`: 9 stages, 331 checks. Passes locally under Node and through the runner under Deno. |
 | Lost answers | Produced by the bridge's own dev-only test fault. The runner no longer holds bridge code or reads the Nexus key. |
-| Void and unit-count safety | `supabase/candidates/20261204_wms_pallet_stock_safety.sql`, `void.test.mjs` (6 tests), `units.test.mjs` (5 tests). Local only. Dev migration prepared: `supabase/dev/pending/dev_032_pallet_stock_safety.sql`. |
+| Void and unit-count safety | `supabase/candidates/20261204_wms_pallet_stock_safety.sql`, `void.test.mjs` (6 tests), `units.test.mjs` (5 tests). On the dev database as `dev_032` (`supabase/dev/pending/dev_032_pallet_stock_safety.sql`); not in production. |
 | Existing tests | Bridge 16, Edge wrapper 4, waves/receiving/dock/registry/activity unchanged and passing, dev regression 15 checks, WMS unit 56, put-away browser test 29. |
 
 ## What the repairs change (20261203)
@@ -198,10 +244,9 @@ new candidate loaded.
 
 Reproduced on the local database, or read from the code where stated. None of these blocks the synthetic rehearsal.
 
-1. **Voiding a stored pallet after picks left a negative position.** FIXED in candidate 20261204 (local only): refused.
-2. **Voiding while a request is waiting.** FIXED in candidate 20261204 (local only): refused until the request is settled.
-   Neither fix is on the hosted dev database or in production yet.
-6. **Changing a stored pallet's unit count had the same gaps.** FIXED in candidate 20261204 (local only).
+1. **Voiding a stored pallet after picks left a negative position.** FIXED in candidate 20261204 (on dev, not production): refused.
+2. **Voiding while a request is waiting.** FIXED in candidate 20261204 (on dev, not production): refused until the request is settled.
+6. **Changing a stored pallet's unit count had the same gaps.** FIXED in candidate 20261204 (on dev, not production).
 7. **Opening a carton is a second way to change a put-away pallet's stock, and it has none of these checks** (from the code,
    not reproduced): `wms_open_box` takes the carton's units off the pallet's position and puts a freely entered number (1 to
    500) on the open-box shelf. Any floor login, no reason, no check for picks, planned stops or a waiting Nexus request. On a
@@ -242,8 +287,7 @@ state first and stops at the first failed check. Nothing is retried, repaired or
 
 1. **Dev database. DONE 2026-11-23** (approved by Derek). See "Applied to shipbay-nexus-dev" above.
 2. **Bridge. DONE 2026-11-23** (approved by Derek). See "Bridge deployed to shipbay-nexus-dev" above.
-3. **Dev database again, then the runner (approval for each).** Apply `supabase/dev/pending/dev_032_pallet_stock_safety.sql`
-   to dev and check the function fingerprints and the two rolled-back checks there. Then `bundle.sh`, set the one-hour gate, deploy the runner into the existing `bridge-smoke` slot in dev. The stages now fit the
+3. **Dev database again: DONE 2026-11-23** (dev_032, approved by Derek). **Then the runner (approval).** `bundle.sh`, set the one-hour gate, deploy the runner into the existing `bridge-smoke` slot in dev. The stages now fit the
    call limit observed in step 2.
 4. **Switches (Derek, by hand, dev only).** `NEXUS_BRIDGE_MODE` = `staging`, `NEXUS_PALLET_MOVES` = `on`, `NEXUS_TEST_FAULTS` = `on`.
 5. **`preflight`** (read-only, 23 checks).
