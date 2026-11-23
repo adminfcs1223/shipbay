@@ -45,6 +45,20 @@ only for `test-…@example.test`. No password is set by default.
 - `hosted-smoke-disabled.sh`: the deployed function with everything off; needs no login. Not yet run.
 - `hosted-smoke.sh`: read-only checks once the connection is on and movement is still off. Not yet run.
 
+- `../tests/hosted/local.test.mjs` (after `../tests/hosted/build-local.sh`): the hosted movement suite on the local database with the real Nexus service code. 261 checks pass.
+- `../tests/deno/run-runner.sh`: the temporary movement runner under Deno against local stand-ins. Passes.
+
+## Movement rehearsal (prepared, not run)
+
+`MOVEMENT-REHEARSAL.md` has the plan, the proposed sequence and the remaining inventory issues. `movement-dev.sql` and
+`seed-movement.sql` are NOT applied to the hosted database; `runner/` is NOT deployed and its gate is closed as committed.
+
+## Applied to the hosted database but kept only there
+
+`dev_026` (set_order_cutoff search path, also in `security-dev.sql`) and `dev_027` (`dev_repair_check()`, the hosted form of
+`../security/repair-check.sql`). The first hosted put-away (PSKU-000001 at P-01, 2026-11-22) used a temporary runner that was
+replaced by the inert stub afterwards; its successor is `runner/`.
+
 See `DEPLOY.md` for the deployment steps and `PRODUCTION-DIFFERENCES.md` for the four functions that differ from production.
 
 ## Deployed
