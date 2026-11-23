@@ -45,6 +45,7 @@ only for `test-…@example.test`. No password is set by default.
 - `hosted-smoke-disabled.sh`: the deployed function with everything off; needs no login. Not yet run.
 - `../candidates/20261204_wms_pallet_stock_safety.sql` + `../tests/staging/void.test.mjs`, `units.test.mjs`: void and unit-count safety rules, local only.
 - `pending/dev_032_pallet_stock_safety.sql` (+ `build.sh`): the combined migration for the dev database. APPLIED to shipbay-nexus-dev 2026-11-23 (its own header still says not applied: the file is kept byte-for-byte as reviewed).
+- `../candidates/20261205_wms_open_box_safety.sql` + `../tests/staging/openbox.test.mjs`, `pending/dev_033_open_box_safety.sql`, `openbox-check.sql`: open-box stock safety. Tested locally. NOT applied to the dev database.
 - `stock-safety-check.sql`: third rolled-back check, for the void and unit-count rules. 7 of 7 on hosted, 2026-11-23.
 - `probe/index.ts`: one-off disabled-mode probe with genuine sessions (gate closed as committed). Run once on 2026-11-23 against bridge version 7; see MOVEMENT-REHEARSAL.md.
 - `hosted-smoke.sh`: read-only checks once the connection is on and movement is still off. Not yet run.

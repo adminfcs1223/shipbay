@@ -182,7 +182,10 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
     const row = viaLabel ? (cartons || []).find((x) => x.code === viaLabel.code) : (cartons || []).find((x) => x.seq === seq);
     if (!row) return say('bad', viaLabel ? `Carton ${viaLabel.seq} belongs to ${viaLabel.psku}, not this pallet.` : 'Scan the carton label, or type the carton number.');
     setBusy(true);
-    const { data, error } = await supabase.rpc('wms_open_box', { p_carton_code: row.code, p_units: Number(ob.units) });
+    // put away and the count differs from the carton's: a stock correction (admin or staff, with a reason)
+    const fix = p.status === 'stored' && row.units_per_carton != null && Number(ob.units) !== row.units_per_carton;
+    if (fix && (ob.why || '').trim().length < 4) { setBusy(false); return say('bad', `Carton ${row.seq} holds ${row.units_per_carton} on file. Say why it holds ${Number(ob.units)}; an admin or staff login is needed.`); }
+    const { data, error } = fix ? await supabase.rpc('wms_open_box_correct', { p_carton_code: row.code, p_units: Number(ob.units), p_location: null, p_reason: ob.why.trim() }) : await supabase.rpc('wms_open_box', { p_carton_code: row.code, p_units: Number(ob.units) });
     setBusy(false); if (error) return say('bad', error.message);
     await loadCartons();
     const { data: made } = await supabase.from('wms_units').select('*').eq('carton_id', row.id).order('code');
@@ -325,6 +328,7 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
               <div className="fields">
                 <label>Carton<input value={ob.carton} onChange={(e) => setOb({ ...ob, carton: e.target.value })} placeholder="Scan its label or type its number" autoFocus required /></label>
                 <label>Units in it<input className="bignum" type="number" min="1" max="500" inputMode="numeric" value={ob.units} onChange={(e) => setOb({ ...ob, units: e.target.value })} required /></label>
+                {p.status === 'stored' && <label>Reason, only if the count differs from the carton's (admin or staff)<input value={ob.why || ''} onChange={(e) => setOb({ ...ob, why: e.target.value })} placeholder="Two units missing…" maxLength={140} /></label>}
               </div>
               {feed?.kind === 'bad' && <div className="strip bad"><span>{feed.text}</span></div>}
               <div className="rowbtns"><button className="btn go" disabled={busy || !ob.carton || !Number(ob.units)}>{busy ? 'Saving…' : `Make ${Number(ob.units) || ''} unit labels`}</button><button type="button" className="btn" onClick={() => setOb(null)}>Cancel</button></div>
