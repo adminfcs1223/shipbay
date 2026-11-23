@@ -28,7 +28,7 @@ export const CAST = {
   G: ['syn-move-2', 2, 1000, 'SYN-MLR-S'],    // P-19 -> P-20: part-picked, moved, the pick reopened; then its planned stop follows it P-20 <-> P-19
 };
 export const POSITIONS = ['P-11', 'P-12', 'P-13', 'P-14', 'P-15', 'P-16', 'P-17', 'P-18', 'P-19', 'P-20'];
-export const STAGES = ['preflight', 'move', 'release', 'lost', 'partial', 'picks', 'stops', 'final'];
+export const STAGES = ['preflight', 'move', 'release', 'lost', 'partial', 'undo', 'picks', 'stops', 'final'];
 const ORG_MAILERS = '5a000000-0000-4000-8000-0000000000a2';
 const MAP_CHECKSUM = 'be3cc8f3e9134cb4dfe7d3ac41773bc5d231ed56b4a42c05f5939467d67c8c4f';
 
@@ -97,6 +97,7 @@ export async function runStage(io, stage) {
       check('the stock ledger is the one receipt from the first placement', ledger(s), [1, KEEP.units]);
       check('the journal is the one put-away from the first placement', s.ops.map((o) => [o.psku, o.kind, o.state]), [[KEEP.psku, 'assign', 'done']]);
       check('the OFF-FLOOR holding location exists, is not shared and cannot be picked from', s.off_floor, { exists: true, pickable: false, shared: false });
+      check('the void safety rules are installed (candidate 20261204): the partial-failure stage depends on them', s.rules?.void_safety, true);
       check('the one synthetic order is waiting', s.orders.map((o) => [o.number, o.status, o.org]), [['SYN-ORD-1', 'new', ORG_MAILERS]]);
       const { f, at } = await floor();
       check('Nexus: test floor, map version 4, the agreed checksum, moves enabled', [f.warehouse, f.map_version, f.checksum, f.moves_enabled], ['HILLSBOROUGH-TEST', 4, MAP_CHECKSUM, true]);
@@ -230,8 +231,8 @@ export async function runStage(io, stage) {
 
     // ---- 4. Nexus accepted, ShipBay could not record it: the position stays reserved until an admin decides at the position ----
     async partial() {
-      const s0 = await keepIntact('before'); const c = cast(s0); const F1 = c.F1.psku, F2 = c.F2.psku;
-      check('start: both pallets are open and unplaced', [c.F1, c.F2].map((p) => [p.status, p.location, p.held]), [['open', null, false], ['open', null, false]]);
+      const s0 = await keepIntact('before'); const c = cast(s0); const F1 = c.F1.psku;
+      check('start: the pallet is open and unplaced', [c.F1].map((p) => [p.status, p.location, p.held]), [['open', null, false]]);
       const waiting = async () => { const r = await call('admin', 'GET', '/reconcile'); return [r.status, r.in_sync, r.differences, r.waiting.map((w) => [w.pallet, w.kind, w.state, w.nexus_has_it_at])]; };
       check('ShipBay and Nexus agree before the faults', await waiting(), [200, true, [], []]);
 
@@ -262,15 +263,28 @@ export async function runStage(io, stage) {
       check('Nexus holds the same one pallet at P-17: recording sent it nothing new', (await floor()).at('P-17'), { mine: [F1], used: 1 });
       check('ShipBay and Nexus agree again', await waiting(), [200, true, [], []]);
 
-      // b) the pallet is NOT at the position: only an admin's confirmed correction frees it, with its own key
+      check('nothing is waiting for Nexus', (await call('floor', 'GET', '/pending')).open, []);
+      ledgerRules(s1, 'after the partial-failure stage'); await keepIntact('after');
+    },
+
+    // ---- 4b. the same failure where the pallet is NOT at the position: only an admin's confirmed correction frees it, with its own key.
+    //          Its own stage so that no stage makes more than about 25 calls to the bridge (the platform allowed 30 from one request). ----
+    async undo() {
+      const s1 = await keepIntact('before'); const c = cast(s1); const F2 = c.F2.psku; let s;
+      check('start: the pallet is open and unplaced', [c.F2].map((p) => [p.status, p.location, p.held]), [['open', null, false]]);
+      const waiting = async () => { const r = await call('admin', 'GET', '/reconcile'); return [r.status, r.in_sync, r.differences, r.waiting.map((w) => [w.pallet, w.kind, w.state, w.nexus_has_it_at])]; };
+      check('ShipBay and Nexus agree before the fault', await waiting(), [200, true, [], []]);
       await lossy('floor', '/putaway', { psku: F2, location: 'P-18' });
-      await io.rpc('admin', 'wms_void_pallet', { p_id: c.F2.id, p_reason: 'Synthetic: not on the floor' });
-      const r2 = await call('floor', 'POST', '/pending/retry'); check('Nexus says yes on the retry, ShipBay cannot record a voided pallet: out of sync', [r2.status, r2.results.map((x) => [x.pallet, x.kind, x.to, x.ok, x.error])], [200, [[F2, 'assign', 'P-18', false, 'out_of_sync']]]);
-      s = await snap(); check('ShipBay posted no stock for it', [grew(s1, s), row(s, F2)], [[0, 0], ['void', null, 0, 0, 0, 0, 0, 0]]);
+      const sp = await snap(); const VOID = { p_id: c.F2.id, p_reason: 'Synthetic: not on the floor' };
+      const nv1 = await refused(() => io.rpc('admin', 'wms_void_pallet', VOID)); ok('a void is refused while Nexus has not answered the put-away', /cannot be voided yet: it has a request for P-18/.test(String(nv1)), nv1);
+      await io.faultHold(F2, 'Synthetic: wrong label found while waiting for Nexus');
+      const r2 = await call('floor', 'POST', '/pending/retry'); check('Nexus says yes on the retry, ShipBay cannot record a pallet on HOLD: out of sync', [r2.status, r2.results.map((x) => [x.pallet, x.kind, x.to, x.ok, x.error])], [200, [[F2, 'assign', 'P-18', false, 'out_of_sync']]]);
+      const nv2 = await refused(() => io.rpc('admin', 'wms_void_pallet', VOID)); ok('a void is refused while the request is out of sync: an admin settles it first', /Nexus accepted P-18 and ShipBay has not recorded it/.test(String(nv2)), nv2);
+      s = await snap(); check('ShipBay posted no stock for it and the refused voids changed nothing', [grew(s1, s), grew(sp, s), row(s, F2)], [[0, 0], [0, 0], ['open', null, 0, 0, 0, 0, 0, 0]]);
       check('P-18 stays reserved in Nexus', (await floor()).at('P-18'), { mine: [F2], used: 1 });
       check('reconciliation shows it waiting', await waiting(), [200, false, [], [[F2, 'assign', 'out_of_sync', 'P-18']]]);
       const OP2 = ops(s, F2)[0].op;
-      const cannot = await call('admin', 'POST', '/reconcile/record', { op: OP2, confirmed: true }); ok('a voided pallet cannot be recorded as standing there', cannot.status === 409 && /voided/.test(cannot.message), cannot);
+      const cannot = await call('admin', 'POST', '/reconcile/record', { op: OP2, confirmed: true }); ok('while it is on HOLD it cannot be recorded as standing there', cannot.status === 409 && /HOLD/.test(cannot.message), cannot);
       check('undoing without the confirmation made at the position is refused (400)', short(await call('admin', 'POST', '/reconcile/undo', { op: OP2 }), 'error'), [400, 'not_confirmed']);
       const nf2 = await call('floor', 'POST', '/reconcile/undo', { op: OP2, confirmed: true }); ok('the floor login cannot undo it', nf2.status === 409 && /Only ShipBay admin or staff/.test(nf2.message), nf2);
       check('P-18 is still reserved after those refusals', (await floor()).at('P-18'), { mine: [F2], used: 1 });
@@ -278,11 +292,15 @@ export async function runStage(io, stage) {
       const s2 = await snap(); const o2 = ops(s2, F2);
       check('the original request is closed as undone and the correction names it', o2.map((o) => [o.kind, o.state, o.reason, o.confirmed, o.fixes === OP2]), [['assign', 'undone', null, false, false], ['release', 'done', 'correction', true, true]]);
       ok('the correction used its own key', o2[1].key !== o2[0].key && /^SB-FIX-/.test(o2[1].key), [o2[0].key, o2[1].key]);
-      check('no stock was ever posted for the voided pallet', [grew(s1, s2), row(s2, F2)], [[0, 0], ['void', null, 0, 0, 0, 0, 0, 0]]);
+      check('no stock was ever posted for it', [grew(s1, s2), row(s2, F2)], [[0, 0], ['open', null, 0, 0, 0, 0, 0, 0]]);
       check('Nexus: P-18 is free', (await floor()).at('P-18'), { mine: [], used: 0 });
       check('ShipBay and Nexus agree again', await waiting(), [200, true, [], []]);
       check('nothing is waiting for Nexus', (await call('floor', 'GET', '/pending')).open, []);
-      ledgerRules(s2, 'after the partial-failure stage'); await keepIntact('after');
+      // settled: the pallet that was never on the floor is now voided as a mistaken entry, which sends Nexus nothing and posts nothing
+      const before = mutating; await io.rpc('admin', 'wms_void_pallet', VOID); const s3 = await snap();
+      check('with nothing waiting the void is accepted: no stock, no journal entry, no request to Nexus', [row(s3, F2), grew(s1, s3), ops(s3, F2).length, mutating - before], [['void', null, 0, 0, 0, 0, 0, 0], [0, 0], 2, 0]);
+      check('Nexus: P-18 is still free and ShipBay and Nexus still agree', [(await floor()).at('P-18'), await waiting()], [{ mine: [], used: 0 }, [200, true, [], []]]);
+      ledgerRules(s3, 'after the undo stage'); await keepIntact('after');
     },
 
     // ---- 5. a part-picked pallet is moved, then the pick is reopened ----
@@ -347,7 +365,7 @@ export async function runStage(io, stage) {
     async final() {
       const s = await keepIntact('at the end'); const c = cast(s); const { f } = await floor();
       check('every pallet is where the suite left it', Object.fromEntries(Object.entries(c).map(([k, p]) => [k, [p.status, p.location, p.held]])),
-        { M: ['stored', 'P-12', false], HELD: ['open', null, true], R1: ['stored', 'P-13', false], R2: ['departed', null, false], L: ['stored', 'P-16', false], F1: ['stored', 'P-17', false], F2: ['void', null, false], G: ['stored', 'P-20', false] });
+        { M: ['stored', 'P-12', false], HELD: ['open', null, true], R1: ['stored', 'P-13', false], R2: ['departed', null, false], L: ['stored', 'P-16', false], F1: ['stored', 'P-17', false], F2: ['void', null, true], G: ['stored', 'P-20', false] });
       check('Nexus holds exactly these ShipBay pallets', mineInNexus(f), { 'P-01': [KEEP.psku], 'P-12': [c.M.psku], 'P-13': [c.R1.psku], 'P-16': [c.L.psku], 'P-17': [c.F1.psku], 'P-20': [c.G.psku] });
       check('the positions the suite freed are empty in Nexus', ['P-11', 'P-14', 'P-15', 'P-18', 'P-19'].filter((p) => (f.locations.find((l) => l.code === p)?.used || 0) !== 0), []);
       check('receipts: seven pallets were ever put away, one receipt each, 2000 units in all', s.by_reason.receive, { rows: 7, units: 2000 });

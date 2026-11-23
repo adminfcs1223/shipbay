@@ -2,7 +2,7 @@
 // It exists because the test machine cannot reach Supabase and the four synthetic logins have no passwords. Deployed (when
 // Derek approves a run) into the existing "bridge-smoke" slot, used, then replaced by the inert stub again.
 //
-// What it does, per request:  GET ?t=<one-time token>&stage=<preflight|move|release|lost|partial|picks|final>
+// What it does, per request:  GET ?t=<one-time token>&stage=<preflight|move|release|lost|partial|undo|picks|stops|final>
 //   1. Refuses unless: the token matches the hash compiled in at deploy, the deploy-time expiry has not passed, and the
 //      database it is attached to is shipbay-nexus-dev. Any other request gets a bare 404.
 //   2. Records the start (dev_runner_begin). A stage that writes can be started once; a reload or retry is refused there.

@@ -121,6 +121,8 @@ Deno.test('who did what: floor rules as the signed-in login, recording as the br
   assert.deepEqual(out.posts.some((p) => p.includes(KEEP.psku) || /"P-01"/.test(p)), false, 'no write to Nexus named PSKU-000001 or P-01');
   const k = (await ndb.query(`select (select count(*)::int from nexus.moves m join nexus.pallets p on p.id = m.pallet_id where p.external_id = $1) moves, (select l.code from nexus.occupancy o join nexus.pallets p on p.id = o.pallet_id join nexus.locations l on l.id = o.location_id where p.external_id = $1) at`, [KEEP.psku])).rows[0];
   assert.deepEqual(k, { moves: 1, at: 'P-01' });
+  // the platform refused the 31st call from one function to another inside one request (observed 2026-11-23): keep every stage well under it
+  for (const [stage, t] of Object.entries(totals)) { const c = (t as any)[3]; assert.ok(c.deployed + c.lossy <= 25, `${stage} makes ${c.deployed + c.lossy} calls to the bridge; the limit kept here is 25`); }
   console.log('per stage [passed, failed, writes sent, calls]:', JSON.stringify(totals));
 });
 

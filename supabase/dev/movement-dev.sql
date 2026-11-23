@@ -47,7 +47,9 @@ begin
     'left_floor_log', (select coalesce(jsonb_agg(jsonb_build_object('psku', a.ref, 'from', a.detail ->> 'from', 'reason', a.detail ->> 'reason', 'units_on_books', a.detail -> 'units_on_books') order by a.id), '[]')
       from wms_activity a where a.kind = 'pallet_left_floor'),
     'off_floor', (select jsonb_build_object('exists', true, 'pickable', l.pickable, 'shared', coalesce(l.shared, false)) from locations l where l.code = 'OFF-FLOOR'),
-    'orders', (select coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'number', o.order_number, 'status', o.status, 'org', o.org_id) order by o.order_number), '[]') from orders o)
+    'orders', (select coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'number', o.order_number, 'status', o.status, 'org', o.org_id) order by o.order_number), '[]') from orders o),
+    -- which safety rules this database has (read from the function text; the suite's preflight refuses to start without them)
+    'rules', jsonb_build_object('void_safety', exists (select 1 from pg_proc where pronamespace = 'public'::regnamespace and proname = 'wms_void_pallet' and prosrc like '%cannot be voided yet%'))
   ) into j;
   return j;
 end $$;
@@ -77,7 +79,7 @@ create or replace function public.dev_runner_begin(p_stage text) returns bigint 
 declare v bigint;
 begin
   perform _dev_synthetic_only();
-  if p_stage not in ('preflight', 'move', 'release', 'lost', 'partial', 'picks', 'stops', 'final') then raise exception 'Unknown stage.'; end if;
+  if p_stage not in ('preflight', 'move', 'release', 'lost', 'partial', 'undo', 'picks', 'stops', 'final') then raise exception 'Unknown stage.'; end if;
   if exists (select 1 from dev_runner_runs where finished_at is null and started_at > now() - interval '10 minutes') then raise exception 'A stage is still running. Nothing was started.'; end if;
   if p_stage not in ('preflight', 'final') and exists (select 1 from dev_runner_runs where stage = p_stage) then raise exception 'Stage % was already started once. Nothing was started.', p_stage; end if;
   insert into dev_runner_runs (stage) values (p_stage) returning id into v; return v;

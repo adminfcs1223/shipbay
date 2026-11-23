@@ -1,8 +1,38 @@
 # Hosted movement rehearsal: steps 1 and 2 done, the rest not run
 
-Updated 2026-11-23, 1:05 AM ET. Step 1 (development database) and step 2 (updated bridge) are applied and verified on
+Updated 2026-11-23, 1:50 AM ET. Step 1 (development database) and step 2 (updated bridge) are applied and verified on
 `shipbay-nexus-dev`. The movement runner is NOT deployed, all switches are off, and nothing was sent to Nexus. Production and
 `main` are untouched.
+
+## Void safety (candidate 20261204): tested locally, applied nowhere
+
+`supabase/candidates/20261204_wms_void_safety.sql` replaces `wms_void_pallet` only. Before: a void set the status, and the stock
+trigger then took everything the pallet had posted off the books, whatever had been picked and whatever Nexus was doing.
+Now a void is refused, with nothing changed, when:
+
+- a Nexus request for the pallet is not settled (waiting for an answer, or accepted by Nexus and not recorded by ShipBay);
+- a wave still has a pick planned from it;
+- units have been picked from it and not put back ("30 of PSKU-...'s units have been picked ... undo those picks first");
+- taking its units off would leave any position below zero (older picks that name no pallet);
+- it has left the building (status departed). This one was not asked for: a void there would write the departed units off with
+  the generic adjust reason, which is the deduction Derek ruled out on 2026-11-23. Say so if it should be allowed.
+
+A void that passes posts exactly what it posted before. Reconciliation is unchanged: record and undo for an out-of-sync
+request work as before, and the pallet can be voided once the request is settled. The void takes the same row lock every
+Nexus request takes first, so a void and a scan for the same pallet cannot pass each other.
+
+Tests: `supabase/tests/staging/void.test.mjs`, 6 tests, all fail without the candidate and pass with it (real Nexus service code,
+local). They cover the 100/30 case, a wave stop planned and picked, a pick that travelled with a moved pallet, an older pick with
+no pallet, a void during a waiting put-away and a waiting move, both out-of-sync resolutions, a correction whose own answer was
+lost, departed and off-floor pallets, totals, one receipt per pallet, and no position below zero.
+
+The rehearsal no longer uses a void to produce its second partial failure. Both now use the HOLD fault; the second one also
+checks that a void is refused while the request is waiting and while it is out of sync, and accepted after the admin's
+correction. That part is its own stage, `undo`. Preflight refuses to start unless the database has the void rules (read from
+the snapshot). The suite is 9 stages, 328 checks.
+
+**Before the rehearsal, with separate approval:** apply 20261204 and the updated `movement-dev.sql` (snapshot reports the rule,
+the run-once record knows the `undo` stage) to `shipbay-nexus-dev`. Until then preflight fails on purpose.
 
 ## Bridge deployed to shipbay-nexus-dev (step 2)
 
@@ -37,11 +67,12 @@ per request; the probe was split into three parts and rerun in full.
 
 **Blocker for step 3 found here.** The limit that stopped the first probe applies to the movement runner too: the 31st call
 from the probe to the bridge inside one request was refused by the platform ("Rate limit exceeded for trace", retry after 59
-seconds); 30 went through. The suite's stages make more bridge calls than that (the largest about 50), and a writing stage can
-be started only once. As built, a stage would be cut off part-way by the platform, after some Nexus writes and before others.
-The runner must not be deployed until each request it serves stays under the limit (stages split into smaller run-once
-requests, or another calling arrangement), and that is re-tested locally with the limit simulated. The exact limit is observed,
-not documented here: 30 passed, the 31st failed.
+seconds); 30 went through. A writing stage can be started only once, so a stage cut off part-way would leave some Nexus writes
+done and others not. Correction to the first version of this note: "about 50" counted database calls too. Counted properly,
+only the `partial` stage reached the limit (30 calls to the bridge). It is now two stages (`partial` 19, `undo` 17); the largest
+is `release` with 22, and the runner's test fails if any stage exceeds 25. The exact limit is observed, not documented here
+(30 passed, the 31st failed; whether it is per request or per minute is not known), so the first hosted stage after preflight
+is still the real test of it.
 
 After the probe: `workflow-check.sql` 6 of 6 on hosted (run after the deploy). Dev database: PSKU-000001 stored at P-01, ledger one
 row of 100, one journal entry (04:26:05Z), 9 pallets, 0 waves, 0 runner runs, 28 migrations. Nexus staging: occupancy is
@@ -69,8 +100,9 @@ stored at P-01 with its one journal entry and its one 100-unit receipt, byte-for
 |---|---|
 | Workflow repairs | `supabase/candidates/20261203_wms_inventory_workflow.sql`. Applied to the dev database only. |
 | Regression tests for the repairs | `supabase/tests/staging/workflow.test.mjs`, 6 tests, all pass locally (real Nexus service code). |
-| Hosted suite | `supabase/tests/hosted/suite.js`: 8 stages, 306 checks. The earlier 261 are all still in it. Passes locally under Node and through the runner under Deno. |
+| Hosted suite | `supabase/tests/hosted/suite.js`: 9 stages, 328 checks. Passes locally under Node and through the runner under Deno. |
 | Lost answers | Produced by the bridge's own dev-only test fault. The runner no longer holds bridge code or reads the Nexus key. |
+| Void safety | `supabase/candidates/20261204_wms_void_safety.sql` and `supabase/tests/staging/void.test.mjs` (6 tests). Local only. |
 | Existing tests | Bridge 16, Edge wrapper 4, waves/receiving/dock/registry/activity unchanged and passing, dev regression 15 checks, WMS unit 56, put-away browser test 29. |
 
 ## What the repairs change (20261203)
@@ -121,13 +153,12 @@ new candidate loaded.
 
 Reproduced on the local database, or read from the code where stated. None of these blocks the synthetic rehearsal.
 
-1. **Voiding a stored pallet after picks leaves a negative position.** The void takes the full received quantity off the books
-   and the picks stay: 100 received, 30 picked, void, and the position shows minus 30 (reproduced). This is older behaviour, not
-   caused by Nexus, and it is wrong for real stock.
-2. **Voiding while a request is waiting.** Still allowed. On a waiting put-away it ends as an out-of-sync request the admin
-   undoes (the suite rehearses this). On a waiting move the stock is written off at once, Nexus completes the move, and ShipBay
-   refuses to record it: the pallet shows void at the old position while Nexus holds the new one (reproduced). Recoverable by an
-   admin, but it should be refused instead. Fixing it changes how the suite produces its second partial failure.
+1. **Voiding a stored pallet after picks left a negative position.** FIXED in candidate 20261204 (local only): refused.
+2. **Voiding while a request is waiting.** FIXED in candidate 20261204 (local only): refused until the request is settled.
+   Neither fix is on the hosted dev database or in production yet.
+6. **Changing a stored pallet's unit count has the same two gaps the void had** (from the code, not reproduced):
+   `wms_set_units` re-posts the pallet's stock with no check for picks or for a waiting Nexus request. Setting a
+   part-picked pallet's count below what was picked leaves the position below zero. Not changed: it was not in the request.
 3. **There is no cycle-count transaction.** No function posts a count. Stock corrections today are direct ledger entries by
    ShipBay logins (the table's own access rule allows them), with no pallet, at any position including shared ones, and with no
    check for a waiting movement. A correction at a shared position does not travel with the pallet when it moves (from the code).
@@ -150,7 +181,7 @@ receipt, its one journal entry and Nexus's own answer for P-01 before and after 
 | R2 | `syn-move-1` #2 | 200 | P-14 | Released as shipped out; the answer to the release is lost and re-sent. |
 | L | `syn-move-1` #3 | 200 | P-15, then P-16 | Both Nexus answers lost: one finished by re-scan, one by the retry run. |
 | F1 | `syn-move-1` #4 | 200 | P-17 | Nexus accepted, ShipBay could not record; admin confirms it IS there. |
-| F2 | `syn-move-2` #1 | 1000 | P-18 | Nexus accepted, ShipBay could not record; admin confirms it is NOT there. |
+| F2 | `syn-move-2` #1 | 1000 | P-18 | Stage `undo`. Nexus accepted, ShipBay could not record; admin confirms it is NOT there; then voided. |
 | G | `syn-move-2` #2 | 1000 | P-19, P-20 | Part-picked, moved, reopened; then its planned stop follows it P-20, P-19, P-20. |
 
 On the hosted database the six new pallets are PSKU-000016 to PSKU-000021. The suite finds them by receipt batch, not by number. P-11 to P-20 were open and empty in Nexus staging on 2026-11-22
@@ -163,18 +194,20 @@ state first and stops at the first failed check. Nothing is retried, repaired or
 
 1. **Dev database. DONE 2026-11-23** (approved by Derek). See "Applied to shipbay-nexus-dev" above.
 2. **Bridge. DONE 2026-11-23** (approved by Derek). See "Bridge deployed to shipbay-nexus-dev" above.
-3. **Runner (approval).** `bundle.sh`, set the one-hour gate, deploy into the existing `bridge-smoke` slot in dev.
-   BLOCKED until the stages fit the platform's per-request call limit (see step 2).
+3. **Dev database again, then the runner (approval for each).** Apply 20261204 and the updated `movement-dev.sql` to dev. Then
+   `bundle.sh`, set the one-hour gate, deploy the runner into the existing `bridge-smoke` slot in dev. The stages now fit the
+   call limit observed in step 2.
 4. **Switches (Derek, by hand, dev only).** `NEXUS_BRIDGE_MODE` = `staging`, `NEXUS_PALLET_MOVES` = `on`, `NEXUS_TEST_FAULTS` = `on`.
-5. **`preflight`** (read-only, 22 checks).
+5. **`preflight`** (read-only, 23 checks).
 6. **`move`** (41). Nexus: put-away M at P-11 and R1 at P-13, one refused move, move M to P-12.
 7. **`release`** (53). Nexus: release R1 from P-13, put R1 back, put-away R2 at P-14, release R2 from P-14.
 8. **`lost`** (48). Nexus: put-away L at P-15, move L to P-16, each answer dropped once and recovered.
-9. **`partial`** (57). Nexus: put-away F1 at P-17 and F2 at P-18, one corrective release of P-18.
-10. **`picks`** (24). Nexus: put-away G at P-19, move G to P-20.
-11. **`stops`** (40). Nexus: G moves P-20 to P-19, back to P-20, to P-19, back to P-20; two of those answers dropped and recovered.
-12. **`final`** (read-only, 21).
-13. **Switches off (Derek).** Delete all three. Disabled-mode verification, the stub goes back into `bridge-smoke`, Nexus staging
+9. **`partial`** (39). Nexus: put-away F1 at P-17; the admin records it.
+10. **`undo`** (39). Nexus: put-away F2 at P-18, one corrective release of P-18. Voids refused while unsettled, accepted after.
+11. **`picks`** (24). Nexus: put-away G at P-19, move G to P-20.
+12. **`stops`** (40). Nexus: G moves P-20 to P-19, back to P-20, to P-19, back to P-20; two of those answers dropped and recovered.
+13. **`final`** (read-only, 21).
+14. **Switches off (Derek).** Delete all three. Disabled-mode verification, the stub goes back into `bridge-smoke`, Nexus staging
     and production checked read-only.
 
 Across the writing stages Nexus sees 8 put-aways, 7 moves and 3 releases from ShipBay, plus one refused move on record. The
@@ -199,5 +232,4 @@ helpers. The runner holds no bridge code and no Nexus address, and never reads t
 
 - The real Auth endpoints, the platform's token check in front of the bridge, and real network time.
 - Background execution in the Edge runtime (`&wait=1` runs a stage in the foreground if it is not available).
-- Stage duration. The largest stage makes about 50 round trips; preflight's timing decides whether any stage must be split.
-- Known since 2026-11-23: one request may make about 30 calls to another function. See the blocker under step 2.
+- Stage duration, and the platform's limit on calls from one function to another (30 observed; the largest stage makes 22).
