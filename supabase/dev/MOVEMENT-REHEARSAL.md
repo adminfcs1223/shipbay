@@ -40,8 +40,9 @@ The repair (`supabase/candidates/20261205_wms_open_box_safety.sql`), with the ex
   the units found onto the shelf", it raises and everything is taken back.
 
 One change to the ledger's wording, for Derek to know: opening a box on a put-away pallet used to appear as `adjust` and
-`receive` rows; it now appears as `transfer` rows. Quantities per place are the same as before for an exact count. Nothing reads
-those reasons for billing in the code searched here, but say so if a report depends on them.
+`receive` rows; it now appears as `transfer` rows. Quantities per place are the same as before for an exact count. Nothing in
+the warehouse functions, the WMS source or the portal source reads those reasons. Billing and reporting functions that live only in
+the production database are outside the extract used here and were not searched: say so if one depends on them.
 
 Tests: `supabase/tests/staging/openbox.test.mjs`, 5 tests (receiving before put-away, exact opening, moved pallet, second shelf,
 corrected count both ways, authorization and reason, heavy picks, unpick, planned wave, packed order, waiting and out-of-sync
