@@ -18,7 +18,7 @@ const db = new pg.Pool({ connectionString: `${base}/staging`, max: 4 });
   if (g.c !== 'shipbay-local-staging' || g.n !== 0 || g.p !== 9 || g.m !== 0) { await db.end(); throw new Error('REFUSED: not a freshly built local synthetic database (run build-local.sh)'); } }
 await db.query('drop database if exists nexus_runner_test'); await db.query('create database nexus_runner_test');
 const ndb = new pg.Pool({ connectionString: `${base}/nexus_runner_test`, max: 4 });
-for (const f of ['001_core.sql', '002_floor_map.sql', '003_calendar.sql']) await ndb.query(await Deno.readTextFile(`${NX}/${f}`));
+for (const f of ['001_core.sql', '002_floor_map.sql', '003_calendar.sql', '004_baseline.sql', '005_key_handoff.sql', '007_destinations_only.sql']) await ndb.query(await Deno.readTextFile(`${NX}/${f}`));
 const { makeHandler } = await import(`file://${NX}/service/handler.mjs`);
 const nexus = makeHandler(async (sql: string, p: unknown[]) => (await ndb.query(sql, p)).rows);
 const n1 = async (sql: string, p?: unknown[]) => Object.values((await ndb.query(sql, p)).rows[0])[0] as string;

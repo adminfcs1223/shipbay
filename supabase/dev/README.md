@@ -50,7 +50,7 @@ only for `test-…@example.test`. No password is set by default.
 - `stock-safety-check.sql`: third rolled-back check, for the void and unit-count rules. 7 of 7 on hosted, 2026-11-23.
 - `probe/index.ts`: one-off disabled-mode probe with genuine sessions (gate closed as committed). Run once on 2026-11-23 against bridge version 7; see MOVEMENT-REHEARSAL.md.
 - `probe/corrections.ts`: one-off probe of the three correction endpoints with genuine sessions for all four logins (gate closed as committed). Every call names things that do not exist, so none can write. Run once on 2026-11-23, 35 of 35; see MOVEMENT-REHEARSAL.md.
-- `manager-correct-check.sql`: fifth rolled-back check, for candidate 20261206 (5 checks). `pending/dev_034_manager_pick_corrections.sql` is generated and NOT applied.
+- `manager-correct-check.sql`: fifth rolled-back check, for candidate 20261206 (5 checks). `pending/dev_034_manager_pick_corrections.sql` was applied to dev on 2026-11-23 (the file's header still says NOT APPLIED; it is kept byte for byte).
 - `../../wms/test/corrections-e2e/`: the three correction forms in a real browser on a local stack built like this database (`run.sh`, 113 checks; `SEED=manager RUNNER=run-manager.cjs run.sh` for the manager's list, 79 checks). Local only.
 - `hosted-smoke.sh`: read-only checks once the connection is on and movement is still off. Not yet run.
 

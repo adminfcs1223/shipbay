@@ -21,7 +21,8 @@ functions (shows the double deduction), applies the candidate, repeats the flow,
 ## Bridge test (ShipBay to Nexus, local only)
 `bridge.test.mjs` runs ShipBay's database functions, the bridge (`supabase/functions/nexus-bridge`) and the real Nexus service
 code together on this machine. It needs the `neutral/` folder of branch `nexus-neutral` of `adminfcs1223/nexus` extracted
-somewhere (tested against commit `b4d3053`, map version 4):
+somewhere (tested against commit `9826ba3`, map version 4). The tests build the local Nexus database from the migrations
+Nexus staging runs: 001 to 005 and 007 (checked against staging on 2026-11-23; 006, 008 and 009 are not deployed there):
 
     EXTRACT=<schema extract> supabase/tests/staging/load.sh
     NEXUS_NEUTRAL=<path to neutral/> node --test supabase/tests/staging/bridge.test.mjs

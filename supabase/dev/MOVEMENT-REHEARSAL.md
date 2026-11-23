@@ -1,14 +1,96 @@
 # Hosted movement rehearsal: dev database and bridge ready, screens validated, runner and stages not run
 
-Updated 2026-11-23, 1:15 PM ET (manager access to pick corrections, local only; see the next section). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
-and dev_033 are applied and verified on `shipbay-nexus-dev`. The three correction forms have now been run in a browser and the
+Updated 2026-11-23, 6:40 PM ET (dev_034 applied to dev and verified; see the next section). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
+dev_033 and the manager pick-correction migration dev_034 are applied and verified on `shipbay-nexus-dev`. The three correction forms have now been run in a browser and the
 correction endpoints called over HTTP with real sessions (below). The movement runner is NOT deployed, no switch was set, and
 nothing was sent to Nexus. Production and `main` are untouched.
 
 **Hold (Derek, 2026-11-23 2:30 AM):** the hosted rehearsal does not start yet. Souled's P-02 placement is being prepared and
 Nexus has a destination-safety deployment pending. PSKU-000001 stays at P-01.
 
-## Manager access to pick corrections (candidate 20261206): built and tested locally, applied nowhere
+## dev_034 applied to shipbay-nexus-dev and verified (approved by Derek, 2026-11-23 6:25 PM)
+
+Applied as migration `dev_034_manager_pick_corrections` (the 31st). The WMS screen is NOT deployed anywhere; on dev the
+functions are reachable by API only. No runner, no switch, nothing sent to Nexus, production and `main` untouched.
+
+Before applying: target confirmed (`gdoaonsasbsperqjuurm`, two synthetic brands, four example.test logins). The file adds three
+functions, five revoke/grant lines, nothing else: no DROP, no table, no row, no existing grant. Applied to a local database in
+dev's state it gives the same three bodies as the tested candidate.
+
+| Check on the hosted dev database | Result |
+|---|---|
+| The three function bodies equal the tested candidate (md5 of stored source) | 3 of 3 (`wms_manager_stops` 2afa232b, `wms_manager_stop_correct` a020b2da, `_wms_stop_correct_block` e5ee05ea) |
+| The other 159 public functions (body and grants) | One fingerprint, identical before and after |
+| Table grants (845) and access rules (43) | Fingerprints identical before and after: no unrelated grant changed |
+| Permissions on the new functions | Public key: none. Signed-in logins: the list and the correction (each checks admin or staff itself). Service login: none. The internal check: nobody |
+| `manager-correct-check.sql` | 5 of 5, rolled back |
+| `workflow-check.sql` | 6 of 6, rolled back |
+| `stock-safety-check.sql` | 7 of 7, rolled back |
+| `openbox-check.sql` | 8 of 8, rolled back |
+| `regression.sql` | 15 of 15, rolled back |
+| Real Supabase Auth sessions (one-off probe, 23:31:30Z) | 28 of 28 |
+| Pallets, cartons, ledger, journal, orders: fingerprints before the migration and after everything | Identical (9 pallets, 90 cartons, 1 ledger row of 100, 1 journal entry, 1 order) |
+| Positions below zero; pallets received twice; correction log rows left behind; open requests; waves; runner runs | 0, 0, 0, 0, 0, 0 |
+| PSKU-000001 | Stored at P-01; its row, its one receipt of 100 and its one journal entry (04:26:05Z) have the same md5 as before |
+
+What the hosted manager check showed (as the synthetic logins, rolled back): a stop not picked yet, a stop whose pallet is on
+the floor and a pick at the pack station are each refused in words with the ledger untouched; floor and client logins can
+neither read the list nor correct; each brand's list holds only its own picks and a stop named under the other brand is
+refused; a correction needs a reason and a private shelf; staff's correction posts ONE row (+6 on A-01) naming staff, the stop
+and the reason, with an activity entry, and the picker's stop reopens at the shelf; a second correction of the same pick is
+refused; the admin's correction for the other brand posts under that brand.
+
+The probe (real sessions): Auth issued a session for each of the four logins with the expected role; floor and client are
+refused on the list (both brands) and the correction, and cannot call the internal check; no token, the public key and a
+made-up token are refused before anything runs; admin and staff get each brand's list (empty: no wave is open on dev), are
+refused with no brand named, and are refused for a stop that is not the brand's; nobody can call the internal check. It also
+read the bridge's `/status` once: connection off, pallet moves false, test faults false. It was in the `bridge-smoke` slot for
+about 10 seconds; the stub is back (version 20, source read back, sign-in required).
+
+Stated plainly:
+- Three of the five checks (stock-safety, open box, regression) were pasted to the database by a helper session from the
+  committed files; it reported pasting the blocks unchanged but could not byte-compare. Their pass lines and counts are the
+  expected ones.
+- With real sessions, every call named a stop that does not exist, so the reason rule and a successful correction were NOT
+  exercised through Supabase Auth. They were exercised on hosted in the rolled-back check (as each login's identity) and in
+  the local browser and HTTP runs.
+- The screen is local-only. Nothing a production user can open has changed.
+- The rolled-back checks consumed pallet, carton and package label numbers.
+
+### Movement rehearsal against Nexus's deployed destination-safety code (local)
+
+Correction to earlier notes here: the local tests built their Nexus database from files 001 to 003 of the copy fetched at
+commit `b4d3053`. That copy predates the idempotency change of 2026-11-22 23:43 (a key matches only the identical request,
+positions included) and everything after it, although staging already ran some of that when the earlier runs were reported.
+
+Now: branch `nexus-neutral` at `9826ba3`. Staging runs migrations 001 to 005 and 007 (006, 008, 009 are not there). A local
+database built from those six has the same 34 functions as staging; 31 have identical bodies, including everything on the
+movement path (`place`, `api_place`, `_auth`, `api_occupancy`, `api_map`, `api_moves`, `api_changes`, `_occupancy_guard`,
+`_map_checksum`). The three that differ (`_baseline_problems`, `floor_stop`, `integration_create`) are baseline and
+administration functions the bridge never calls; staging has an older text of them. Map version 4 and the checksum the suite
+pins are unchanged on staging. The tests now load those six files.
+
+| Against that code, locally | Result |
+|---|---|
+| Movement suite, nine stages | 331 of 331 |
+| Runner under Deno | 13 of 13; most bridge calls in one stage still 22 |
+| Bridge | 16 of 16 |
+| Manager, void, unit count, open box, workflow | 5, 6, 5, 5, 6 |
+
+Not verified: the three functions that differ were not compared line by line, and the service's HTTP wrapper on staging
+(`service/supabase`) was not read; the tests drive `service/handler.mjs`, which is unchanged from the copy used before.
+
+Seen while reading Nexus staging at 23:35Z (read-only): Souled's PAL-9801 now stands at P-02 (14 moves on record). ShipBay
+still has exactly one movement (04:26:05Z) and PSKU-000001 at P-01. The suite never names P-01 or P-02.
+
+### Security follow-up, to be fixed before real inventory (NOT changed here)
+
+Admin, staff and sales logins can still insert, change and delete ledger rows directly through the API (`shipbay_all_moves`
+on `inventory_moves`), with no reason recorded, bypassing every correction function. Floor and client logins cannot. Table
+grants and access rules were fingerprinted before and after dev_034 and are unchanged. The requirement is written out under
+"Later hardening" below.
+
+## Manager access to pick corrections (candidate 20261206): what was built (on dev as dev_034 since 2026-11-23 evening; screen local-only)
 
 Derek's assignment, 2026-11-23 12:20 PM. The gap was defect 2 below: a floor picker whose pallet left after the pick is told to
 ask a manager, and a manager who signed in saw only their own wave.
@@ -288,11 +370,10 @@ resetting the dev database.
 
 ### 5. What must be read fresh immediately before execution
 
-1. **Nexus's code.** The suite was proven against the Nexus service code of branch `nexus-neutral` at commit `b4d3053`. Nexus has
-   a destination-safety deployment pending. If it lands first, the local suite must be rerun against the new service code
-   before any hosted stage: it may change refusal codes (`location_full`), the map version or checksum (preflight pins version
-   4 and one checksum), or what a put-away must send. Nexus staging's function fingerprint at 07:47:56Z:
-   33 functions, `7782edb9...`. A different value means "retest first".
+1. **Nexus's code. RETESTED 2026-11-23 evening against what staging runs now** (see "dev_034 applied" at the top): the
+   destinations-only rule (007) is on staging, and the suite, the runner and the bridge tests pass against it locally.
+   Staging's function fingerprint to compare before execution: 34 functions, `e4d5a270...` (names, arguments and bodies,
+   C order). A different value means "retest first".
 2. **Occupancy.** P-11 to P-20 empty for every company (they were at 07:47:56Z). Souled's P-02 placement does not touch them and
    the suite never names P-02, but preflight only protects the moment it runs: Souled must stay off P-11 to P-20 for the whole
    window, or a stage will meet `location_full` half-way and stop.

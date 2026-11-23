@@ -19,7 +19,7 @@ const db = new pg.Client(`${base}/staging`); await db.connect();
 // ---- the real Nexus, local ----
 await db.query('drop database if exists nexus_hosted_suite'); await db.query('create database nexus_hosted_suite');
 const ndb = new pg.Pool({ connectionString: `${base}/nexus_hosted_suite` });
-for (const f of ['001_core.sql', '002_floor_map.sql', '003_calendar.sql']) await ndb.query(fs.readFileSync(path.join(NX, f), 'utf8'));
+for (const f of ['001_core.sql', '002_floor_map.sql', '003_calendar.sql', '004_baseline.sql', '005_key_handoff.sql', '007_destinations_only.sql']) await ndb.query(fs.readFileSync(path.join(NX, f), 'utf8'));
 const { makeHandler } = await import(pathToFileURL(path.join(NX, 'service/handler.mjs')));
 const nexus = makeHandler(async (sql, p) => (await ndb.query(sql, p)).rows);
 const n1 = async (sql, p) => Object.values((await ndb.query(sql, p)).rows[0])[0];
