@@ -1,17 +1,82 @@
 # Hosted movement rehearsal: dev database and bridge ready, runner and stages not run
 
-Updated 2026-11-23, 2:40 AM ET. Step 1 (development database), step 2 (updated bridge) and the stock safety migration dev_032
-are applied and verified on `shipbay-nexus-dev`. The movement runner is NOT deployed, no switch was set, and nothing was sent to
+Updated 2026-11-23, 3:10 AM ET. Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
+and dev_033 are applied and verified on `shipbay-nexus-dev`. The movement runner is NOT deployed, no switch was set, and nothing was sent to
 Nexus. Production and `main` are untouched.
 
 **P-01 hold released (Derek, 2026-11-23 2:06 AM):** Souled's conflict test at occupied P-01 passed (Nexus answered 409
 `location_full`; ShipBay's pallet and stock unchanged). PSKU-000001 still stays at P-01 until a separately authorized movement
 rehearsal changes that. The switches were read as off at 06:49:35Z by a one-off signed-in probe; the inert stub is back.
 
-**Open-box stock safety (candidate 20261205): repaired and tested locally, NOT on the dev database.** It stays a blocker before
-real-inventory testing until `dev_033` is approved, applied and verified on dev (and later production).
+**Open-box stock safety (candidate 20261205) is on the dev database as `dev_033` (approved by Derek, 2026-11-23 2:20 AM) and
+verified there.** It is not in production. Before real inventory: the production-only billing function could not be checked
+(below), and the two screen forms have not been run in a browser.
 
-## Open-box stock safety (candidate 20261205): tested locally, applied nowhere
+## dev_033 applied to shipbay-nexus-dev and verified
+
+Applied as migration `dev_033_open_box_safety` (the 30th). Reviewed before applying: it replaces `wms_open_box`, adds
+`wms_open_box_correct` and the internal `_wms_open_box_do`, one revoke for each new function and one grant; no DROP and no
+statement that touches a row. (The function itself rewrites the two ledger rows it has just created in the same call; it never
+touches a row that existed before the call.)
+
+| Check on the hosted dev database | Result |
+|---|---|
+| The three function bodies equal the committed file (md5 of the stored source) | 3 of 3 |
+| The other 156 functions in the public schema | One fingerprint, identical before and after |
+| Permissions | Public key: none of the three. Signed-in logins: `wms_open_box` and `wms_open_box_correct` (each checks the role itself). `_wms_open_box_do`: no login and not the service login |
+| `openbox-check.sql` | 8 of 8, rolled back: the six prepared checks plus two added for this verification (a wave pick and pack with boxes opened around it; admin, shipbay_staff, floor and client) |
+| `stock-safety-check.sql` | 7 of 7, rolled back |
+| `regression.sql` | 15 of 15, rolled back |
+| `workflow-check.sql` (wave pick, pack station, packing, older pick list, correction) | 6 of 6, rolled back |
+| Pallets, cartons, unit labels, ledger, journal: fingerprints before the migration, after it, and after the four checks | Identical each time (9 pallets, 90 cartons, 0 unit labels, 1 ledger row of 100, 1 journal entry) |
+| Positions below zero; a pallet received twice at one place; correction log rows left behind; open requests | 0, 0, 0, 0 |
+| PSKU-000001 | Stored at P-01, one receipt of 100, one journal entry (04:26:05Z), no carton opened |
+| Nexus staging (read-only) | ShipBay holds P-01 with PSKU-000001 and nothing else; one ShipBay move on record; movement key last used 04:26:05Z, no key error |
+| Functions deployed | `nexus-bridge` version 7 and `bridge-smoke` version 14 (inert stub), both unchanged; 0 runner runs |
+
+What the hosted open-box check showed: a short box found before put-away posts nothing and put-away then receives 90 and 7 once
+each; on a put-away pallet a count other than the carton's is refused for the floor and the carton's own 10 move as one transfer
+pair netting to zero; an admin correction (8 in a carton of 10) is one transfer pair plus one adjustment with reason, person and
+an activity entry; with everything picked a further carton is refused; no box is opened under a waiting or out-of-sync Nexus
+request or on a departed pallet; with a wave planning 85 at a position holding 100, one carton can be opened and a second
+cannot, the stop is picked, the wave goes to the pack station and the order is packed, stock down by exactly 85;
+`shipbay_staff` and admin can each correct with a reason of substance and are named on the ledger row and the activity entry,
+the floor and client logins cannot, and the floor login cannot reach the internal function.
+
+### Who reads the ledger reasons and the activity kinds
+
+Checked on the dev database (every function and view outside the system schemas) and in the repository (portal, WMS, site,
+Nexus screens, Edge Functions, production migrations):
+
+- **Stock on hand** (`inventory_levels` view, `wms_stock`, the client portal's warehouse page, the wave planner, the Nexus brand
+  counts and first-in-first-out helpers): they add up quantities and never look at the reason. A transfer pair nets to zero, so
+  totals are the same as before.
+- **No function or view on dev tests for `receive`, `adjust` or `transfer`** except the writers themselves and the dev test
+  snapshot. The production migrations in the repository that read the ledger (`ship_order`, `receive_inbound`,
+  `finalize_inbound`, `wms_pick`, `wms_unpick`, `wms_stock`, `inventory_levels`) do not test the reason either.
+- **Activity log** (`wms_activity_summary`, `wms_activity_recent`, the portal's Billing page): they list every kind with its
+  count. Two things follow. The existing `carton_open_box` entry is unchanged (one per opened carton, quantity = units found).
+  The new kinds `open_box_corrected` and `pallet_units_corrected` (and `pick_corrected` from 20261203) will appear on the
+  Billing activity table and its CSV under their raw names, because that page has no label for them. They are counts only.
+- **Could not be checked: `billing_estimate`, `billing_rates_list`, `billing_rate_save` and the `billing_rates` table.** They
+  exist only in production (applied 2026-11-20; their SQL is not in the repository) and are not on dev. The portal lists the
+  sources a charge can count from (pallets received, stored pallets, shipments, units picked, pack checks, carton scans, label
+  prints, put-aways, cycle-count scans, by hand); none is a ledger reason or an open-box kind by name, but the function body was
+  not read, so it is NOT assumed compatible. One read-only look at production's function list was attempted to name any other
+  production-only reader and was refused by the session's access rules; nothing in production was read or changed. Any
+  production function or view that is not in the repository's migrations is therefore unlisted and unchecked.
+- QuickBooks and HubSpot code in the repository does not read the stock ledger.
+
+Stated plainly:
+- The switches were not read again for this step (that needs a signed-in call, and no probe was approved for it). Last direct
+  reading: off, at 06:49:35Z. Since then no function has been deployed or changed, nothing in this session set a switch, and
+  Nexus shows no ShipBay request and no key error.
+- Not run in a browser: the reason field on the open-box dialog, the count-correction form, the pick-correction form.
+- The roles were exercised at the database with each synthetic login's identity (the same check the API applies), not through a
+  signed-in HTTP session.
+- The rolled-back checks consumed pallet, carton, unit and package label numbers; no row was left behind.
+
+## Open-box stock safety (candidate 20261205): the repair
 
 Reproduced first on the database without the fix, with `wms_open_box` as a floor login on put-away pallets of 10 x 10:
 
@@ -50,7 +115,7 @@ requests and reconciliation, departed, off-floor, NCC, void afterwards). "One re
 before put-away is received in two places by design (cartons at the position, loose units on the shelf), so the rule checked is
 no second receive row for the same pallet, product and place.
 
-Prepared, NOT applied: `supabase/dev/pending/dev_033_open_box_safety.sql` (three functions, one revoke pair, one grant; no
+Applied to dev 2026-11-23 (see above): `supabase/dev/pending/dev_033_open_box_safety.sql` (three functions, one revoke pair, one grant; no
 DROP, no data) and a fourth rolled-back check `supabase/dev/openbox-check.sql` (6 checks). Tested locally on a database built the
 way dev is now (through dev_032, PSKU-000001 stored at P-01): after dev_033 every public function matches a full build (one
 fingerprint over 155), and the open-box check (6), stock-safety check (7), regression (15) and workflow check (6) pass with
@@ -102,7 +167,7 @@ Stated plainly:
   synthetic pallet will have a higher PSKU number than the last one on file. No row was left behind.
 - The count-correction form on the Pallets screen was not run in a browser.
 
-## Pallet stock safety (candidate 20261204): void and unit count, tested locally, applied nowhere
+## Pallet stock safety (candidate 20261204): void and unit count (on dev as dev_032)
 
 One candidate, `supabase/candidates/20261204_wms_pallet_stock_safety.sql`. The void part was accepted by Derek as locally tested
 (commit f08a83f), including the rule for departed pallets.
@@ -246,7 +311,7 @@ stored at P-01 with its one journal entry and its one 100-unit receipt, byte-for
 | Hosted suite | `supabase/tests/hosted/suite.js`: 9 stages, 331 checks. Passes locally under Node and through the runner under Deno. |
 | Lost answers | Produced by the bridge's own dev-only test fault. The runner no longer holds bridge code or reads the Nexus key. |
 | Void and unit-count safety | `supabase/candidates/20261204_wms_pallet_stock_safety.sql`, `void.test.mjs` (6 tests), `units.test.mjs` (5 tests). On the dev database as `dev_032` (`supabase/dev/pending/dev_032_pallet_stock_safety.sql`); not in production. |
-| Open-box safety | `supabase/candidates/20261205_wms_open_box_safety.sql`, `openbox.test.mjs` (5 tests). Local only. Dev migration prepared: `supabase/dev/pending/dev_033_open_box_safety.sql`; check: `supabase/dev/openbox-check.sql`. |
+| Open-box safety | `supabase/candidates/20261205_wms_open_box_safety.sql`, `openbox.test.mjs` (5 tests). On the dev database as `dev_033`; not in production. Hosted check: `supabase/dev/openbox-check.sql` (8 checks). |
 | Existing tests | Bridge 16, Edge wrapper 4, waves/receiving/dock/registry/activity unchanged and passing, dev regression 15 checks, WMS unit 56, put-away browser test 29. |
 
 ## What the repairs change (20261203)
@@ -300,8 +365,8 @@ Reproduced on the local database, or read from the code where stated. None of th
 1. **Voiding a stored pallet after picks left a negative position.** FIXED in candidate 20261204 (on dev, not production): refused.
 2. **Voiding while a request is waiting.** FIXED in candidate 20261204 (on dev, not production): refused until the request is settled.
 6. **Changing a stored pallet's unit count had the same gaps.** FIXED in candidate 20261204 (on dev, not production).
-7. **Opening a carton on a put-away pallet had none of these checks.** Reproduced, and FIXED in candidate 20261205 (local only;
-   not on dev, not in production).
+7. **Opening a carton on a put-away pallet had none of these checks.** Reproduced, and FIXED in candidate 20261205 (on dev, not
+   in production).
 8. **Loose units on the open-box shelf have no pallet on their picks** (from the code): a pick from OB-01 is a shelf pick. The
    void and count rules protect the shelf through the "never below zero" check, not through the pallet. Not changed.
 3. **There is no cycle-count transaction.** No function posts a count. Stock corrections today are direct ledger entries by
