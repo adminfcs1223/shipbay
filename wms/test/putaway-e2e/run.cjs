@@ -14,12 +14,16 @@ const norm = (t) => t.replace(/\s+/g, ' ').trim();
     st.at[b.location] = 'SHIPBAY'; st.mine[b.location] = b.psku; st.open = [];
     return [200, { ok: true, psku: b.psku, location: b.location, from, units_posted: 100 }];
   };
+  const release = (b) => { if (b.confirmed !== true || !b.reason) return [400, { ok: false, error: 'not_confirmed', message: 'Confirm at the position.' }]; if (st.mine[b.location] !== b.psku) return [409, { ok: false, error: 'pallet_not_placed', message: 'Nexus does not have it there.' }];
+    delete st.at[b.location]; delete st.mine[b.location]; return [200, { ok: true, kind: 'release', psku: b.psku, from: b.location, location: null }]; };
+  const fix = (b, how) => { const o = st.open.find((x) => x.op === b.op); if (!o || b.confirmed !== true) return [400, { ok: false, error: 'not_confirmed', message: 'Confirm at the position.' }]; st.open = st.open.filter((x) => x !== o);
+    if (how === 'undo') { delete st.at[o.to]; delete st.mine[o.to]; } return [200, { ok: true, psku: o.pallet, location: how === 'record' ? o.to : null, from: o.to }]; };
   const server = http.createServer((req, res) => {
     const p = decodeURIComponent(req.url.split('?')[0]);
     if (p.startsWith('/functions/v1/nexus-bridge')) {
       let raw = ''; req.on('data', (c) => { raw += c; }); req.on('end', () => {
         const r = p.replace('/functions/v1/nexus-bridge', ''); const body = raw ? JSON.parse(raw) : null; st.seen.push({ m: req.method, r, body, auth: req.headers.authorization });
-        const [code, out] = r === '/status' ? [200, st.status] : r === '/floor' ? [200, floor()] : r === '/pending' ? [200, { ok: true, open: st.open }] : r === '/putaway' ? place(body, false) : r === '/move' ? place(body, true) : [404, { ok: false }];
+        const [code, out] = r === '/status' ? [200, st.status] : r === '/floor' ? [200, floor()] : r === '/pending' ? [200, { ok: true, open: st.open }] : r === '/putaway' ? place(body, false) : r === '/move' ? place(body, true) : r === '/release' ? release(body) : r === '/reconcile/record' ? fix(body, 'record') : r === '/reconcile/undo' ? fix(body, 'undo') : [404, { ok: false }];
         res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(out));
       }); return;
     }
@@ -42,12 +46,26 @@ const norm = (t) => t.replace(/\s+/g, ' ').trim();
   await scan('124'); await scan('P-02'); r = await result(); ok(r.tone === 'bad' && /P-02 is taken in Nexus/.test(r.text), `a position the other company holds is refused in plain words: ${r.text}`);
   ok(/PSKU-000124/.test(await p.locator('[data-testid=pa-pallet]').innerText()), 'the pallet stays selected so another position can be scanned');
   await scan('P-03'); r = await result('ok'); ok(r.tone === 'ok' && /PSKU-000124 is at P-03/.test(r.text), 'and the next position works');
-  await scan('125'); await scan('P-04'); r = await result(); ok(r.tone === 'wait' && /NOT put away yet/.test(r.text), `no answer from Nexus is shown as not confirmed, never as stored: ${r.text}`);
-  await p.waitForSelector('[data-testid=pa-open]'); const openText = norm(await p.locator('[data-testid=pa-open]').innerText()); ok(/PSKU-000125 to P-04 ?Not stored yet/.test(openText), `the unconfirmed request is listed: ${openText}`);
+  await scan('125'); await scan('P-04'); r = await result(); ok(r.tone === 'wait' && /NOT put away yet|Nothing is confirmed/.test(r.text), `no answer from Nexus is shown as not confirmed, never as stored: ${r.text}`);
+  await p.waitForSelector('[data-testid=pa-open]'); const openText = norm(await p.locator('[data-testid=pa-open]').innerText()); ok(/PSKU-000125 to P-04 ?Not confirmed yet/.test(openText), `the unconfirmed request is listed: ${openText}`);
   await p.locator('[data-testid=pa-result] button').click(); await p.waitForSelector('[data-testid=pa-result][data-tone=ok]'); r = await result(); ok(/PSKU-000125 is at P-04/.test(r.text), 'Send again repeats the same request and confirms it');
   ok(st.seen.filter((s) => s.r === '/putaway' && s.body.psku === 'PSKU-000125').every((s) => s.body.location === 'P-04'), 'both attempts named the same pallet and position');
   await p.getByRole('button', { name: 'Move a stored pallet' }).click(); await scan('PSKU-000123'); await scan('P-06'); await p.waitForSelector('[data-testid=pa-result][data-tone=ok]'); r = await result();
-  ok(/PSKU-000123 is at P-06\. Moved from P-01\. Stock is unchanged/.test(r.text) && st.seen.some((s) => s.r === '/move'), `a move goes to the move route and says where it came from: ${r.text}`);
+  ok(/PSKU-000123 is at P-06\. Moved from P-01\. Quantity unchanged/.test(r.text) && st.seen.some((s) => s.r === '/move'), `a move goes to the move route and says where it came from: ${r.text}`);
+  // release: only at the position, with a reason and a stated confirmation
+  await p.getByRole('button', { name: 'Pallet left the floor' }).click(); await scan('LOC-P-03'); await p.waitForSelector('[data-testid=pa-release]');
+  ok(/P-03 · Nexus has these ShipBay pallets here/.test(norm(await p.locator('[data-testid=pa-release]').innerText())) && /PSKU-000124/.test(await p.locator('[data-testid=pa-release]').innerText()), 'release starts from the position scan and lists what Nexus has there for ShipBay');
+  const relBtn = p.getByRole('button', { name: 'Release P-03' }); ok(await relBtn.isDisabled(), 'the release button is locked until a reason and the confirmation are given');
+  await p.locator('[data-testid=pa-reason]').selectOption('shipped_out'); ok(await relBtn.isDisabled(), 'a reason alone is not enough'); await p.locator('[data-testid=pa-sure]').check(); const nBefore = st.seen.filter((s) => s.r === '/release').length;
+  await relBtn.click(); r = await result('ok'); const relSent = st.seen.filter((s) => s.r === '/release'); ok(/P-03 is free\. PSKU-000124 is recorded as having left the floor\. Its stock was not changed/.test(r.text) && nBefore === 0 && relSent.length === 1 && relSent[0].body.confirmed === true && relSent[0].body.reason === 'shipped_out' && relSent[0].body.location === 'P-03', `a confirmed release frees the position and says stock was not changed: ${r.text}`);
+  // out of sync: shown apart, never auto-released, resolved only by a ticked admin action
+  st.at['P-05'] = 'SHIPBAY'; st.mine['P-05'] = 'PSKU-000130'; st.open = [{ op: 'x1', kind: 'assign', pallet: 'PSKU-000130', to: 'P-05', state: 'out_of_sync', attempts: 1, by: 'Test Floor', problem: 'PSKU-000130 is on HOLD (found damage).' }];
+  await p.reload(); await p.waitForSelector('[data-testid=pa-broken]'); const bt = norm(await p.locator('[data-testid=pa-broken]').innerText());
+  ok(/positions stay reserved/.test(bt) && /PSKU-000130 at P-05/.test(bt) && /on HOLD/.test(bt), `an out-of-sync placement is listed with its reason and says the position stays reserved: ${bt.slice(0, 160)}`);
+  const recBtn = p.getByRole('button', { name: 'The pallet is there: record it' }); const undoBtn = p.getByRole('button', { name: 'It is not there: free the position' });
+  ok(await recBtn.isDisabled() && await undoBtn.isDisabled() && !st.seen.some((s) => s.r.startsWith('/reconcile')), 'neither correction can be sent before the admin ticks that they went and checked');
+  await p.locator('[data-testid=pa-broken] input[type=checkbox]').check(); await undoBtn.click(); r = await result('ok');
+  ok(/P-05 is free/.test(r.text) && st.seen.filter((s) => s.r === '/reconcile/undo').length === 1 && st.seen.find((s) => s.r === '/reconcile/undo').body.confirmed === true, `the confirmed correction frees the position: ${r.text}`);
   st.status = { ok: true, connection: 'off', pallet_moves: false, calendar_writes: false }; await p.reload(); await p.waitForSelector('[data-testid=pa-closed]');
   ok(/Put-away through Nexus is off/.test(await p.locator('[data-testid=pa-closed]').innerText()), 'when the bridge is off the screen says nothing here will store a pallet');
   const js = fs.readdirSync(path.join(BUILD, 'assets')).filter((f) => f.endsWith('.js')).map((f) => fs.readFileSync(path.join(BUILD, 'assets', f), 'utf8')).join('\n');

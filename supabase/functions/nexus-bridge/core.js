@@ -6,7 +6,8 @@
 //   NEXUS_BRIDGE_MODE       unset or "off": every route answers 503 and nothing is called. "staging": the staging service.
 //                           Any other value (including "production") is refused: there is no production connection in this build.
 //   NEXUS_STAGING_API_KEY   ShipBay's staging key. Read here, sent only to the fixed staging host, never logged or returned.
-//   NEXUS_PALLET_MOVES      "on" to allow put-away and moves. Anything else: those routes answer 503.
+//   NEXUS_PALLET_MOVES      "on" to allow put-away, moves and releases. Anything else: those routes answer 503.
+//   NEXUS_REGISTRY_WRITES   "on" to allow the position list to be written into ShipBay. Anything else: the sync route only reports.
 //   NEXUS_CALENDAR_WRITES   "on" to allow calendar publishing. Anything else: the sync route only reports what it would send.
 //   SUPABASE_URL            if it names ShipBay's production database, the staging connection refuses to run.
 export const STAGING_HOST = 'ankoqruedjujyefhrmtw.supabase.co';
@@ -21,7 +22,7 @@ export function readConfig(env = {}) {
   if (String(env.SUPABASE_URL || '').includes(PRODUCTION_DB_REF)) return no(503, 'wrong_database', 'The staging connection does not run on the production database.');
   if (!env.NEXUS_STAGING_API_KEY) return no(503, 'not_configured', 'The Nexus staging key is not set.');
   return { ok: true, mode, base: `https://${STAGING_HOST}/functions/v1/nexus`, key: env.NEXUS_STAGING_API_KEY, floor: TEST_FLOOR,
-    palletMoves: env.NEXUS_PALLET_MOVES === 'on', calendarWrites: env.NEXUS_CALENDAR_WRITES === 'on' };
+    palletMoves: env.NEXUS_PALLET_MOVES === 'on', registryWrites: env.NEXUS_REGISTRY_WRITES === 'on', calendarWrites: env.NEXUS_CALENDAR_WRITES === 'on' };
 }
 
 /** Calls to Nexus. status 0 means no answer arrived (network failure or timeout): the request may or may not have been applied. */
@@ -64,7 +65,7 @@ export function makeBridge({ env, fetchImpl, db, routes, now = Date.now, timeout
     const send = (body, status = 200) => json(body, status, cors); const fail = (status, error, message, extra = {}) => send({ ok: false, error, message, ...extra }, status);
     const path = url.pathname.replace(/^.*\/nexus-bridge/, '').replace(/\/+$/, '') || '/';
     const cfg = readConfig(env);
-    if (req.method === 'GET' && path === '/status') return send({ ok: true, connection: cfg.ok ? cfg.mode : 'off', reason: cfg.ok ? null : cfg.error, floor: cfg.ok ? cfg.floor : null, pallet_moves: !!cfg.palletMoves, calendar_writes: !!cfg.calendarWrites });
+    if (req.method === 'GET' && path === '/status') return send({ ok: true, connection: cfg.ok ? cfg.mode : 'off', reason: cfg.ok ? null : cfg.error, floor: cfg.ok ? cfg.floor : null, pallet_moves: !!cfg.palletMoves, registry_writes: !!cfg.registryWrites, calendar_writes: !!cfg.calendarWrites });
     if (!cfg.ok) return fail(cfg.status, cfg.error, cfg.message);
     const token = (req.headers.get('authorization') || '').match(/^Bearer\s+(\S+)$/i)?.[1];
     if (!token) return fail(401, 'sign_in', 'Sign in to the WMS first.');

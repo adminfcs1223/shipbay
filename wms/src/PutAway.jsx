@@ -1,45 +1,54 @@
-// WMS → Put away: scan the pallet label, scan the position. ShipBay checks its own rules, Nexus decides whether the position
-// is free, and only then is the pallet stored and its stock posted. Every answer on this screen comes from ShipBay's bridge;
-// the browser never talks to Nexus. Only present in a build made with VITE_NEXUS_BRIDGE=on.
+// WMS → Put away: place, move and release pallets on the shared floor. ShipBay checks its own rules, Nexus decides who
+// stands where, and only then does ShipBay record it. Every answer on this screen comes from ShipBay's bridge; the browser
+// never talks to Nexus. Only present in a build made with VITE_NEXUS_BRIDGE=on.
+//   A position is released only here, by a person who confirms at the position that the pallet is no longer standing in it.
+//   Nothing else on this screen, and nothing in the bridge, frees a position.
 import { useEffect, useState } from 'react';
 import { bridge } from './nexusBridge.js';
 import { ScanBox, beep, normPsku } from './parts.jsx';
 
 const loc = (s) => String(s || '').trim().toUpperCase().replace(/^LOC-/, '');
 const num = (n) => Number(n || 0).toLocaleString('en-US');
+const MODES = [['putaway', 'Put away'], ['move', 'Move a stored pallet'], ['release', 'Pallet left the floor']];
+const REASONS = [['shipped_out', 'Shipped out'], ['emptied_and_removed', 'Emptied and removed'], ['moved_off_shared_floor', 'Moved off the shared floor'], ['correction', 'Correction']];
+const NO_PALLET_RESET = ['location_full', 'location_blocked', 'location_unavailable', 'location_not_found'];
 
 export default function PutAway() {
-  const [mode, setMode] = useState('putaway');           // 'putaway' = a received pallet · 'move' = a pallet already stored
+  const [mode, setMode] = useState('putaway');
   const [psku, setPsku] = useState(null); const [busy, setBusy] = useState(false);
-  const [last, setLast] = useState(null);                // { tone: 'ok' | 'bad' | 'wait', title, text, retry? }
+  const [last, setLast] = useState(null);                // { tone: 'ok' | 'bad' | 'wait', title, text, again? }
   const [floor, setFloor] = useState(null); const [status, setStatus] = useState(null); const [open, setOpen] = useState([]);
+  const [rel, setRel] = useState({ at: null, reason: '', sure: false });   // release: the position scanned, why, and the confirmation
+  const [sure, setSure] = useState({});                  // per out-of-sync request: the admin's confirmation tick
 
   const refresh = async () => {
     const [s, f, p] = await Promise.all([bridge('/status'), bridge('/floor'), bridge('/pending')]);
     setStatus(s); setFloor(f.ok ? f : { ok: false, message: f.message }); if (p.ok) setOpen(p.open || []);
   };
   useEffect(() => { refresh(); const t = setInterval(refresh, 60000); return () => clearInterval(t); }, []);
+  const pick = (m) => { setMode(m); setPsku(null); setLast(null); setRel({ at: null, reason: '', sure: false }); };
 
-  const send = async (p, to) => {
-    setBusy(true); setLast(null); const r = await bridge(mode === 'move' ? '/move' : '/putaway', { method: 'POST', body: { psku: p, location: to } }); setBusy(false);
-    if (r.ok) {
-      beep('ok'); setPsku(null);
-      setLast({ tone: 'ok', title: `${r.psku} is at ${r.location}.`, text: mode === 'move' ? `Moved from ${r.from}. Stock is unchanged.` : `${num(r.units_posted)} units are on the shelf count.` });
-    } else if (r.pending || r.status === 0) {
-      beep('bad'); setLast({ tone: 'wait', title: 'Not confirmed.', text: r.message, retry: { p, to } });
-    } else {
-      beep('bad'); setLast({ tone: 'bad', title: 'Not put away.', text: r.message || 'The request was refused.' });
-      if (r.error !== 'location_full' && r.error !== 'location_blocked' && r.error !== 'location_unavailable' && r.error !== 'location_not_found') setPsku(null);   // a taken position: keep the pallet, scan another position
-    }
+  const call = async (path, body, done) => {
+    setBusy(true); setLast(null); const r = await bridge(path, { method: 'POST', body }); setBusy(false);
+    if (r.ok) { beep('ok'); setPsku(null); setRel({ at: null, reason: '', sure: false }); setLast({ tone: 'ok', ...done(r) }); }
+    else if (r.pending || r.status === 0) { beep('bad'); setLast({ tone: 'wait', title: 'Not confirmed.', text: r.message, again: () => call(path, body, done) }); }
+    else { beep('bad'); setLast({ tone: 'bad', title: r.error === 'out_of_sync' ? 'Needs an admin.' : 'Not done.', text: r.message || 'The request was refused.' }); if (!NO_PALLET_RESET.includes(r.error)) setPsku(null); }
     refresh();
   };
+  const place = (p, to) => call(mode === 'move' ? '/move' : '/putaway', { psku: p, location: to },
+    (r) => ({ title: `${r.psku} is at ${r.location}.`, text: mode === 'move' ? `Moved from ${r.from}. Quantity unchanged.` : `${num(r.units_posted)} units are on the shelf count.` }));
+  const release = (p) => call('/release', { psku: p, location: rel.at, reason: rel.reason, confirmed: true }, (r) => ({ title: `${r.from} is free.`, text: `${r.psku} is recorded as having left the floor. Its stock was not changed.` }));
   const retryAll = async () => { setBusy(true); const r = await bridge('/pending/retry', { method: 'POST' }); setBusy(false);
-    setLast(r.ok ? { tone: r.results.every((x) => x.ok) ? 'ok' : 'bad', title: 'Sent again.', text: r.results.map((x) => `${x.pallet} to ${x.to}: ${x.ok ? 'stored' : 'not stored'}`).join(' · ') || 'Nothing was waiting.' } : { tone: 'wait', title: 'Not confirmed.', text: r.message }); refresh(); };
+    setLast(r.ok ? { tone: r.results.every((x) => x.ok) ? 'ok' : 'bad', title: 'Sent again.', text: r.results.map((x) => `${x.pallet} ${x.kind} ${x.to || x.from}: ${x.ok ? 'confirmed' : 'not confirmed'}`).join(' · ') || 'Nothing was waiting.' } : { tone: 'wait', title: 'Not confirmed.', text: r.message }); refresh(); };
+  const resolve = (o, how) => call(how === 'record' ? '/reconcile/record' : '/reconcile/undo', { op: o.op, confirmed: true },
+    (r) => (how === 'record' ? { title: `${r.psku} is recorded at ${r.location}.`, text: 'ShipBay now matches Nexus.' } : { title: `${o.to} is free.`, text: `Nexus no longer holds ${o.pallet} there. ShipBay's record was not changed.` }));
 
   const pallets = floor?.ok ? floor.locations.filter((l) => l.kind === 'pallet' || l.kind === 'staging') : [];
   const free = pallets.filter((l) => l.status === 'open' && l.free > 0);
+  const here = rel.at ? pallets.find((l) => l.code === rel.at) : null;
   const closed = status && (!status.ok || status.connection === 'off' || !status.pallet_moves);
   const notOpen = floor?.ok && !floor.moves_enabled;
+  const waiting = open.filter((o) => o.state === 'pending'); const broken = open.filter((o) => o.state === 'out_of_sync');
 
   return (
     <>
@@ -50,24 +59,39 @@ export default function PutAway() {
       {closed && <div className="strip bad" data-testid="pa-closed"><b>Put-away through Nexus is off.</b><span>This environment is not set up to place pallets. Nothing on this screen will store a pallet.</span></div>}
       {floor && !floor.ok && !closed && <div className="strip bad"><b>Nexus is not answering.</b><span>{floor.message} Do not put pallets away until it does.</span><button onClick={refresh}>Try again</button></div>}
       {notOpen && <div className="strip bad" data-testid="pa-notopen"><b>The floor is not open.</b><span>Nexus has not verified the starting occupancy of this floor, so it refuses every put-away.</span></div>}
-      {last && <div className={`strip ${last.tone === 'ok' ? 'ok' : 'bad'}`} data-testid="pa-result" data-tone={last.tone}><b>{last.title}</b><span>{last.text}</span>{last.retry && <button disabled={busy} onClick={() => send(last.retry.p, last.retry.to)}>Send again</button>}</div>}
+      {last && <div className={`strip ${last.tone === 'ok' ? 'ok' : 'bad'}`} data-testid="pa-result" data-tone={last.tone}><b>{last.title}</b><span>{last.text}</span>{last.again && <button disabled={busy} onClick={last.again}>Send again</button>}</div>}
 
       <section className="panel pad">
-        <div className="seg" style={{ marginBottom: 16, width: 'fit-content' }}>
-          <button className={mode === 'putaway' ? 'on' : ''} onClick={() => { setMode('putaway'); setPsku(null); setLast(null); }}>Put away</button>
-          <button className={mode === 'move' ? 'on' : ''} onClick={() => { setMode('move'); setPsku(null); setLast(null); }}>Move a stored pallet</button>
-        </div>
-        {!psku
+        <div className="seg" style={{ marginBottom: 16, width: 'fit-content' }}>{MODES.map(([k, label]) => <button key={k} className={mode === k ? 'on' : ''} onClick={() => pick(k)}>{label}</button>)}</div>
+        {mode !== 'release' && (!psku
           ? <ScanBox key="p" autoFocus placeholder="Scan the pallet label" onScan={(c) => { setLast(null); setPsku(normPsku(c)); }} />
           : (<>
             <div className="hold" data-testid="pa-pallet" style={{ marginBottom: 12 }}><b>{psku}</b> · now scan the position it is standing in. <button className="btn sm" onClick={() => setPsku(null)}>Different pallet</button></div>
-            <ScanBox key="l" autoFocus placeholder={busy ? 'Asking Nexus…' : 'Scan the position label'} onScan={(c) => { if (!busy) send(psku, loc(c)); }} />
-          </>)}
+            <ScanBox key="l" autoFocus placeholder={busy ? 'Asking Nexus…' : 'Scan the position label'} onScan={(c) => { if (!busy) place(psku, loc(c)); }} />
+          </>))}
+        {mode === 'release' && (!rel.at
+          ? <ScanBox key="r" autoFocus placeholder="Go to the position and scan its label" onScan={(c) => { setLast(null); setRel({ at: loc(c), reason: '', sure: false }); }} />
+          : (<div data-testid="pa-release">
+            <div className="hold" style={{ marginBottom: 12 }}><b>{rel.at}</b> · {here ? (here.your_pallets || []).length ? 'Nexus has these ShipBay pallets here:' : 'Nexus has no ShipBay pallet here.' : 'Nexus does not list this position.'} <button className="btn sm" onClick={() => setRel({ at: null, reason: '', sure: false })}>Different position</button></div>
+            {(here?.your_pallets || []).length > 0 && (<>
+              <label style={{ display: 'block', marginBottom: 10 }}>Why did it leave?{' '}
+                <select value={rel.reason} onChange={(e) => setRel({ ...rel, reason: e.target.value })} data-testid="pa-reason"><option value="">Choose…</option>{REASONS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
+              <label className="sc-check" style={{ display: 'block', marginBottom: 12 }}><input type="checkbox" checked={rel.sure} onChange={(e) => setRel({ ...rel, sure: e.target.checked })} data-testid="pa-sure" /> I am standing at {rel.at} and the pallet is no longer in it.</label>
+              <ul className="sc-list">{here.your_pallets.map((id) => <li key={id} className="sc-row"><div><b>{id}</b><span>Frees {rel.at} in Nexus. The pallet's stock is not changed.</span></div><div className="r"><button className="btn sm" disabled={busy || !rel.reason || !rel.sure} onClick={() => release(id)}>Release {rel.at}</button></div></li>)}</ul>
+            </>)}
+          </div>))}
       </section>
 
-      {open.length > 0 && <section className="panel pad" data-testid="pa-open">
+      {broken.length > 0 && <section className="panel pad" data-testid="pa-broken">
+        <header className="panelhead"><h3>Needs an admin</h3><span>Nexus accepted these and ShipBay did not record them. The positions stay reserved.</span></header>
+        <ul className="sc-list">{broken.map((o) => <li key={o.op} className="sc-row"><div><b>{o.pallet} at {o.to || o.from}</b><span>{o.problem || 'ShipBay could not record it.'}</span>
+          <label className="sc-check"><input type="checkbox" checked={!!sure[o.op]} onChange={(e) => setSure({ ...sure, [o.op]: e.target.checked })} /> I have been to {o.to || o.from} and checked.</label></div>
+          <div className="r"><button className="btn sm" disabled={busy || !sure[o.op]} onClick={() => resolve(o, 'record')}>The pallet is there: record it</button>{o.kind !== 'release' && <button className="btn sm" disabled={busy || !sure[o.op]} onClick={() => resolve(o, 'undo')}>It is not there: free the position</button>}</div></li>)}</ul>
+      </section>}
+
+      {waiting.length > 0 && <section className="panel pad" data-testid="pa-open">
         <header className="panelhead"><h3>Not confirmed by Nexus</h3><button className="btn sm" disabled={busy} onClick={retryAll}>Send all again</button></header>
-        <ul className="sc-list">{open.map((o) => <li key={o.op} className="sc-row"><div><b>{o.pallet} to {o.to}</b><span>{o.state === 'stuck' ? 'Needs an admin: Nexus and ShipBay disagree. Leave the pallet where it is.' : `Not stored yet. Sent ${o.attempts} time${o.attempts === 1 ? '' : 's'} by ${o.by || 'staff'}.`}</span></div></li>)}</ul>
+        <ul className="sc-list">{waiting.map((o) => <li key={o.op} className="sc-row"><div><b>{o.pallet} {o.kind === 'release' ? `leaving ${o.from}` : `to ${o.to}`}</b><span>Not confirmed yet. Sent {o.attempts} time{o.attempts === 1 ? '' : 's'} by {o.by || 'staff'}.</span></div></li>)}</ul>
       </section>}
 
       {floor?.ok && <section className="panel pad">
