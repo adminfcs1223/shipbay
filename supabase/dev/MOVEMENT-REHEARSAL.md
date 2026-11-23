@@ -35,6 +35,14 @@ at the database (`is_wms_staff`). It gets its hosted proof in the suite's stages
 The first probe attempt stopped at 45 checks, all passing, on Supabase's limit of about 30 calls from one function to another
 per request; the probe was split into three parts and rerun in full.
 
+**Blocker for step 3 found here.** The limit that stopped the first probe applies to the movement runner too: the 31st call
+from the probe to the bridge inside one request was refused by the platform ("Rate limit exceeded for trace", retry after 59
+seconds); 30 went through. The suite's stages make more bridge calls than that (the largest about 50), and a writing stage can
+be started only once. As built, a stage would be cut off part-way by the platform, after some Nexus writes and before others.
+The runner must not be deployed until each request it serves stays under the limit (stages split into smaller run-once
+requests, or another calling arrangement), and that is re-tested locally with the limit simulated. The exact limit is observed,
+not documented here: 30 passed, the 31st failed.
+
 After the probe: `workflow-check.sql` 6 of 6 on hosted (run after the deploy). Dev database: PSKU-000001 stored at P-01, ledger one
 row of 100, one journal entry (04:26:05Z), 9 pallets, 0 waves, 0 runner runs, 28 migrations. Nexus staging: occupancy is
 PSKU-000001 at P-01 only, 12 moves in total, one of them ShipBay's, last move and the movement key's last use both 04:26:05Z,
@@ -156,6 +164,7 @@ state first and stops at the first failed check. Nothing is retried, repaired or
 1. **Dev database. DONE 2026-11-23** (approved by Derek). See "Applied to shipbay-nexus-dev" above.
 2. **Bridge. DONE 2026-11-23** (approved by Derek). See "Bridge deployed to shipbay-nexus-dev" above.
 3. **Runner (approval).** `bundle.sh`, set the one-hour gate, deploy into the existing `bridge-smoke` slot in dev.
+   BLOCKED until the stages fit the platform's per-request call limit (see step 2).
 4. **Switches (Derek, by hand, dev only).** `NEXUS_BRIDGE_MODE` = `staging`, `NEXUS_PALLET_MOVES` = `on`, `NEXUS_TEST_FAULTS` = `on`.
 5. **`preflight`** (read-only, 22 checks).
 6. **`move`** (41). Nexus: put-away M at P-11 and R1 at P-13, one refused move, move M to P-12.
@@ -191,3 +200,4 @@ helpers. The runner holds no bridge code and no Nexus address, and never reads t
 - The real Auth endpoints, the platform's token check in front of the bridge, and real network time.
 - Background execution in the Edge runtime (`&wait=1` runs a stage in the foreground if it is not available).
 - Stage duration. The largest stage makes about 50 round trips; preflight's timing decides whether any stage must be split.
+- Known since 2026-11-23: one request may make about 30 calls to another function. See the blocker under step 2.
