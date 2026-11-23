@@ -14,7 +14,7 @@ const NX = process.env.NEXUS_NEUTRAL; if (!NX || !fs.existsSync(path.join(NX, '0
 const base = 'postgres://postgres@127.0.0.1:54317';
 const db = new pg.Client(`${base}/staging`); await db.connect();
 { const g = (await db.query(`select current_setting('cluster_name') c, split_part(pg_read_file('SHIPBAY_LOCAL_STAGING'),' ',1) m`).catch(() => ({ rows: [{}] }))).rows[0]; if (g.c !== 'shipbay-local-staging' || g.m !== 'shipbay-local-staging' || (await db.query('select count(*) n from orgs')).rows[0].n !== '0') { await db.end(); throw new Error('REFUSED'); } }
-for (const f of ['20261123_wms_booking_receiving', '20261124_nexus', '20261124_nexus_map', '20261124_nexus_shared_controls', '20261125_wms_activity', '20261126_nexus_dock', '20261128_nexus_registry_sync', '20261129_wms_calendar_publish', '20261130_wms_nexus_putaway']) await db.query(fs.readFileSync(path.join(here, '../../candidates', f + '.sql'), 'utf8'));
+for (const f of ['20261123_wms_booking_receiving', '20261124_nexus', '20261124_nexus_map', '20261124_nexus_shared_controls', '20261125_wms_activity', '20261126_nexus_dock', '20261127_wms_waves', '20261128_nexus_registry_sync', '20261129_wms_calendar_publish', '20261130_wms_nexus_putaway', '20261201_wms_nexus_departure']) await db.query(fs.readFileSync(path.join(here, '../../candidates', f + '.sql'), 'utf8'));
 
 // ---- the real Nexus, local ----
 await db.query('drop database if exists nexus_bridge_test'); await db.query('create database nexus_bridge_test');
@@ -89,14 +89,14 @@ test('position list: ShipBay takes P-01..P-66 and STG-01/STG-02 from the Nexus m
   const done = await bridge('admin', 'POST', '/registry/sync', { apply: true }); assert.equal(done.applied, true); assert.equal(await count(), 68);
   const codes = (await db.query(`select code, kind, shared, nexus_status from locations where kind in ('pallet','floor') order by code`)).rows;
   assert.deepEqual(codes.filter((c) => c.kind === 'floor').map((c) => c.code), ['STG-01', 'STG-02']); assert.deepEqual([codes[0].code, codes[65].code], ['P-01', 'P-66']); assert.ok(codes.every((c) => c.shared && c.nexus_status === 'active'));
-  assert.equal((await db.query(`select count(*)::int n from locations where code = 'RCV-DOCK'`)).rows[0].n, 0, 'the dock is not a pallet position'); assert.equal((await db.query(`select active from locations where code = 'A-01-1'`)).rows[0].active, true, 'ShipBay\'s own shelf is untouched');
+  assert.equal((await db.query(`select count(*)::int n from locations where code = 'RCV-DOCK'`)).rows[0].n, 0, 'the dock is not a shared pallet position'); assert.equal((await db.query(`select active from locations where code = 'A-01-1'`)).rows[0].active, true, 'ShipBay\'s own shelf is untouched');
   const again = await bridge('admin', 'POST', '/registry/sync', { apply: true }); assert.deepEqual([again.report.added, again.report.changed, again.report.retired], [0, 0, 0]);
 });
 
 let P1, P2;
 test('put-away: ShipBay checks its rules, Nexus takes the position, then the pallet is stored and stock posts once', async () => {
   P1 = await pallet(); assert.equal(await stock(), 0);
-  const bad = net.calls.length; const r0 = await bridge('floor', 'POST', '/putaway', { psku: P1.psku, location: 'A-01-1' }); assert.equal(r0.status, 409); assert.equal(r0.error, 'refused_by_shipbay'); assert.match(r0.message, /not a pallet position/);
+  const bad = net.calls.length; const r0 = await bridge('floor', 'POST', '/putaway', { psku: P1.psku, location: 'A-01-1' }); assert.equal(r0.status, 409); assert.equal(r0.error, 'refused_by_shipbay'); assert.match(r0.message, /not a shared pallet position/);
   assert.ok(!net.calls.slice(bad).some((c) => c.startsWith('POST')), 'a ShipBay refusal never reaches Nexus');
   const r = await bridge('floor', 'POST', '/putaway', { psku: P1.psku, location: 'LOC-P-01' }); assert.equal(r.status, 200); assert.equal(r.location, 'P-01'); assert.equal(Number(r.units_posted), 100);
   assert.deepEqual(await row(P1.id), { status: 'stored', held: false, code: 'P-01' }); assert.equal(await stock(), 100);
@@ -146,7 +146,7 @@ test('held pallets never reach Nexus. Nexus says yes but ShipBay cannot record i
   let o = await ops(p.psku); assert.deepEqual(o.map((x) => x.state), ['out_of_sync']); const OP = o[0].id;
   const again = await bridge('floor', 'POST', '/putaway', { psku: p.psku, location: 'P-07' }); assert.equal(again.status, 409); assert.match(again.message, /needs an admin/);
   assert.equal((await bridge('admin', 'POST', '/pending/retry')).results.length, 0, 'the retry run does not touch it');
-  const rec = await bridge('floor', 'GET', '/reconcile'); assert.equal(rec.in_sync, false); assert.deepEqual(rec.waiting.map((w) => [w.pallet, w.state, w.nexus_has_it_at]), [[p.psku, 'out_of_sync', 'P-06']]); assert.match(rec.waiting[0].problem, /HOLD|hold/i);
+  const rec = await bridge('admin', 'GET', '/reconcile'); assert.equal(rec.in_sync, false); assert.deepEqual(rec.waiting.map((w) => [w.pallet, w.state, w.nexus_has_it_at]), [[p.psku, 'out_of_sync', 'P-06']]); assert.match(rec.waiting[0].problem, /HOLD|hold/i);
   // the corrective paths need an admin and a confirmation made at the position
   assert.equal((await bridge('admin', 'POST', '/reconcile/record', { op: OP })).status, 400);
   const notAdmin = await bridge('floor', 'POST', '/reconcile/record', { op: OP, confirmed: true }); assert.equal(notAdmin.status, 409); assert.match(notAdmin.message, /Only ShipBay admin or staff/);
@@ -179,7 +179,7 @@ test('move: the position changes in both systems and the quantity does not; the 
   const same = await bridge('floor', 'POST', '/move', { psku: P1.psku, location: 'P-08' }); assert.equal(same.status, 409); assert.match(same.message, /already at P-08/);
 });
 
-test('release is explicit: voiding a pallet frees nothing; a confirmed release frees the position and touches neither the pallet row nor stock', async () => {
+test('release is explicit: voiding a pallet frees nothing; a confirmed release frees the position, clears the position on the pallet and touches no stock', async () => {
   await run('authenticated', U.admin, 'wms_void_pallet', { p_id: P2.id, p_reason: 'synthetic void' }); assert.equal((await at('P-03')).used, 1, 'a voided pallet still holds its position in Nexus');
   assert.equal((await bridge('floor', 'POST', '/release', { psku: P2.psku, location: 'P-03', reason: 'shipped_out' })).status, 400);
   const noReason = await bridge('floor', 'POST', '/release', { psku: P2.psku, location: 'P-03', confirmed: true }); assert.equal(noReason.status, 409); assert.match(noReason.message, /Say why/);
@@ -187,19 +187,56 @@ test('release is explicit: voiding a pallet frees nothing; a confirmed release f
   const before = { row: await row(P2.id), stock: await stock(), moves: await moves() };
   net.mode = 'lost'; assert.equal((await bridge('floor', 'POST', '/release', { psku: P2.psku, location: 'P-03', reason: 'shipped_out', confirmed: true })).status, 503);
   const r = await bridge('floor', 'POST', '/release', { psku: P2.psku, location: 'P-03', reason: 'shipped_out', confirmed: true }); assert.equal(r.status, 200); assert.equal(r.replayed, true); assert.equal((await at('P-03')).used, 0);
-  assert.deepEqual({ row: await row(P2.id), stock: await stock(), moves: await moves() }, before, 'the pallet row, the stock total and the stock ledger are exactly as they were');
+  assert.deepEqual({ stock: await stock(), moves: await moves() }, { stock: before.stock, moves: before.moves }, 'the stock total and the stock ledger are exactly as they were');
+  assert.deepEqual([(await row(P2.id)).status, (await row(P2.id)).code], ['void', null], 'the voided pallet no longer shows P-03 as where it is');
   const o = (await ops(P2.psku)).filter((x) => x.kind === 'release'); assert.deepEqual(o.map((x) => [x.state, x.reason, x.confirmed_at_position]), [['done', 'shipped_out', true]]);
   const twice = await bridge('floor', 'POST', '/release', { psku: P2.psku, location: 'P-03', reason: 'shipped_out', confirmed: true }); assert.equal(twice.status, 409); assert.equal(twice.error, 'pallet_not_placed'); assert.equal((await at('P-03')).used, 0);
 });
 
+test('a departed pallet: no position on the pallet, no stock deducted by the release; off the floor keeps its stock; every move carries what is really left', async () => {
+  const on = async (code) => Number((await db.query(`select coalesce(sum(m.qty),0) n from inventory_moves m join locations l on l.id = m.location_id where l.code = $1`, [code])).rows[0].n);
+  const pick = async (pal, code, qty) => db.query(`insert into inventory_moves (org_id, sku_id, qty, reason, ref_type, ref_id, note, location_id, pallet_id) select $1, $2, $3, 'pick', 'wave_task', gen_random_uuid(), 'synthetic pick', id, $4 from locations where code = $5`, [A, SKU, -qty, pal, code]);
+  const rel = (psku, location, reason, who = 'floor') => bridge(who, 'POST', '/release', { psku, location, reason, confirmed: true });
+  // emptied by picking, then removed: the release changes no stock
+  const a = await pallet(); assert.equal((await bridge('floor', 'POST', '/putaway', { psku: a.psku, location: 'P-11' })).status, 200); await pick(a.id, 'P-11', 100); assert.equal(await on('P-11'), 0);
+  let s = await stock(), n = await moves(); const ra = await rel(a.psku, 'P-11', 'emptied_and_removed'); assert.equal(ra.status, 200); assert.equal(ra.pallet_status, 'departed'); assert.equal(ra.note, null);
+  assert.deepEqual([(await row(a.id)).status, (await row(a.id)).code, await stock(), await moves(), (await at('P-11')).used], ['departed', null, s, n, 0], 'no position shown, nothing deducted, nothing written to the ledger');
+  const back = await bridge('floor', 'POST', '/putaway', { psku: a.psku, location: 'P-11' }); assert.equal(back.status, 409); assert.match(back.message, /left the building/);
+  const again = await rel(a.psku, 'P-11', 'shipped_out'); assert.equal(again.status, 409); assert.match(again.message, /already left the shared floor/);
+  const log = (await db.query(`select detail from wms_activity where kind = 'pallet_left_floor' and ref = $1`, [a.psku])).rows; assert.equal(log.length, 1); assert.equal(log[0].detail.from, 'P-11', 'where it stood is kept in the log');
+  // part-picked pallet, moved: the old position ends at zero and the new one holds what is really left
+  const b = await pallet(); assert.equal((await bridge('floor', 'POST', '/putaway', { psku: b.psku, location: 'P-12' })).status, 200); await pick(b.id, 'P-12', 40); s = await stock();
+  assert.equal((await bridge('floor', 'POST', '/move', { psku: b.psku, location: 'P-13' })).status, 200); assert.deepEqual([await on('P-12'), await on('P-13'), await stock()], [0, 60, s]);
+  // floor staff cannot force a correction
+  const forced = await rel(b.psku, 'P-13', 'correction'); assert.equal(forced.status, 409); assert.match(forced.message, /needs a ShipBay admin or staff login/); assert.equal((await at('P-13')).used, 1);
+  // off the shared floor, still in custody: stock is kept, at the holding location
+  const off = await rel(b.psku, 'P-13', 'moved_off_shared_floor'); assert.equal(off.status, 200); assert.equal(off.pallet_status, 'off_floor');
+  assert.deepEqual([(await row(b.id)).status, (await row(b.id)).code, await on('P-13'), await on('OFF-FLOOR'), await stock(), (await at('P-13')).used], ['off_floor', null, 0, 60, s, 0]);
+  // and back: a transfer, not a second receipt
+  assert.equal((await bridge('floor', 'POST', '/putaway', { psku: b.psku, location: 'P-14' })).status, 200);
+  assert.deepEqual([(await row(b.id)).status, (await row(b.id)).code, await on('P-14'), await on('OFF-FLOOR'), await stock()], ['stored', 'P-14', 60, 0, s]);
+  assert.equal((await db.query(`select count(*)::int n from inventory_moves where ref_id = $1 and reason in ('receive', 'adjust')`, [b.id])).rows[0].n, 1, 'one receipt, no adjustment, for the pallet\'s whole life');
+  // shipped out with stock still on the books: released, NOT deducted, and said plainly
+  n = await moves(); const out = await rel(b.psku, 'P-14', 'shipped_out'); assert.equal(out.status, 200); assert.equal(out.pallet_status, 'departed'); assert.match(out.note, /60 units are still on the books at P-14/);
+  assert.deepEqual([await on('P-14'), await stock(), await moves(), (await at('P-14')).used], [60, s, n, 0]);
+  // a later carton edit on a departed pallet does not touch the ledger either
+  await db.query(`update wms_cartons set units_per_carton = 1 where pallet_id = $1`, [b.id]); assert.deepEqual([await stock(), await moves()], [s, n]);
+  await pick(b.id, 'P-14', 60);   // the proper outbound transaction, here simulated, so the next test starts clean
+  // an admin's forced correction on a stored pallet frees the position and keeps the stock
+  const c = await pallet(); assert.equal((await bridge('floor', 'POST', '/putaway', { psku: c.psku, location: 'P-15' })).status, 200); s = await stock();
+  const fc = await rel(c.psku, 'P-15', 'correction', 'admin'); assert.equal(fc.status, 200); assert.deepEqual([fc.pallet_status, await on('P-15'), await on('OFF-FLOOR'), await stock()], ['off_floor', 0, 100, s]);
+  const priv = await bridge('floor', 'POST', '/putaway', { psku: c.psku, location: 'OFF-FLOOR' }); assert.equal(priv.status, 409); assert.match(priv.message, /not a shared pallet position/);
+});
+
 test('reconciliation compares ShipBay\'s journal with Nexus and reports drift in either direction; it changes nothing', async () => {
-  const clean = await bridge('floor', 'GET', '/reconcile'); assert.equal(clean.in_sync, true, JSON.stringify(clean.differences)); assert.equal(clean.waiting.length, 0);
+  const nf = await bridge('floor', 'GET', '/reconcile'); assert.equal(nf.status, 403); assert.equal(nf.error, 'not_admin', 'occupancy reconciliation is admin or staff work');
+  const clean = await bridge('admin', 'GET', '/reconcile'); assert.equal(clean.in_sync, true, JSON.stringify(clean.differences)); assert.equal(clean.waiting.length, 0);
   const sb = async (p, body, idem) => { const r = await nexus(new Request(`http://nexus.local${p}`, { method: 'POST', headers: { authorization: `Bearer ${KEYS.shipbay}`, 'content-type': 'application/json', 'idempotency-key': idem }, body: JSON.stringify(body) })); return r.status; };
   assert.equal(await sb('/v1/pallets/release', { pallet: P1.psku }, 'drift-1'), 200); assert.equal(await sb('/v1/pallets/assign', { pallet: 'PSKU-GHOST', to: 'P-10' }, 'drift-2'), 200);   // drift made outside the bridge
-  const n = net.calls.length; const d = await bridge('floor', 'GET', '/reconcile'); assert.equal(d.in_sync, false);
+  const n = net.calls.length; const d = await bridge('admin', 'GET', '/reconcile'); assert.equal(d.in_sync, false);
   assert.deepEqual(d.differences.map((x) => [x.pallet, x.kind, x.shipbay, x.nexus]).sort(), [['PSKU-GHOST', 'nexus_only', null, 'P-10'], [P1.psku, 'shipbay_only', 'P-08', null]].sort());
   assert.ok(net.calls.slice(n).every((c) => c.startsWith('GET')), 'reconciliation only reads'); assert.equal((await row(P1.id)).code, 'P-08');
-  assert.equal(await sb('/v1/pallets/assign', { pallet: P1.psku, to: 'P-08' }, 'drift-3'), 200); assert.equal(await sb('/v1/pallets/release', { pallet: 'PSKU-GHOST' }, 'drift-4'), 200); assert.equal((await bridge('floor', 'GET', '/reconcile')).in_sync, true);
+  assert.equal(await sb('/v1/pallets/assign', { pallet: P1.psku, to: 'P-08' }, 'drift-3'), 200); assert.equal(await sb('/v1/pallets/release', { pallet: 'PSKU-GHOST' }, 'drift-4'), 200); assert.equal((await bridge('admin', 'GET', '/reconcile')).in_sync, true);
 });
 
 test('a floor that is not open for moves answers 423 in plain words; a key without the move scope answers 403; neither stores anything', async () => {

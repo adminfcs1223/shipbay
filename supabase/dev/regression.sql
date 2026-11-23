@@ -1,6 +1,6 @@
 -- Database regression test for the isolated development database (shipbay-nexus-dev).
--- Runs as the synthetic logins, checks twelve behaviours, and always ends by raising an exception so that
--- everything it did is rolled back. A pass ends with:  ROLLBACK-OK 12 checks passed: ...
+-- Runs as the synthetic logins, checks thirteen behaviours, and always ends by raising an exception so that
+-- everything it did is rolled back. A pass ends with:  ROLLBACK-OK 13 checks passed: ...
 -- A failure ends with:  FAIL <n>: ...   Either way the database is left exactly as it was.
 -- Needs the synthetic records (two brands, four logins, SYN-PO-1001..1003, one pallet on HOLD) and the v4 registry.
 -- Never run this against production.
@@ -9,7 +9,7 @@ declare
   o1 uuid := '5a000000-0000-4000-8000-0000000000a1';
   ua uuid := '5b000000-0000-4000-8000-000000000001'; uf uuid := '5b000000-0000-4000-8000-000000000002'; uc uuid := '5b000000-0000-4000-8000-000000000004';
   s1 uuid; s3 uuid; k1 uuid; ids uuid[]; pa wms_pallets; pb wms_pallets; pc wms_pallets; pd wms_pallets; ph wms_pallets;
-  j jsonb; op uuid; fx jsonb; n int; plan jsonb; ord uuid; task uuid; ok text[] := '{}'; before jsonb;
+  j jsonb; op uuid; fx jsonb; n int; plan jsonb; ord uuid; task uuid; ok text[] := '{}'; before jsonb; pk uuid;
   cf text := json_build_object('sub', uf, 'role', 'authenticated')::text; ca text := json_build_object('sub', ua, 'role', 'authenticated')::text; cc text := json_build_object('sub', uc, 'role', 'authenticated')::text;
 begin
   if current_database() is null or exists (select 1 from orgs where id <> all (array['5a000000-0000-4000-8000-0000000000a1', '5a000000-0000-4000-8000-0000000000a2']::uuid[])) then
@@ -87,8 +87,8 @@ begin
   if (select coalesce(sum(m.qty), 0) from inventory_moves m join locations l on l.id = m.location_id where m.ref_id = pb.id and l.code = 'P-02') <> 0 or (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where m.ref_id = pb.id and l.code = 'P-40') <> 100 then raise exception 'FAIL 6: per position'; end if;
   ok := ok || 'move: position changes, on-hand quantity is unchanged, stock follows as one transfer pair, still exactly one receive entry'::text;
 
-  -- 7 release: only with a stated confirmation and a reason, only from where the pallet stands; pallet row and ledger untouched
-  select jsonb_build_object('row', to_jsonb(p), 'moves', (select count(*) from inventory_moves), 'sum', (select sum(qty) from inventory_moves)) into before from wms_pallets p where p.id = pb.id;
+  -- 7 release: only with a stated confirmation and a reason, only from where the pallet stands. It frees the position and clears it on the pallet; the ledger is untouched
+  select jsonb_build_object('moves', (select count(*) from inventory_moves), 'sum', (select sum(qty) from inventory_moves), 'p40', (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-40')) into before;
   perform set_config('role', 'authenticated', true);
   begin perform wms_release_begin(pb.psku, 'P-40', 'shipped_out', false); raise exception 'FAIL 7: released without confirmation';
   exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%Confirm at the position%' then raise exception 'FAIL 7: %', sqlerrm; end if; end;
@@ -97,9 +97,16 @@ begin
   begin perform wms_release_begin(pb.psku, 'P-41', 'shipped_out', true); raise exception 'FAIL 7: released from the wrong position';
   exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%at P-40, not P-41%' then raise exception 'FAIL 7: %', sqlerrm; end if; end;
   j := wms_release_begin(pb.psku, 'P-40', 'shipped_out', true); perform set_config('role', 'service_role', true); perform wms_nexus_op_commit((j ->> 'op')::uuid); perform set_config('role', 'postgres', true);
-  if before is distinct from (select jsonb_build_object('row', to_jsonb(p), 'moves', (select count(*) from inventory_moves), 'sum', (select sum(qty) from inventory_moves)) from wms_pallets p where p.id = pb.id) then raise exception 'FAIL 7: release changed the pallet or the ledger'; end if;
+  if before is distinct from jsonb_build_object('moves', (select count(*) from inventory_moves), 'sum', (select sum(qty) from inventory_moves), 'p40', (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-40')) then raise exception 'FAIL 7: release changed the ledger'; end if;
+  if (select status || '/' || coalesce(location_id::text, 'no position') from wms_pallets where id = pb.id) <> 'departed/no position' then raise exception 'FAIL 7: the departed pallet still shows a position'; end if;
+  if (select problem from wms_nexus_ops where pallet_id = pb.id and kind = 'release') not like '100 units are still on the books at P-40%' then raise exception 'FAIL 7: stock left on the books was not reported'; end if;
+  if (select detail ->> 'from' from wms_activity where kind = 'pallet_left_floor' and ref = pb.psku) is distinct from 'P-40' then raise exception 'FAIL 7: history'; end if;
+  perform set_config('role', 'authenticated', true);
+  begin perform wms_putaway_begin(pb.psku, 'P-22'); raise exception 'FAIL 7: a departed pallet was put away again';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%left the building%' then raise exception 'FAIL 7: %', sqlerrm; end if; end;
+  perform set_config('role', 'postgres', true);
   if (select count(*) from wms_nexus_ops where pallet_id = pb.id and kind = 'release' and state = 'done' and confirmed_at_position and reason = 'shipped_out' and by_name is not null) <> 1 then raise exception 'FAIL 7: audit'; end if;
-  ok := ok || 'release: refused without confirmation, without a reason, or from the wrong position; when confirmed it is audited and leaves the pallet row and stock ledger exactly as they were'::text;
+  ok := ok || 'release: refused without confirmation, without a reason, or from the wrong position; when confirmed it is audited, the pallet becomes departed with no position, its old position stays in the log, the stock ledger is exactly as it was, and stock still on the books is reported, not deducted'::text;
 
   -- 8 Nexus accepted, ShipBay did not record: stays reserved in the journal, locked, admin-only, confirmation required; record path
   perform set_config('role', 'authenticated', true); j := wms_putaway_begin(pc.psku, 'P-03'); op := (j ->> 'op')::uuid;
@@ -132,6 +139,7 @@ begin
   if has_function_privilege('authenticated', 'public.wms_nexus_op_commit(uuid)', 'execute') or has_function_privilege('anon', 'public.wms_putaway_begin(text, text)', 'execute')
      or has_function_privilege('authenticated', 'public.nexus_registry_apply(jsonb, boolean)', 'execute') or has_function_privilege('authenticated', 'public.wms_calendar_plan()', 'execute')
      or has_table_privilege('anon', 'public.wms_nexus_ops', 'select') or has_table_privilege('authenticated', 'public.wms_nexus_ops', 'select, insert, update, delete')
+     or has_function_privilege('authenticated', 'public._wms_nexus_carry(uuid, uuid, uuid, text, uuid)', 'execute')
      or has_table_privilege('authenticated', 'public.wms_receipt_links', 'select') or has_table_privilege('anon', 'public.wms_pins', 'select') then raise exception 'FAIL 10: a privilege is too wide'; end if;
   perform set_config('request.jwt.claims', cc, true); perform set_config('role', 'authenticated', true);
   begin perform wms_putaway_begin(pa.psku, 'P-09'); raise exception 'FAIL 10: a client login placed a pallet';
@@ -143,7 +151,7 @@ begin
   -- 11 calendar: a confirmed time is a "put" with only public fields; a date-only shipment is held; a moved date cancels
   perform set_config('role', 'service_role', true); plan := wms_calendar_plan(); perform set_config('role', 'postgres', true);
   if (select count(*) from jsonb_array_elements(plan) a where a ->> 'action' = 'put') <> 1 or (select a -> 'body' from jsonb_array_elements(plan) a where a ->> 'action' = 'put') - 'starts_at' - 'ends_at' <> '{"direction": "inbound", "pallets": 4, "status": "scheduled"}'::jsonb
-     or (select (a -> 'body' ->> 'starts_at') from jsonb_array_elements(plan) a where a ->> 'action' = 'put') !~ 'T15:00:00Z$' then raise exception 'FAIL 11: put %', plan; end if;
+     or (select (a -> 'body' ->> 'starts_at') from jsonb_array_elements(plan) a where a ->> 'action' = 'put') !~ 'T1[45]:00:00Z$' then raise exception 'FAIL 11: put %', plan; end if;
   if (select count(*) from jsonb_array_elements(plan) a where a ->> 'action' = 'hold_date_only') <> 2 or plan::text ~ 'SYN-PO|Synthetic|SYNTHETIC' then raise exception 'FAIL 11: hold or privacy %', plan; end if;
   perform set_config('role', 'service_role', true); perform wms_calendar_mark(s3, 'published', (select a ->> 'hash' from jsonb_array_elements(plan) a where a ->> 'action' = 'put')); plan := wms_calendar_plan(); perform set_config('role', 'postgres', true);
   if exists (select 1 from jsonb_array_elements(plan) a where a ->> 'action' in ('put', 'cancel')) then raise exception 'FAIL 11: republish'; end if;
@@ -155,7 +163,26 @@ begin
   begin perform wms_shipment_set_appointment(s3, now(), null); raise exception 'FAIL 11: floor set an appointment';
   exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%Only ShipBay admin or staff%' then raise exception 'FAIL 11: %', sqlerrm; end if; end;
   perform set_config('role', 'postgres', true);
-  ok := ok || 'calendar: a confirmed time plans one publish at 15:00Z (10:00 ET) with direction, time, pallets and status only; date-only shipments are held; nothing repeats once published; moving the date clears the time and plans a cancel'::text;
+  ok := ok || 'calendar: a confirmed time plans one publish at 10:00 Eastern with direction, time, pallets and status only; date-only shipments are held; nothing repeats once published; moving the date clears the time and plans a cancel'::text;
+
+  -- 13 a part-picked pallet keeps its real quantity through a move, off the shared floor and back; a forced correction is admin work
+  select pallet_id into pk from inventory_moves where reason = 'pick' limit 1;
+  if pk is distinct from pa.id then raise exception 'FAIL 13: the pick is not tied to the first-in pallet'; end if;
+  n := (select sum(qty) from inventory_moves);
+  perform set_config('request.jwt.claims', cf, true); perform set_config('role', 'authenticated', true); j := wms_move_begin(pa.psku, 'P-20'); perform set_config('role', 'service_role', true); perform wms_nexus_op_commit((j ->> 'op')::uuid); perform set_config('role', 'postgres', true);
+  if (select coalesce(sum(m.qty), 0) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-01') <> 0 or (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-20') <> 95 or (select sum(qty) from inventory_moves) <> n then raise exception 'FAIL 13: move of a part-picked pallet'; end if;
+  perform set_config('role', 'authenticated', true);
+  begin perform wms_release_begin(pa.psku, 'P-20', 'correction', true); raise exception 'FAIL 13: floor staff forced a correction';
+  exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like '%needs a ShipBay admin or staff login%' then raise exception 'FAIL 13: %', sqlerrm; end if; end;
+  if wms_nexus_journal() <> '[]'::jsonb then raise exception 'FAIL 13: floor staff read the reconciliation journal'; end if;
+  j := wms_release_begin(pa.psku, 'P-20', 'moved_off_shared_floor', true); perform set_config('role', 'service_role', true); perform wms_nexus_op_commit((j ->> 'op')::uuid); perform set_config('role', 'postgres', true);
+  if (select status || '/' || coalesce(location_id::text, 'no position') from wms_pallets where id = pa.id) <> 'off_floor/no position' or (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'OFF-FLOOR') <> 95
+     or (select coalesce(sum(m.qty), 0) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-20') <> 0 or (select sum(qty) from inventory_moves) <> n then raise exception 'FAIL 13: off the floor'; end if;
+  perform set_config('role', 'authenticated', true); j := wms_putaway_begin(pa.psku, 'P-21'); perform set_config('role', 'service_role', true); perform wms_nexus_op_commit((j ->> 'op')::uuid); perform set_config('role', 'postgres', true);
+  if (select l.code from wms_pallets p join locations l on l.id = p.location_id where p.id = pa.id and p.status = 'stored') is distinct from 'P-21' or (select sum(m.qty) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'P-21') <> 95
+     or (select coalesce(sum(m.qty), 0) from inventory_moves m join locations l on l.id = m.location_id where l.code = 'OFF-FLOOR') <> 0 or (select sum(qty) from inventory_moves) <> n
+     or (select count(*) from inventory_moves where ref_type = 'wms_pallet' and ref_id = pa.id and reason in ('receive', 'adjust')) <> 1 then raise exception 'FAIL 13: back on the floor'; end if;
+  ok := ok || 'a part-picked pallet (95 of 100 left) moves, leaves the shared floor and comes back with 95 at each step, total unchanged, one receipt and no adjustment; floor staff cannot force a correction or read the reconciliation journal'::text;
 
   -- 12 ledger integrity
   if exists (select 1 from inventory_moves where location_id is null) or (select sum(qty) from inventory_moves) <> (select sum(on_hand) from inventory_levels) then raise exception 'FAIL 12'; end if;

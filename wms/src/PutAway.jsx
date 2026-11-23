@@ -10,7 +10,7 @@ import { ScanBox, beep, normPsku } from './parts.jsx';
 const loc = (s) => String(s || '').trim().toUpperCase().replace(/^LOC-/, '');
 const num = (n) => Number(n || 0).toLocaleString('en-US');
 const MODES = [['putaway', 'Put away'], ['move', 'Move a stored pallet'], ['release', 'Pallet left the floor']];
-const REASONS = [['shipped_out', 'Shipped out'], ['emptied_and_removed', 'Emptied and removed'], ['moved_off_shared_floor', 'Moved off the shared floor'], ['correction', 'Correction']];
+const REASONS = [['shipped_out', 'Shipped out'], ['emptied_and_removed', 'Emptied and removed'], ['moved_off_shared_floor', 'Moved off the shared floor'], ['correction', 'Correction (admin only)']];
 const NO_PALLET_RESET = ['location_full', 'location_blocked', 'location_unavailable', 'location_not_found'];
 
 export default function PutAway() {
@@ -37,7 +37,7 @@ export default function PutAway() {
   };
   const place = (p, to) => call(mode === 'move' ? '/move' : '/putaway', { psku: p, location: to },
     (r) => ({ title: `${r.psku} is at ${r.location}.`, text: mode === 'move' ? `Moved from ${r.from}. Quantity unchanged.` : `${num(r.units_posted)} units are on the shelf count.` }));
-  const release = (p) => call('/release', { psku: p, location: rel.at, reason: rel.reason, confirmed: true }, (r) => ({ title: `${r.from} is free.`, text: `${r.psku} is recorded as having left the floor. Its stock was not changed.` }));
+  const release = (p) => call('/release', { psku: p, location: rel.at, reason: rel.reason, confirmed: true }, (r) => ({ title: `${r.from} is free.`, text: r.note ? `${r.psku} left the floor. ${r.note}` : r.pallet_status === 'off_floor' ? `${r.psku} is off the shared floor and still in ShipBay custody. Its stock is kept.` : `${r.psku} left the floor. Its stock was not changed.` }));
   const retryAll = async () => { setBusy(true); const r = await bridge('/pending/retry', { method: 'POST' }); setBusy(false);
     setLast(r.ok ? { tone: r.results.every((x) => x.ok) ? 'ok' : 'bad', title: 'Sent again.', text: r.results.map((x) => `${x.pallet} ${x.kind} ${x.to || x.from}: ${x.ok ? 'confirmed' : 'not confirmed'}`).join(' · ') || 'Nothing was waiting.' } : { tone: 'wait', title: 'Not confirmed.', text: r.message }); refresh(); };
   const resolve = (o, how) => call(how === 'record' ? '/reconcile/record' : '/reconcile/undo', { op: o.op, confirmed: true },

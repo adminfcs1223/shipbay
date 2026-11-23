@@ -49,8 +49,9 @@ async function request(ctx, fn, args) {
 }
 const scans = (ctx) => { const psku = clean(ctx.body.psku), location = clean(ctx.body.location); return psku && location ? { psku, location } : null; };
 
-// ShipBay's journal next to Nexus's occupancy. Read-only: it reports, it corrects nothing.
+// ShipBay's journal next to Nexus's occupancy. Admin or staff only. Read-only: it reports, it corrects nothing.
 async function reconcile({ nx, user, send: out, fail }) {
+  if (!(await user.rpc('wms_nexus_admin', {}))) return fail(403, 'not_admin', 'Only ShipBay admin or staff can reconcile occupancy.');
   const o = await nx.call('GET', '/v1/occupancy'); if (o.status !== 200 || !o.body.ok) return fail(o.status === 0 ? 503 : 502, 'nexus_no_answer', 'Nexus did not answer. Nothing was compared.');
   const [journal, open] = [await user.rpc('wms_nexus_journal', {}), await user.rpc('wms_nexus_ops_open', {})];
   const nexus = new Map(); for (const l of o.body.locations || []) for (const p of l.your_pallets || []) nexus.set(String(p).toUpperCase(), l.code);
@@ -58,8 +59,8 @@ async function reconcile({ nx, user, send: out, fail }) {
   for (const j of journal) {
     const id = String(j.pallet).toUpperCase(); seen.add(id); const n = nexus.get(id) || null; const w = waiting.get(id) || null;
     if (!w && j.journal !== n) differences.push({ pallet: j.pallet, kind: n === null ? 'shipbay_only' : j.journal === null ? 'nexus_only' : 'different_position', shipbay: j.journal, nexus: n });
-    // the pallet row is ShipBay's operational record; a release leaves it alone on purpose, so only a placed pallet is compared
-    if (!w && !j.left_floor && j.pallet_row !== j.journal) differences.push({ pallet: j.pallet, kind: 'pallet_row_differs', shipbay: j.journal, pallet_row: j.pallet_row });
+    // after a release the pallet row shows no position; a row that still shows one is a difference too
+    if (!w && j.pallet_row !== j.journal) differences.push({ pallet: j.pallet, kind: 'pallet_row_differs', shipbay: j.journal, pallet_row: j.pallet_row });
   }
   for (const [id, code] of nexus) if (!seen.has(id) && !waiting.has(id)) differences.push({ pallet: id, kind: 'nexus_only', shipbay: null, nexus: code });
   return out({ ok: true, as_of: o.body.as_of || null, warehouse: o.body.warehouse, in_sync: differences.length === 0 && open.length === 0, placed_in_nexus: nexus.size, differences,

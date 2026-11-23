@@ -55,7 +55,7 @@ const json = (body, status, cors) => new Response(JSON.stringify(body), { status
  *   db         { user(token).rpc(fn, args), service.rpc(fn, args) }: ShipBay's own database, as the signed-in user or as the bridge
  *   routes     [{ method, match: RegExp, run(ctx) }] from calendar.js and pallets.js
  */
-export function makeBridge({ env, fetchImpl, db, routes, now = Date.now, timeoutMs }) {
+export function makeBridge({ env, fetchImpl, db, routes, now = Date.now, timeoutMs = 8000 }) {
   const origins = String(env.BRIDGE_ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
   let nx = null;
   return async function handle(req) {
