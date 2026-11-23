@@ -1,12 +1,111 @@
 # Hosted movement rehearsal: dev database and bridge ready, screens validated, runner and stages not run
 
-Updated 2026-11-23, 6:40 PM ET (dev_034 applied to dev and verified; see the next section). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
+Updated 2026-11-23, 7:30 PM ET (stock-ledger hardening prepared and tested locally, NOT applied: next section; dev_034 is applied to dev and verified). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
 dev_033 and the manager pick-correction migration dev_034 are applied and verified on `shipbay-nexus-dev`. The three correction forms have now been run in a browser and the
 correction endpoints called over HTTP with real sessions (below). The movement runner is NOT deployed, no switch was set, and
 nothing was sent to Nexus. Production and `main` are untouched.
 
 **Hold (Derek, 2026-11-23 2:30 AM):** the hosted rehearsal does not start yet. Souled's P-02 placement is being prepared and
 Nexus has a destination-safety deployment pending. PSKU-000001 stays at P-01.
+
+## Stock-ledger hardening (candidate 20261207, pending dev_035): prepared and tested LOCALLY, NOT applied anywhere
+
+Derek's assignment of 2026-11-23 6:43 PM. The P-02 hold is released (Souled's placement succeeded and Nexus confirmed it); the
+movement-rehearsal hold is NOT. Nothing here was applied to hosted dev, no screen, runner or bridge was deployed, no switch was
+set, nothing was sent to Nexus, production and `main` were not touched. Hosted dev was read twice (catalog and one fingerprint).
+
+### 1. Dependency audit (hosted dev schema, read-only, plus the repository)
+
+Before: `inventory_moves` grants INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES and TRIGGER to `anon`, `authenticated`,
+`service_role` and `postgres`. Two permissive access rules: `client_read_moves` (read own brand) and `shipbay_all_moves`
+(everything, for `is_shipbay()` = admin, staff, sales). No trigger on the table. `skus.org_id`/`orgs` deletes cascade into the
+ledger and a location delete blanks `location_id`, so deleting a product, brand or location also removed or defaced history.
+
+| Writer | Rows it writes | Who can call it | Check inside |
+|---|---|---|---|
+| `_wms_post_stock(pallet)` via the three pallet/carton/unit triggers | receive, adjust (insert) | service login only | internal |
+| `_wms_nexus_carry` | transfer (insert); ties older picks to the pallet (update `pallet_id` only) | no login | internal |
+| `_wms_open_box_do` | transfer/adjust (insert); finalises rows of the same call (update) | no login | internal |
+| `wms_correct_units` | via triggers; rewrites the note of the same call's rows (update) | signed-in | admin/staff, reason |
+| `wms_pick_correct` (and `wms_manager_stop_correct` through it) | pick (insert) | signed-in | role, brand, reason |
+| `wms_wave_confirm`, `wms_wave_unconfirm` | pick (insert) | signed-in | floor staff, own wave |
+| `wms_pick_scan`, `wms_unpick` | pick (insert) | signed-in, service | `is_wms_staff()` |
+| `receive_inbound` (older portal receiving) | receive, no position (insert) | signed-in, service | `is_shipbay()` (sales included) |
+| `ship_order` (older pack station) | pick, no position (insert) | signed-in, service | `is_shipbay()` (sales included) |
+| `wms_demo_reset` | deletes and re-inserts the demo brand's rows | signed-in, service | `is_wms_staff()` |
+| `dev_security_check` (dev database only) | tries two forbidden inserts, expects refusal | no login | n/a |
+
+All of them are SECURITY DEFINER, owned by `postgres`, with `search_path = public` (except `dev_security_check`, which runs as
+its caller and is closed to logins). None relies on the caller's own table privileges. No portal, WMS or Edge Function code
+writes the table directly (the portal only names it in a list of brand-scoped tables; `nexus-bridge` never touches it). Read
+access: admin, staff and sales read everything; a client reads its own brand; floor logins read nothing directly (their screens
+go through functions); the view `inventory_levels` runs with the reader's rights. Nobody needs a direct write.
+
+**Not verifiable from here (production only):** whether production has other functions, triggers, scheduled jobs or
+integrations (Shopify/Veeqo sync, `billing_estimate`, `billing_rates_list`, `billing_rate_save`, imports from the Admin screens)
+that insert, edit or delete ledger rows, and whether anything there deletes products, brands or locations that have history.
+Read access to the production catalog was refused earlier and was not retried. This candidate is therefore NOT cleared for
+production.
+
+### 2. The candidate (`supabase/candidates/20261207_inventory_ledger_hardening.sql`; no DROP; no existing function replaced; no row changed)
+
+1. Revokes INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER on the ledger from the public key and signed-in logins. SELECT
+   and the two existing access rules are untouched, and so are the service login's privileges.
+2. Three restrictive access rules (`ledger_no_direct_insert/update/delete`): refused even if the privileges are granted back.
+3. Append-only for everyone, the service login and the owner included (trigger `inventory_moves_append_only`, plus a truncate
+   trigger): no delete (except the demo brand's sample rows), no truncate, no edit of a row from an earlier transaction except
+   tying an older pick to its pallet once; a row may be finalised (quantity, reason, note) only inside the transaction that
+   wrote it; brand, product, position, reference, author and time never change. Consequence: a product, brand or location
+   with stock history can no longer be deleted.
+4. Insert rules for everyone: the product must be the row's brand's; an adjust, cycle_count, damage or return_restock row must
+   have a position, a reference, a reason of 5+ characters and, during a signed-in request, its author; a row written during a
+   signed-in request can only name that login.
+5. `wms_stock_correct(brand, product, shelf, change, reason)`: the sanctioned correction for stock not on a pallet. Admin or
+   staff only (not sales, floor, client), reason required, private shelf only, never below zero or below what a wave being
+   picked has planned there; one adjust row and one activity entry (`stock_corrected`). No screen calls it yet.
+
+Pending dev migration: `supabase/dev/pending/dev_035_inventory_ledger_hardening.sql` (generated, NOT applied).
+Rollback: `supabase/candidates/20261207_inventory_ledger_hardening.rollback.sql` (no DROP: switches the three triggers off, opens
+the three rules, grants the privileges back, closes the new function). Tested locally: after it an admin's direct insert is
+accepted again as before; applying dev_035 again closes it. Rows written meanwhile are kept.
+
+### 3. Local results (2026-11-23 evening; all on this machine)
+
+| What | Result |
+|---|---|
+| New `supabase/dev/ledger-hardening-check.sql` (rolled back) | 8 of 8: 24 direct writes refused (admin, staff, sales, floor, client, public key x insert/edit/delete/empty); refused again with privileges handed back; 22 owner/service deletes and edits refused; insert rules; correction refusals; accepted corrections; older writers; integrity |
+| Direct HTTP through the local API (PostgREST), real tokens | 18 of 18 writes refused (admin, staff, floor, client: 403; public key and a forged token: 401); `wms_stock_correct` over HTTP: admin and staff 200, floor and client 400, public key and forged 401 |
+| Database built as dev is today + dev_034 + dev_035 | other 158 functions and their grants, the ledger row, other tables' grants, the other 43 access rules and PSKU-000001 byte-for-byte unchanged by the migration |
+| Earlier rolled-back checks on that build | regression 15, open box 8, stock safety 7, workflow 6, manager 5: all pass |
+| Staging suites with the candidate loaded | void 6, units 5, openbox 5, workflow 6, bridge 16, manager 5, wms-graft 10: all pass |
+| Movement rehearsal suite | 331 of 331 checks, 0 failed |
+| Runner under Deno / bridge under Deno | 13 passed / 4 passed |
+| Signed-in browser suites | corrections 113 passed, manager 79 passed |
+| WMS unit tests | 56 passed |
+
+Covered by those: receiving, put-away, void, carton opening, unit correction, pick correction, manager correction, wave picking,
+packing hand-off, the stock view. Not covered: sales was tested as a stand-in (the staff login given the sales role inside the
+rolled-back check), not as its own signed-in browser session; `activity`, `dock`, `nexus`, `registry` and `waves` staging suites
+load older candidate sets and do not include this one; `dev_security_check()` exists only on hosted dev and was not run against
+the hardening (its two forbidden inserts are still refused, but for lack of permission rather than by the access rule, so if it
+matches on message text it may need a look after applying).
+
+### 4. Risks and decisions
+
+- A correction to a receipt row an hour later is no longer an edit: it must be a new compensating row. All current functions
+  already work that way; any production-only code that edits old rows would break.
+- Products, brands and locations with stock history cannot be deleted. Admin screens that offer such a delete would now show
+  an error for those. Retire (deactivate) instead.
+- `wms_demo_reset` keeps its delete, limited to the brand with slug `demo-brand`.
+- `receive_inbound` and `ship_order` still accept a sales login and still post rows with no position. Not changed here (they
+  are existing workflows); deciding whether sales should post receipts and shipments is Derek's call.
+- Put-away receipts still have no author on the ledger row (bridge commits under the service login). The insert rule allows
+  that for the service login only. Still an open defect.
+- Sales keeps read access to the whole ledger (unchanged). Derek's call whether it should.
+- `wms_stock_correct` has no screen; until one exists, a shelf-stock correction needs the function call.
+
+**Safe to apply to isolated shipbay-nexus-dev: yes**, as dev_035, one transaction, with the six rolled-back checks and
+`dev_security_check()` run afterwards. **Not cleared for production** until the production-only writers are listed.
 
 ## dev_034 applied to shipbay-nexus-dev and verified (approved by Derek, 2026-11-23 6:25 PM)
 
@@ -185,7 +284,7 @@ issued by Supabase Auth cannot reach these functions until they exist on dev.
 5. **Rehearsal.** Unaffected: the suite calls none of the three functions, and 331 of 331 pass with them loaded. The pre-run
    check then expects 31 migrations and three more functions on dev.
 
-## Later hardening: direct ledger writes by ShipBay logins (documented, NOT changed)
+## Later hardening: direct ledger writes by ShipBay logins (the requirement; now answered by candidate 20261207 above, still NOT applied)
 
 Today the ledger table `inventory_moves` has two access rules: a client reads its own brand's rows, and
 `shipbay_all_moves` lets any login for which `is_shipbay()` is true read, insert, update and delete any row. `is_shipbay()` is

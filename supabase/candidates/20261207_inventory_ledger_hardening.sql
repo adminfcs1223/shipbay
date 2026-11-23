@@ -1,0 +1,138 @@
+-- CANDIDATE. Tested on the local synthetic database only. Not applied to shipbay-nexus-dev, not applied to production.
+-- Derek's request, 2026-11-23 6:43 PM: close the direct-write path into the stock ledger.
+--
+-- Before: the ledger table inventory_moves gives INSERT, UPDATE, DELETE and TRUNCATE to every signed-in login and to the public
+-- key, and the access rule shipbay_all_moves lets any ShipBay admin, staff or sales login use them on any row. So those logins
+-- can post, edit or remove stock through the API with no reason, no check and no record, around every correction function.
+-- Deleting a product or a brand also deletes its ledger rows, and deleting a location blanks the position on its rows.
+--
+-- Every function that writes the ledger today is SECURITY DEFINER, owned by postgres, with a fixed search_path (audited on the
+-- dev schema: _wms_post_stock, _wms_nexus_carry, _wms_open_box_do, wms_wave_confirm, wms_wave_unconfirm, wms_pick_scan,
+-- wms_unpick, wms_pick_correct, wms_correct_units, receive_inbound, ship_order, wms_demo_reset). None of them relies on the
+-- caller's own table privileges, so taking those privileges away does not touch them.
+--
+-- What this does (no DROP; nothing existing is replaced; no existing row is changed):
+--   1. Table privileges: INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES and TRIGGER on inventory_moves are revoked from the public
+--      key and from signed-in logins. SELECT stays exactly as it is (the two existing access rules still decide who reads what).
+--      The service login's privileges are NOT changed.
+--   2. Three restrictive access rules: no direct INSERT, UPDATE or DELETE for any login that is subject to access rules, whatever
+--      is granted later. (Functions owned by postgres and the service login are not subject to access rules.)
+--   3. Append-only, for every caller including the service login and postgres:
+--        - a row is never deleted, except a row of the demo brand (wms_demo_reset rebuilds the demo);
+--        - a row is never truncated;
+--        - a row written by an EARLIER transaction is never edited, except to tie an older pick to its pallet (pallet_id only,
+--          from empty to a pallet: what _wms_nexus_carry does when a pallet moves);
+--        - a row written in the SAME transaction may have its quantity, reason and note finalised by the function that wrote it
+--          (what the open-box and count-correction functions do); its brand, product, position, reference and author never change.
+--      A consequence: a product, brand or location that has ledger rows can no longer be deleted (it took its history with it).
+--   4. Insert rules, for every caller: the row's brand must be the product's brand; an adjustment (adjust, cycle_count, damage,
+--      return_restock) must carry a position, a reference, a note saying why, and the login that made it (the service login is
+--      accepted without one: the bridge commits under it, and the person is on the Nexus journal row). A row written during a
+--      signed-in request can only name that login as its author.
+--   5. wms_stock_correct(brand, product, shelf, change, reason): the one sanctioned way to correct stock that is not on a pallet.
+--      ShipBay admin or staff, reason required, private ShipBay shelf only, never below zero or below what waves have planned
+--      there. One adjust row naming who and why, and one activity entry.
+begin;
+
+-- 3. append-only -----------------------------------------------------------------------------------------------------------
+create or replace function public._inventory_moves_guard() returns trigger
+language plpgsql set search_path to 'public' as $$
+begin
+  if tg_op = 'TRUNCATE' then raise exception 'The stock ledger is append-only: it cannot be emptied.' using errcode = '42501'; end if;
+  if tg_op = 'DELETE' then
+    if exists (select 1 from orgs where id = old.org_id and slug = 'demo-brand') then return old; end if;   -- the demo brand's sample rows are rebuilt by wms_demo_reset
+    raise exception 'The stock ledger is append-only: a row cannot be deleted. Post a correcting entry instead. (A product, brand or location with stock history cannot be deleted either.)' using errcode = '42501';
+  end if;
+  -- UPDATE
+  if new.id is distinct from old.id or new.org_id is distinct from old.org_id or new.sku_id is distinct from old.sku_id or new.location_id is distinct from old.location_id
+     or new.ref_type is distinct from old.ref_type or new.ref_id is distinct from old.ref_id or new.created_by is distinct from old.created_by or new.created_at is distinct from old.created_at then
+    raise exception 'The stock ledger is append-only: the brand, product, position, reference, author and time of a row cannot be changed. Post a correcting entry instead.' using errcode = '42501';
+  end if;
+  if old.created_at = transaction_timestamp() then   -- written by this same transaction: its own function may finalise quantity, reason and note
+    if new.pallet_id is distinct from old.pallet_id and old.pallet_id is not null then raise exception 'The stock ledger is append-only: a row''s pallet cannot be changed.' using errcode = '42501'; end if;
+    return new;
+  end if;
+  if new.qty = old.qty and new.reason = old.reason and new.note is not distinct from old.note and old.pallet_id is null and new.pallet_id is not null then return new; end if;   -- an older pick tied to its pallet
+  raise exception 'The stock ledger is append-only: an existing row cannot be edited. Post a correcting entry instead.' using errcode = '42501';
+end $$;
+
+create or replace trigger inventory_moves_append_only before update or delete on public.inventory_moves for each row execute function public._inventory_moves_guard();
+create or replace trigger inventory_moves_no_truncate before truncate on public.inventory_moves for each statement execute function public._inventory_moves_guard();
+
+-- 4. what a new row must carry ---------------------------------------------------------------------------------------------
+create or replace function public._inventory_moves_insert_guard() returns trigger
+language plpgsql set search_path to 'public' as $$
+declare v_role text := coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role', ''); v_uid uuid := auth.uid();
+begin
+  if not exists (select 1 from skus s where s.id = new.sku_id and s.org_id = new.org_id) then
+    raise exception 'A stock entry must be for a product of its own brand.' using errcode = '23514';
+  end if;
+  -- written during a signed-in request: the row may only name that login as its author
+  if v_uid is not null and new.created_by is not null and new.created_by <> v_uid then
+    raise exception 'A stock entry cannot be written in another login''s name.' using errcode = '23514';
+  end if;
+  if new.reason in ('adjust', 'cycle_count', 'damage', 'return_restock') then
+    if new.location_id is null then raise exception 'A stock adjustment must name its position.' using errcode = '23514'; end if;
+    if new.ref_type is null or new.ref_id is null then raise exception 'A stock adjustment must name what it refers to (a pallet or a stock correction).' using errcode = '23514'; end if;
+    if length(btrim(coalesce(new.note, ''))) < 5 then raise exception 'A stock adjustment must say why.' using errcode = '23514'; end if;
+    -- the service login (the bridge) and database maintenance carry no login; every other request must
+    if new.created_by is null and v_role not in ('', 'service_role') then
+      raise exception 'A stock adjustment must name the login that made it.' using errcode = '23514';
+    end if;
+  end if;
+  return new;
+end $$;
+
+create or replace trigger inventory_moves_insert_rules before insert on public.inventory_moves for each row execute function public._inventory_moves_insert_guard();
+-- (a rollback only switches the three triggers off; applying this file again must switch them back on)
+alter table public.inventory_moves enable trigger inventory_moves_append_only;
+alter table public.inventory_moves enable trigger inventory_moves_no_truncate;
+alter table public.inventory_moves enable trigger inventory_moves_insert_rules;
+
+-- 5. the sanctioned correction for stock that is not on a pallet ---------------------------------------------------------------
+create or replace function public.wms_stock_correct(p_org uuid, p_sku uuid, p_location text, p_change integer, p_reason text) returns jsonb
+language plpgsql security definer set search_path to 'public' as $$
+declare v_reason text := btrim(coalesce(p_reason, '')); k skus; l locations; v_on int; v_planned int; v_name text; v_ref uuid := gen_random_uuid(); v_brand text;
+begin
+  if not wms_nexus_admin() then raise exception 'Only ShipBay admin or staff can correct stock.'; end if;
+  select * into k from skus where id = p_sku and org_id = p_org;
+  if p_org is null or k.id is null then raise exception 'That product is not one of this brand''s.'; end if;
+  if length(v_reason) < 5 then raise exception 'Say why this stock is being corrected.'; end if;
+  if p_change is null or p_change = 0 then raise exception 'Enter how many units to add or take off.'; end if;
+  select * into l from locations where upper(code) = upper(btrim(coalesce(p_location, ''))) and active;
+  if l.id is null then raise exception 'Name the ShipBay shelf the stock is on.'; end if;
+  if coalesce(l.shared, false) then raise exception '% is a shared Nexus position. Stock there belongs to a pallet: correct the pallet''s count instead.', l.code; end if;
+  perform pg_advisory_xact_lock(hashtextextended('stock:' || k.id::text || ':' || l.id::text, 0));
+  select coalesce(sum(qty), 0) into v_on from inventory_moves where sku_id = k.id and location_id = l.id;
+  select coalesce(sum(t.qty_planned), 0) into v_planned from wms_wave_tasks t join wms_waves w on w.id = t.wave_id where w.status = 'picking' and t.confirmed_at is null and t.sku_id = k.id and t.location_id = l.id;
+  if v_on + p_change < 0 then raise exception 'Only % of % on file at %. A correction cannot take it below zero.', v_on, k.sku, l.code; end if;
+  if v_on + p_change < v_planned then raise exception '% of % at % are planned on a wave that is being picked. A correction cannot take the shelf below that.', v_planned, k.sku, l.code; end if;
+  select coalesce(full_name, email) into v_name from profiles where id = auth.uid(); select name into v_brand from orgs where id = p_org;
+  insert into inventory_moves (org_id, sku_id, qty, reason, ref_type, ref_id, note, created_by, location_id)
+  values (p_org, k.id, p_change, 'adjust', 'stock_correction', v_ref, left('Stock corrected by ' || coalesce(v_name, 'a manager') || ': ' || v_reason, 200), auth.uid(), l.id);
+  insert into wms_activity (org_id, kind, qty, ref, actor, actor_name, detail) values (p_org, 'stock_corrected', abs(p_change), k.sku, auth.uid(), v_name,
+    jsonb_build_object('correction', v_ref, 'sku', k.sku, 'location', l.code, 'units_change', p_change, 'on_hand_before', v_on, 'on_hand_after', v_on + p_change, 'reason', v_reason));
+  return jsonb_build_object('correction', v_ref, 'sku', k.sku, 'location', l.code, 'units_change', p_change, 'on_hand', v_on + p_change);
+end $$;
+
+revoke all on function public._inventory_moves_guard() from public, anon, authenticated, service_role;
+revoke all on function public._inventory_moves_insert_guard() from public, anon, authenticated, service_role;
+revoke all on function public.wms_stock_correct(uuid, uuid, text, integer, text) from public, anon;
+grant execute on function public.wms_stock_correct(uuid, uuid, text, integer, text) to authenticated;
+
+-- 1. table privileges ------------------------------------------------------------------------------------------------------
+revoke insert, update, delete, truncate, references, trigger on table public.inventory_moves from public, anon, authenticated;
+
+-- 2. restrictive access rules (created once; ALTER keeps them closed if this file is applied again) -----------------------------
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'inventory_moves' and policyname = 'ledger_no_direct_insert') then
+    create policy ledger_no_direct_insert on public.inventory_moves as restrictive for insert to public with check (false); end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'inventory_moves' and policyname = 'ledger_no_direct_update') then
+    create policy ledger_no_direct_update on public.inventory_moves as restrictive for update to public using (false) with check (false); end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'inventory_moves' and policyname = 'ledger_no_direct_delete') then
+    create policy ledger_no_direct_delete on public.inventory_moves as restrictive for delete to public using (false); end if;
+end $$;
+alter policy ledger_no_direct_insert on public.inventory_moves with check (false);
+alter policy ledger_no_direct_update on public.inventory_moves using (false) with check (false);
+alter policy ledger_no_direct_delete on public.inventory_moves using (false);
+commit;
