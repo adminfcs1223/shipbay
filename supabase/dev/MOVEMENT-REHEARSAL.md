@@ -27,7 +27,7 @@ stored at P-01 with its one journal entry and its one 100-unit receipt, byte-for
 | Regression tests for the repairs | `supabase/tests/staging/workflow.test.mjs`, 6 tests, all pass locally (real Nexus service code). |
 | Hosted suite | `supabase/tests/hosted/suite.js`: 8 stages, 306 checks. The earlier 261 are all still in it. Passes locally under Node and through the runner under Deno. |
 | Lost answers | Produced by the bridge's own dev-only test fault. The runner no longer holds bridge code or reads the Nexus key. |
-| Existing tests | Bridge 16, Edge wrapper 4, waves/receiving/dock/registry/activity unchanged and passing, dev regression 15 checks, WMS unit 56, put-away browser test 31. |
+| Existing tests | Bridge 16, Edge wrapper 4, waves/receiving/dock/registry/activity unchanged and passing, dev regression 15 checks, WMS unit 56, put-away browser test 29. |
 
 ## What the repairs change (20261203)
 
