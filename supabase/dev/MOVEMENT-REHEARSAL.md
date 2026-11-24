@@ -1,6 +1,6 @@
 # Hosted movement rehearsal: dev database and bridge ready, screens validated, runner and stages not run
 
-Updated 2026-11-23, 7:30 PM ET (stock-ledger hardening prepared and tested locally, NOT applied: next section; dev_034 is applied to dev and verified). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
+Updated 2026-11-23, 8:15 PM ET (stock-ledger hardening revision 2 tested locally, NOT applied: next section, parts 5 and 6; dev_034 is applied to dev and verified). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
 dev_033 and the manager pick-correction migration dev_034 are applied and verified on `shipbay-nexus-dev`. The three correction forms have now been run in a browser and the
 correction endpoints called over HTTP with real sessions (below). The movement runner is NOT deployed, no switch was set, and
 nothing was sent to Nexus. Production and `main` are untouched.
@@ -134,6 +134,64 @@ Nothing was written to hosted dev.
 
 Trial fix (local, rolled back, not a file yet): a trigger on `orgs` refusing a rename to `demo-brand`. With it the staff
 rename is refused, the demo reset still runs twice, and the real brand's ledger row survives.
+
+### 6. Revision 2 of the candidate (Derek chose option 1, stronger form, 2026-11-23 7:08 PM): tested LOCALLY, NOT applied
+
+The demo brand is now identified by a register, not by any editable label. Diff from revision 1:
+`git diff 282cb60 -- supabase/candidates/20261207_inventory_ledger_hardening.sql` (the pending dev_035 is that file minus
+`begin;`/`commit;` under a comment header). What changed, and nothing else:
+
+1. NEW table `wms_demo_brand`: at most one row, the demo brand's id (`org_id` unique, foreign key to `orgs`, delete and update
+   restricted). Access rules on, none defined, every privilege revoked from the public key, signed-in logins and the service
+   login. Only `wms_demo_reset` writes it.
+2. `_inventory_moves_guard`: the delete exception tests `old.org_id` against the register instead of `orgs.slug`; the function
+   is now SECURITY DEFINER (fixed search path, executable by nobody) so it can read the register.
+3. `wms_demo_reset` REPLACED (the only existing function touched; revision 1 replaced none). The brand lookup is the only
+   change: it takes the brand from the register; with an empty register it creates a NEW brand and registers it, and refuses
+   if any brand already holds the slug `demo-brand` or client code `DEMO` (any capitals or spaces); it never adopts a brand by
+   label. Everything after the lookup is the text on file today (md5 e9a5db94 before, cb93563a after). The service login can
+   no longer call it; floor, staff and admin still can (the WMS Orders screen offers it to any WMS user).
+4. Rollback file: also restores `wms_demo_reset` to its old text and permissions. The register table stays (no DROP).
+
+Reset's full destructive scope, all keyed on the registered brand id: its waves, picks, orders, order lines (and by cascade
+from its orders: shipments, wave-order links, packages), its ledger rows; it revokes that brand's API keys and issues one new
+key; it upserts 12 demo products and posts demo stock at shelves A-01..B-04. It never touches pallets, cartons, locations or
+another brand's rows. In revision 1 a renamed real brand lost all of the above and had a live API key handed to the caller.
+
+Local results (database built as dev is today + dev_034 + dev_035 r2):
+
+| What | Result |
+|---|---|
+| Original exploit (staff renames a real brand to `demo-brand`, runs the reset), SQL and over HTTP | Refused; real brand's ledger, orders unchanged |
+| `ledger-hardening-check.sql`, now 9 checks | 9 of 9. New check 8: 18 of 18 impersonations refused before a demo exists (admin, staff, sales x slug, capitals, spaces, client code, all labels, new brand with the slug) plus `wms_set_client_code`; genuine demo created by floor, rebuilt identically by staff and admin (12 rows, 541 units); with the demo registered and renamed away, a real brand wearing every demo label (and its product moved into the demo brand) untouched for admin, staff, sales; 30 of 30 register reads and writes refused (admin, staff, floor, client, public key, service login); brand id swap, change, delete, duplicate all fail; client, sales, public key, service login cannot reset; ordinary brand rename by staff works |
+| Over the local API with real tokens | rename 200 then reset 400 for staff and admin; genuine reset by floor 200 twice on a separate brand; register 403 for every login, 401 for public key and forged token; real-brand ledger md5 identical before and after |
+| Migration effect on a copy of dev | 10 fingerprints identical before and after: the other 157 functions (body, grants, definer flag, settings), ledger row, other tables' grants (787), other access rules (43), other triggers (21), table count, brands, pallets, journal, PSKU-000001 |
+| Rollback, then re-apply | After rollback the same 10 fingerprints, old reset text and permissions back, ledger triggers off; after re-apply same state as first apply, check 9 of 9 |
+| Earlier checks | regression 15, open box 8, stock safety 7, workflow 6, manager 5 |
+| Staging suites | void 6, units 5, openbox 5, workflow 6, bridge 16, manager 5, wms-graft 10 |
+| Movement suite / runner / bridge under Deno | 331 of 331 / 13 / 4 |
+| Browser suites / WMS unit tests | 113 and 79 / 56 |
+
+Correction to section 3: the "byte-for-byte unchanged" fingerprints reported for revision 1 used `string_agg(... order by 1)`,
+which does not sort (it orders by a constant). They happened to agree but proved less than stated. The formula is fixed here
+(`/tmp/fp.sql` logic: ordered by the value itself) and the comparison was redone.
+
+Hosted dev re-read after the work (read-only): 31 migrations ending dev_034, no hardening object present, ledger `afc8960b`,
+journal `28ef4c90`, PSKU-000001 stored at P-01 `56e1c5ac`, pallets `49a8aabd`, cartons `a025ccd7`, orders `940453fc`: all as
+before. Nexus staging occupancy could NOT be re-read (the connector returned Bad Gateway three times); nothing was sent to
+Nexus.
+
+Effects and remaining risks:
+- Existing brands: none on dev (no demo brand there). A database that already has a demo brand from the old reset is not
+  adopted: the reset refuses until the owner registers that brand by hand. Production unknown.
+- Brand edits are unrestricted as before; labels simply confer nothing. The registered brand cannot be deleted.
+- Admin, staff and sales can still delete or re-home ORDERS directly (existing table access, with or without the reset);
+  the ledger rows of those orders survive. Out of scope here; a real-inventory blocker of its own.
+- The reset still posts demo stock at real shelves and is still offered to floor logins. Whether it should exist at all in a
+  database with real inventory is Derek's decision.
+- The reset hands a working API key for the demo brand to the caller (unchanged behaviour).
+
+**Ready for separate hosted-dev approval: yes.** Not cleared for production.
 
 ## dev_034 applied to shipbay-nexus-dev and verified (approved by Derek, 2026-11-23 6:25 PM)
 

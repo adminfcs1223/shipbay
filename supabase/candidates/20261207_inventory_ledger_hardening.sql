@@ -18,7 +18,7 @@
 --   2. Three restrictive access rules: no direct INSERT, UPDATE or DELETE for any login that is subject to access rules, whatever
 --      is granted later. (Functions owned by postgres and the service login are not subject to access rules.)
 --   3. Append-only, for every caller including the service login and postgres:
---        - a row is never deleted, except a row of the demo brand (wms_demo_reset rebuilds the demo);
+--        - a row is never deleted, except a row of the REGISTERED demo brand (wms_demo_reset rebuilds the demo; see 6);
 --        - a row is never truncated;
 --        - a row written by an EARLIER transaction is never edited, except to tie an older pick to its pallet (pallet_id only,
 --          from empty to a pallet: what _wms_nexus_carry does when a pallet moves);
@@ -32,15 +32,39 @@
 --   5. wms_stock_correct(brand, product, shelf, change, reason): the one sanctioned way to correct stock that is not on a pallet.
 --      ShipBay admin or staff, reason required, private ShipBay shelf only, never below zero or below what waves have planned
 --      there. One adjust row naming who and why, and one activity entry.
+--   6. (revision 2, 2026-11-23) The demo brand is identified by a register, not by its slug. The first version let a row be deleted
+--      when its brand's slug was 'demo-brand'; a staff login could rename a real brand to that slug and run wms_demo_reset, which
+--      then deleted that brand's ledger rows, orders, waves and picks and handed back an API key for it. Now:
+--        - wms_demo_brand holds at most one row: the id of the demo brand. No login, and not the service login, can read or write
+--          it; only wms_demo_reset adds the row, when it creates the demo brand itself. The brand it names cannot be deleted and
+--          its id cannot change (foreign key, restrict).
+--        - wms_demo_reset (REPLACED: the only existing function this file changes) takes its brand from the register and from
+--          nowhere else. It no longer looks a brand up by slug. With an empty register it creates a new brand and registers it;
+--          if some brand already holds the slug 'demo-brand' or the client code DEMO it refuses and changes nothing. The rest of
+--          its text is unchanged. The service login can no longer call it (nothing does); signed-in floor, staff and admin can.
+--        - the append-only trigger lets a row be deleted only when its brand is the registered one. The trigger function is now
+--          SECURITY DEFINER so it can read the register whoever runs the statement.
+--      A database that already has a demo brand made by the old reset is NOT adopted automatically: the owner registers it by
+--      hand after checking it (insert into wms_demo_brand (org_id) values (...)). shipbay-nexus-dev has none.
 begin;
+
+-- 6. the demo-brand register -------------------------------------------------------------------------------------------------
+create table if not exists public.wms_demo_brand (
+  only_one boolean primary key default true check (only_one),
+  org_id uuid not null unique references public.orgs (id) on delete restrict on update restrict,
+  registered_at timestamptz not null default now(),
+  registered_by uuid
+);
+alter table public.wms_demo_brand enable row level security;   -- and no access rule: closed to every login
+revoke all on table public.wms_demo_brand from public, anon, authenticated, service_role;
 
 -- 3. append-only -----------------------------------------------------------------------------------------------------------
 create or replace function public._inventory_moves_guard() returns trigger
-language plpgsql set search_path to 'public' as $$
+language plpgsql security definer set search_path to 'public' as $$
 begin
   if tg_op = 'TRUNCATE' then raise exception 'The stock ledger is append-only: it cannot be emptied.' using errcode = '42501'; end if;
   if tg_op = 'DELETE' then
-    if exists (select 1 from orgs where id = old.org_id and slug = 'demo-brand') then return old; end if;   -- the demo brand's sample rows are rebuilt by wms_demo_reset
+    if exists (select 1 from wms_demo_brand d where d.org_id = old.org_id) then return old; end if;   -- the registered demo brand's sample rows are rebuilt by wms_demo_reset
     raise exception 'The stock ledger is append-only: a row cannot be deleted. Post a correcting entry instead. (A product, brand or location with stock history cannot be deleted either.)' using errcode = '42501';
   end if;
   -- UPDATE
@@ -114,6 +138,63 @@ begin
     jsonb_build_object('correction', v_ref, 'sku', k.sku, 'location', l.code, 'units_change', p_change, 'on_hand_before', v_on, 'on_hand_after', v_on + p_change, 'reason', v_reason));
   return jsonb_build_object('correction', v_ref, 'sku', k.sku, 'location', l.code, 'units_change', p_change, 'on_hand', v_on + p_change);
 end $$;
+
+-- 6. the demo reset, confined to the registered demo brand (text otherwise as it is on file today) -----------------------------------
+create or replace function public.wms_demo_reset() returns jsonb
+language plpgsql security definer set search_path to 'public' as $$
+declare v_org uuid; v_key text := 'sbk_demo_' || encode(extensions.gen_random_bytes(20), 'hex'); r record; v_sku uuid; v_loc uuid; n int := 0;
+begin
+  if not is_wms_staff() then raise exception 'This login cannot reset the demo.'; end if;
+  -- the demo brand is the one brand on the register wms_demo_brand, whatever it is called today; never a brand found by its name, slug or client code
+  perform pg_advisory_xact_lock(hashtextextended('wms_demo_brand', 0));
+  select d.org_id into v_org from wms_demo_brand d;
+  if v_org is null then
+    if exists (select 1 from orgs o where lower(btrim(o.slug)) = 'demo-brand' or upper(btrim(o.client_code)) = 'DEMO') then
+      raise exception 'A brand already uses the demo slug or the DEMO client code, and it is not the registered demo brand. The demo was not created and nothing was changed.';
+    end if;
+    insert into orgs (name, slug, status, client_code, notes) values ('Demo Brand', 'demo-brand', 'active', 'DEMO', 'Sample data for the WMS orders and picklist. Not a client.') returning id into v_org;
+    insert into wms_demo_brand (org_id, registered_by) values (v_org, auth.uid());
+  end if;
+  delete from wms_waves where org_id = v_org; delete from wms_picks where org_id = v_org;
+  delete from order_lines where order_id in (select id from orders where org_id = v_org);
+  delete from orders where org_id = v_org;
+  delete from inventory_moves where org_id = v_org;
+  for r in select * from (values
+      ('DEMO-TEE-BLK-M', 'Logo Tee, Black, M',        'A-01', 40, '0F1B2A'),
+      ('DEMO-TEE-WHT-M', 'Logo Tee, White, M',        'A-01', 25, 'C9C5BC'),
+      ('DEMO-HOOD-GRY-L','Pullover Hoodie, Grey, L',  'A-02', 18, '6B7280'),
+      ('DEMO-CAP-NVY',   'Dad Cap, Navy',             'A-03', 30, '1E3A8A'),
+      ('DEMO-SOCK-3PK',  'Crew Socks, 3 Pack',        'A-04', 60, 'B45309'),
+      ('DEMO-MUG-11',    'Ceramic Mug, 11 oz',        'B-01', 24, '0F766E'),
+      ('DEMO-TOTE-NAT',  'Canvas Tote, Natural',      'B-02', 35, 'A16207'),
+      ('DEMO-STKR-PK',   'Sticker Pack',              'B-02', 200,'BE123C'),
+      ('DEMO-BTL-20',    'Steel Bottle, 20 oz',       'B-03', 2,  '334155'),
+      ('DEMO-NOTE-A5',   'Notebook, A5',              'B-04', 45, '7C3AED'),
+      ('DEMO-PIN-SET',   'Enamel Pin Set',            'B-04', 50, 'FF6B15'),
+      ('DEMO-POSTER-18', 'Poster, 18 × 24',           null,   0,  '15803D')
+    ) as t(sku, name, loc, qty, color)
+  loop
+    insert into skus (org_id, sku, name, active, image_url)
+    values (v_org, r.sku, r.name, true, 'https://placehold.co/400x400/' || r.color || '/FFFFFF/png?text=' || replace(split_part(r.name, ',', 1), ' ', '+'))
+    on conflict (org_id, sku) do update set name = excluded.name, image_url = excluded.image_url, active = true
+    returning id into v_sku;
+    if r.loc is not null and r.qty > 0 then
+      select id into v_loc from locations where code = r.loc;
+      insert into inventory_moves (org_id, sku_id, qty, reason, ref_type, note, created_by, location_id)
+      values (v_org, v_sku, r.qty, 'receive', 'demo', 'Demo stock', auth.uid(), v_loc);
+      n := n + 1;
+    end if;
+  end loop;
+  insert into inventory_moves (org_id, sku_id, qty, reason, ref_type, note, created_by, location_id)
+  select v_org, s.id, 12, 'receive', 'demo', 'Demo stock', auth.uid(), (select id from locations where code = 'B-01')
+  from skus s where s.org_id = v_org and s.sku = 'DEMO-TEE-BLK-M';
+  update wms_api_keys set revoked_at = now() where org_id = v_org and revoked_at is null;
+  insert into wms_api_keys (org_id, label, key_hash, hint, created_by)
+  values (v_org, 'Demo reset', encode(extensions.digest(v_key, 'sha256'), 'hex'), right(v_key, 4), auth.uid());
+  return jsonb_build_object('org_id', v_org, 'client', 'DEMO', 'key', v_key, 'today', _wms_today());
+end $$;
+revoke all on function public.wms_demo_reset() from public, anon, service_role;
+grant execute on function public.wms_demo_reset() to authenticated;
 
 revoke all on function public._inventory_moves_guard() from public, anon, authenticated, service_role;
 revoke all on function public._inventory_moves_insert_guard() from public, anon, authenticated, service_role;

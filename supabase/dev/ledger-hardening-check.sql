@@ -1,8 +1,9 @@
 -- Sixth database check for the isolated development database (shipbay-nexus-dev): the stock-ledger hardening of candidate
 -- 20261207 (dev_035). No login may write the ledger directly; the ledger is append-only for everyone; an adjustment says where,
--- what, why and who; the sanctioned stock correction works for admin and staff only; the older writers still work.
+-- what, why and who; the sanctioned stock correction works for admin and staff only; the older writers still work; the demo
+-- reset can only ever touch the registered demo brand, however a real brand is renamed.
 -- Runs as the synthetic logins and always ends by raising an exception, so everything it did is rolled back.
--- A pass ends with:  ROLLBACK-OK 8 checks passed: ...
+-- A pass ends with:  ROLLBACK-OK 9 checks passed: ...
 -- It works only with brands, products, shelves, bookings and orders it creates itself (plus the shelf A-01), never touches a
 -- pallet or a Nexus position, and sends nothing to Nexus. Never run this against production.
 do $t$
@@ -11,7 +12,7 @@ declare
   ua uuid := '5b000000-0000-4000-8000-000000000001'; uf uuid := '5b000000-0000-4000-8000-000000000002'; us uuid := '5b000000-0000-4000-8000-000000000003'; uc uuid := '5b000000-0000-4000-8000-000000000004';
   ca text := json_build_object('sub', ua, 'role', 'authenticated')::text; cf text := json_build_object('sub', uf, 'role', 'authenticated')::text; cs text := json_build_object('sub', us, 'role', 'authenticated')::text; cc text := json_build_object('sub', uc, 'role', 'authenticated')::text;
   k1 uuid; k2 uuid; k3 uuid; kw uuid; ot uuid; kt uuid; lx uuid; la uuid; r_old uuid; r_new uuid; r_loc uuid; ib uuid; il uuid; ord uuid; shp uuid; wv uuid; tk uuid; j jsonb; n int; u bigint; n1 int; u1 bigint; before text; m inventory_moves; act wms_activity;
-  ok text[] := '{}'; who record; stmt text; refused int := 0; msg text; st text; sales_role text;
+  dg uuid; fq text; f0 text; f1 text; ok text[] := '{}'; who record; stmt text; refused int := 0; msg text; st text; sales_role text;
 begin
   if exists (select 1 from orgs where id <> all (array[o1, o2])) then raise exception 'FAIL 0: not the synthetic development database. Not running.'; end if;
   if not exists (select 1 from pg_proc where proname = 'wms_stock_correct') or not exists (select 1 from pg_trigger where tgname = 'inventory_moves_append_only') then raise exception 'FAIL 0: the ledger hardening (dev_035) is not installed.'; end if;
@@ -144,24 +145,112 @@ begin
   perform set_config('request.jwt.claims', ca, true); perform set_config('role', 'authenticated', true);
   perform receive_inbound(ib, jsonb_build_array(jsonb_build_object('line_id', il, 'qty_received', 7)));
   shp := ship_order(ord, 'TEST', 'ground', 'LHC-TRACK', 'other', 0, null, 8);
-  perform wms_demo_reset(); perform wms_demo_reset();   -- the second run deletes and rebuilds the demo brand's sample rows
   perform set_config('role', 'postgres', true);
   if not exists (select 1 from inventory_moves where ref_type = 'inbound' and ref_id = ib and qty = 7 and reason = 'receive' and created_by = ua) or not exists (select 1 from inventory_moves where ref_type = 'order' and ref_id = ord and qty = -2 and reason = 'pick' and created_by = ua) then raise exception 'FAIL 7: the old receiving or shipping function did not post'; end if;
-  select count(*) into n1 from inventory_moves x join orgs g on g.id = x.org_id where g.slug = 'demo-brand'; if n1 = 0 then raise exception 'FAIL 7: the demo brand was not rebuilt'; end if;
-  ok := ok || format('older writers: the floor login''s wave pick posts -6 in its own name; receive_inbound posts +7 and ship_order posts -2 for an admin; wms_demo_reset run twice deletes and rebuilds the demo brand''s %s sample rows (the one delete the ledger allows)', n1);
+  ok := ok || 'older writers: the floor login''s wave pick posts -6 in its own name; receive_inbound posts +7 and ship_order posts -2 for an admin'::text;
 
-  -- 8. the database afterwards
-  if exists (select 1 from inventory_moves group by sku_id, location_id having sum(qty) < 0 and location_id is not null) then raise exception 'FAIL 8: a position is below zero'; end if;
-  if exists (select 1 from inventory_moves where ref_type = 'wms_pallet' and reason = 'receive' group by ref_id, sku_id having count(*) > 1) then raise exception 'FAIL 8: a pallet was received twice'; end if;
-  if exists (select 1 from inventory_moves where reason in ('adjust', 'cycle_count', 'damage', 'return_restock') and id::text not in (select id from _lhc_old where kind = 'm') and (location_id is null or ref_id is null or created_by is null or length(btrim(coalesce(note, ''))) < 5)) then raise exception 'FAIL 8: an adjustment written here lacks its position, reference, reason or author'; end if;
+  -- 8. the demo brand is the registered brand and nothing else. The stand-in for a real brand here is the temporary brand of check 3
+  --    (one ledger row), given an order as well.
+  insert into orders (org_id, order_number, channel, source, status, total_units) values (ot, 'LHC-ORD-T', 'connector', 'connector', 'new', 1) returning id into ord; insert into order_lines (order_id, sku_id, sku, name, qty) values (ord, kt, 'LHC-T', 'Ledger check temp', 1);
+  fq := $q$select md5(concat_ws('|', (select jsonb_agg(to_jsonb(x) order by x.id)::text from inventory_moves x where x.org_id is distinct from $1), (select jsonb_agg(to_jsonb(x) order by x.id)::text from orders x where x.org_id is distinct from $1),
+    (select count(*) from order_lines l join orders o on o.id = l.order_id where o.org_id is distinct from $1), (select jsonb_agg(to_jsonb(x) order by x.id)::text from wms_waves x where x.org_id is distinct from $1),
+    (select count(*) from wms_picks x where x.org_id is distinct from $1), (select jsonb_agg(to_jsonb(x) order by x.id)::text from wms_api_keys x where x.org_id is distinct from $1), (select count(*) from wms_pallets), (select count(*) from wms_cartons)))$q$;
+  execute fq into f0 using dg;
+  if exists (select 1 from wms_demo_brand) then raise exception 'FAIL 0: a demo brand is already registered here; this check expects none'; end if;
+  -- 8a. before any demo brand exists: admin, staff and sales each dress the real brand up as the demo; the reset must refuse and change nothing
+  refused := 0;
+  for who in select * from (values ('admin', ca), ('staff', cs), ('sales', cs)) v(name, claims) loop
+    if who.name = 'sales' then perform set_config('request.jwt.claims', '', true); update profiles set role = 'shipbay_sales' where id = us; end if;
+    foreach stmt in array array[format('update orgs set slug = ''demo-brand'' where id = %L', ot), format('update orgs set slug = ''Demo-Brand'' where id = %L', ot), format('update orgs set slug = ''  DEMO-BRAND '' where id = %L', ot),
+        format('update orgs set slug = ''lhc-temp'', client_code = ''demo'' where id = %L', ot), format('update orgs set name = ''Demo Brand'', slug = ''demo-brand'', client_code = ''DEMO'', notes = ''Sample data for the WMS orders and picklist. Not a client.'' where id = %L', ot),
+        'insert into orgs (name, slug, status, client_code) values (''Demo Brand'', ''demo-brand'', ''active'', ''DEMO'')'] loop
+      perform set_config('request.jwt.claims', who.claims, true); perform set_config('role', 'authenticated', true);
+      begin
+        execute stmt; get diagnostics n1 = row_count; if n1 <> 1 then raise exception 'FAIL 8: % could not make the ordinary brand edit "%"', who.name, left(stmt, 50); end if;
+        -- the reset is then tried by that login where it may (admin, staff) and by the floor login for sales
+        if who.name = 'sales' then perform set_config('request.jwt.claims', cf, true); end if;
+        begin perform wms_demo_reset(); raise exception 'FAIL 8: after % ran "%", the demo reset ran', who.name, left(stmt, 60);
+        exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like 'A brand already uses the demo slug or the DEMO client code%' then raise exception 'FAIL 8: unexpected refusal: %', sqlerrm; end if; refused := refused + 1; end;
+        raise exception 'LHC-UNDO';   -- undo the impersonation edit itself, so the next attempt starts clean
+      exception when others then if sqlerrm <> 'LHC-UNDO' then raise; end if; end;
+    end loop;
+    perform set_config('role', 'postgres', true);
+    if who.name = 'sales' then perform set_config('request.jwt.claims', '', true); update profiles set role = sales_role where id = us; end if;
+  end loop;
+  execute fq into f1 using dg; if refused <> 18 or f1 is distinct from f0 or exists (select 1 from wms_demo_brand) then raise exception 'FAIL 8: % of 18 impersonations refused, or something changed', refused; end if;
+  -- admin only: the client-code function cannot make a brand the demo either
+  perform set_config('request.jwt.claims', ca, true); perform set_config('role', 'authenticated', true); perform wms_set_client_code(ot, 'demo');
+  begin perform wms_demo_reset(); raise exception 'FAIL 8: after the client-code function, the demo reset ran'; exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like 'A brand already uses%' then raise exception 'FAIL 8: %', sqlerrm; end if; end;
+  perform wms_set_client_code(ot, 'LHCT'); perform set_config('role', 'postgres', true);
+  -- 8b. the genuine demo: created and registered by the reset itself (floor login), rebuilt on every run
+  perform set_config('request.jwt.claims', cf, true); perform set_config('role', 'authenticated', true); j := wms_demo_reset(); perform set_config('role', 'postgres', true);
+  select org_id into dg from wms_demo_brand; if dg is null or dg <> (j ->> 'org_id')::uuid or (select count(*) from wms_demo_brand) <> 1 or (select registered_by from wms_demo_brand) <> uf or dg in (o1, o2, ot) then raise exception 'FAIL 8: the demo brand was not registered as a new brand'; end if;
+  select count(*), coalesce(sum(qty), 0) into n, u from inventory_moves where org_id = dg; if n = 0 then raise exception 'FAIL 8: the demo has no stock'; end if;
+  execute fq into f0 using dg;
+  perform set_config('request.jwt.claims', cs, true); perform set_config('role', 'authenticated', true); perform wms_demo_reset(); perform set_config('request.jwt.claims', ca, true); perform wms_demo_reset(); perform set_config('role', 'postgres', true);
+  select count(*), coalesce(sum(qty), 0) into n1, u1 from inventory_moves where org_id = dg; execute fq into f1 using dg;
+  if (n1, u1) is distinct from (n, u) or f1 is distinct from f0 or (select count(*) from orgs where id = dg) <> 1 or (select count(*) from wms_demo_brand) <> 1 then raise exception 'FAIL 8: a repeated demo reset is not clean (% rows / % units, was % / %)', n1, u1, n, u; end if;
+  -- 8c. with the demo registered: rename the demo away and dress the real brand up in its place; the reset still only touches the registered brand
+  for who in select * from (values ('admin', ca), ('staff', cs), ('sales', cs)) v(name, claims) loop
+    if who.name = 'sales' then perform set_config('request.jwt.claims', '', true); update profiles set role = 'shipbay_sales' where id = us; end if;
+    perform set_config('request.jwt.claims', who.claims, true); perform set_config('role', 'authenticated', true);
+    begin
+      update orgs set name = 'Not the demo', slug = 'renamed-away', client_code = 'XDEMO', notes = null where id = dg; get diagnostics n1 = row_count; if n1 <> 1 then raise exception 'FAIL 8: % could not edit the demo brand''s labels', who.name; end if;
+      update orgs set name = 'Demo Brand', slug = 'demo-brand', client_code = 'DEMO', notes = 'Sample data for the WMS orders and picklist. Not a client.' where id = ot;
+      begin update skus set org_id = dg where id = kt; exception when others then null; end;   -- and try to carry its product over into the demo brand
+      if who.name = 'sales' then perform set_config('request.jwt.claims', cf, true); end if;
+      j := wms_demo_reset(); if (j ->> 'org_id')::uuid <> dg then raise exception 'FAIL 8: the reset ran on another brand than the registered one'; end if;
+      perform set_config('role', 'postgres', true);
+      if (select count(*) from inventory_moves where org_id = ot) <> 1 or (select count(*) from orders where org_id = ot) <> 1 or (select count(*) from order_lines l join orders o on o.id = l.order_id where o.org_id = ot) <> 1 or exists (select 1 from wms_api_keys where org_id = ot) or (select org_id from wms_demo_brand) <> dg
+         then raise exception 'FAIL 8: with % impersonating, the reset touched the real brand', who.name; end if;
+      refused := refused + 1; raise exception 'LHC-UNDO';
+    exception when others then if sqlerrm <> 'LHC-UNDO' then raise; end if; end;
+    perform set_config('role', 'postgres', true);
+    if who.name = 'sales' then perform set_config('request.jwt.claims', '', true); update profiles set role = sales_role where id = us; end if;
+  end loop;
+  if refused <> 21 then raise exception 'FAIL 8: the three registered-demo impersonations did not all complete (%)', refused; end if;
+  -- 8d. the brand's identity and the register cannot be changed by any login
+  refused := 0;
+  for who in select * from (values ('admin', ca, 'authenticated'), ('staff', cs, 'authenticated'), ('floor', cf, 'authenticated'), ('client', cc, 'authenticated'), ('public key', '{"role":"anon"}', 'anon'), ('service login', '{"role":"service_role"}', 'service_role')) v(name, claims, dbrole) loop
+    perform set_config('request.jwt.claims', who.claims, true); perform set_config('role', who.dbrole, true);
+    foreach stmt in array array['select count(*) from wms_demo_brand', format('insert into wms_demo_brand (only_one, org_id) values (true, %L)', ot), format('update wms_demo_brand set org_id = %L', ot), 'delete from wms_demo_brand', 'truncate wms_demo_brand'] loop
+      begin execute stmt; raise exception 'FAIL 8: % ran "%" on the register', who.name, left(stmt, 40); exception when insufficient_privilege then refused := refused + 1; when others then if sqlerrm like 'FAIL%' then raise; end if; raise exception 'FAIL 8: % on "%": %', who.name, left(stmt, 40), sqlerrm; end;
+    end loop;
+    perform set_config('role', 'postgres', true);
+  end loop;
+  if refused <> 30 then raise exception 'FAIL 8: % of 30 register attempts refused', refused; end if;
+  refused := 0; perform set_config('request.jwt.claims', ca, true); perform set_config('role', 'authenticated', true);
+  foreach stmt in array array[format('update orgs set id = %L where id = %L', dg, ot), format('update orgs set id = %L where id = %L', gen_random_uuid(), dg), format('delete from orgs where id = %L', dg), format('insert into orgs (id, name, slug, status) values (%L, ''Second demo'', ''second-demo'', ''active'')', dg)] loop
+    begin execute stmt; get diagnostics n1 = row_count; if n1 <> 0 then raise exception 'FAIL 8: an admin ran "%"', left(stmt, 60); end if; refused := refused + 1; exception when others then if sqlerrm like 'FAIL%' then raise; end if; refused := refused + 1; end;
+  end loop;
+  perform set_config('role', 'postgres', true); if refused <> 4 or (select org_id from wms_demo_brand) <> dg or not exists (select 1 from orgs where id = dg) or not exists (select 1 from orgs where id = ot) then raise exception 'FAIL 8: a brand identity changed'; end if;
+  -- 8e. who may reset, and ordinary brand edits still work
+  refused := 0;
+  for who in select * from (values ('client', cc, 'authenticated', 'This login cannot reset the demo.'), ('sales', cs, 'authenticated', 'This login cannot reset the demo.'), ('public key', '{"role":"anon"}', 'anon', 'permission denied%'), ('service login', '{"role":"service_role"}', 'service_role', 'permission denied%')) v(name, claims, dbrole, expect) loop
+    if who.name = 'sales' then perform set_config('request.jwt.claims', '', true); update profiles set role = 'shipbay_sales' where id = us; end if;
+    perform set_config('request.jwt.claims', who.claims, true); perform set_config('role', who.dbrole, true);
+    begin perform wms_demo_reset(); raise exception 'FAIL 8: % reset the demo', who.name; exception when others then if sqlerrm like 'FAIL%' then raise; end if; if sqlerrm not like who.expect then raise exception 'FAIL 8: % refused for another cause: %', who.name, sqlerrm; end if; refused := refused + 1; end;
+    perform set_config('role', 'postgres', true); if who.name = 'sales' then perform set_config('request.jwt.claims', '', true); update profiles set role = sales_role where id = us; end if;
+  end loop;
+  perform set_config('request.jwt.claims', cs, true); perform set_config('role', 'authenticated', true);
+  update orgs set name = 'LHC renamed brand', slug = 'lhc-renamed', notes = 'An ordinary edit' where id = ot; get diagnostics n1 = row_count;
+  perform set_config('role', 'postgres', true); if n1 <> 1 or refused <> 4 or (select slug from orgs where id = ot) <> 'lhc-renamed' then raise exception 'FAIL 8: an ordinary brand edit by staff failed, or a reset refusal is missing'; end if;
+  execute fq into f1 using dg; if f1 is distinct from f0 then raise exception 'FAIL 8: something outside the demo brand changed'; end if;
+  ok := ok || format('demo brand: with no demo yet, admin, staff and sales each tried 6 ways to dress a real brand up as the demo (slug, capitals, spaces, client code, every label at once, a new brand with the slug): each edit is accepted as an ordinary edit and the reset then refuses, 18 of 18, as it does after the client-code function; the genuine demo is created and registered by the reset (floor login) and rebuilt identically by staff and admin (%s rows, %s units each time); with the demo registered and renamed away, a real brand wearing every demo label and its product moved over is untouched by the reset for admin, staff and sales; the register refuses all 30 reads and writes by admin, staff, floor, client, the public key and the service login; a brand id cannot be swapped, changed, deleted or duplicated; client, sales, the public key and the service login cannot reset; an ordinary brand rename by staff still works; ledger, orders, waves, picks, API keys and pallet counts outside the demo brand are unchanged throughout', n, u);
+
+  -- 9. the database afterwards
+  if exists (select 1 from inventory_moves group by sku_id, location_id having sum(qty) < 0 and location_id is not null) then raise exception 'FAIL 9: a position is below zero'; end if;
+  if exists (select 1 from inventory_moves where ref_type = 'wms_pallet' and reason = 'receive' group by ref_id, sku_id having count(*) > 1) then raise exception 'FAIL 9: a pallet was received twice'; end if;
+  if exists (select 1 from inventory_moves where reason in ('adjust', 'cycle_count', 'damage', 'return_restock') and id::text not in (select id from _lhc_old where kind = 'm') and (location_id is null or ref_id is null or created_by is null or length(btrim(coalesce(note, ''))) < 5)) then raise exception 'FAIL 9: an adjustment written here lacks its position, reference, reason or author'; end if;
   if before is distinct from (select md5(concat_ws('|', (select jsonb_agg(to_jsonb(x) order by x.psku)::text from wms_pallets x where x.id::text in (select id from _lhc_old where kind = 'p')),
       (select jsonb_agg(to_jsonb(x) order by x.id)::text from inventory_moves x where x.id::text in (select id from _lhc_old where kind = 'm')),
       (select jsonb_agg(to_jsonb(x) order by x.id)::text from wms_nexus_ops x where x.id::text in (select id from _lhc_old where kind = 'o')),
       (select jsonb_agg(to_jsonb(x) order by x.code)::text from wms_cartons x where x.id::text in (select id from _lhc_old where kind = 'c')),
-      (select jsonb_agg(to_jsonb(x) order by x.id)::text from orders x where x.id::text in (select id from _lhc_old where kind = 'r'))))) then raise exception 'FAIL 8: something that was on file before this test changed'; end if;
+      (select jsonb_agg(to_jsonb(x) order by x.id)::text from orders x where x.id::text in (select id from _lhc_old where kind = 'r'))))) then raise exception 'FAIL 9: something that was on file before this test changed'; end if;
   if has_table_privilege('anon', 'public.inventory_moves', 'insert,update,delete,truncate,references,trigger') or has_table_privilege('authenticated', 'public.inventory_moves', 'insert,update,delete,truncate,references,trigger')
      or not has_table_privilege('authenticated', 'public.inventory_moves', 'select') or has_function_privilege('anon', 'public.wms_stock_correct(uuid, uuid, text, integer, text)', 'execute') or not has_function_privilege('authenticated', 'public.wms_stock_correct(uuid, uuid, text, integer, text)', 'execute')
-     or has_function_privilege('authenticated', 'public._inventory_moves_guard()', 'execute') or has_function_privilege('anon', 'public._inventory_moves_insert_guard()', 'execute') then raise exception 'FAIL 8: a privilege is wrong'; end if;
+     or has_function_privilege('service_role', 'public.wms_demo_reset()', 'execute') or has_function_privilege('anon', 'public.wms_demo_reset()', 'execute') or has_table_privilege('authenticated', 'public.wms_demo_brand', 'select,insert,update,delete') or has_table_privilege('service_role', 'public.wms_demo_brand', 'select,insert,update,delete')
+     or has_function_privilege('authenticated', 'public._inventory_moves_guard()', 'execute') or has_function_privilege('anon', 'public._inventory_moves_insert_guard()', 'execute') then raise exception 'FAIL 9: a privilege is wrong'; end if;
   ok := ok || 'the database afterwards: no position below zero, no pallet received twice, every adjustment written here has its position, reference, reason and author, everything on file before is byte-for-byte unchanged, and the privileges are as designed'::text;
 
   raise exception 'ROLLBACK-OK % checks passed: %', array_length(ok, 1), array_to_string(ok, ' || ');
