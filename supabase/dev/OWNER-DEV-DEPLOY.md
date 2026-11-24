@@ -116,3 +116,25 @@ only to the isolated development database `gdoaonsasbsperqjuurm`. Nothing below 
   - The portal gets `VITE_SHIP_DIRECT=1`. In PackShip, "Mark shipped" calls `ship_order` directly. An order already packed
     in the WMS needs no second unit scan. Rates and label buying are hidden.
   - A production-style build is unchanged: it still calls the labels function and has no `ship_order` call.
+
+## 2026-11-24 browser acceptance: SHIPBAY CORE MVP — BROWSER VERIFIED (dev only)
+- Portal build 2c3a62c (`version.json` local-1795541770981) on gentle-queijadas-2bc8a5; WMS unchanged (19730f7).
+- Flow: receive MVP-A 30 → PSKU-000105 at SB-01 → ACC-1/2/3 (12 each) → wave of ACC-1+ACC-2, ACC-3 short (6 free)
+  → pick 24 → pack → ship ACC-1 (USPS, TEST-ACC-0001) and ACC-2 (UPS, TEST-ACC-0002), no labels bought.
+- Balances: MVP-A received 30, picked/shipped 24, on hand 6 at SB-01; on open orders 12 (ACC-3) → available −6 is
+  unfilled demand, not stock: no position below zero. MVP-B 20 at SB-06.
+- Idempotency: double-click sent one request; reused tracking refused ("already on order ACC-1"); ship_order repeated
+  for ACC-1 with the same tracking as the owner's login (committed, 17:36:03Z) returned the original shipment
+  ba919099…, shipments 2→2, stock moves 2→2, SB-01 6→6.
+- View as client: fail-closed guard (portal/src/viewGuard.js, 8 unit tests). Mailers preview shows only MVP-B-1,
+  MVP-B-2, SYN-ORD-1 (shipped today 0); Records preview shows ACC-3 in progress, shipped today 2.
+- Client Warehouse: shipped orders show Shipped and leave Open orders (Records: 1).
+- Real client: xavier.delmonte24+sb-mailers@gmail.com, invited through Supabase Auth 17:52:48Z, profile set to
+  client_user / Synthetic Mailers (one row), password set by Derek through recovery, signed in through the secure
+  form. Browser: orders 3 (none ACC; "ACC" and "TEST-ACC" searches empty), products 4, stock MVP-B 20 only,
+  pallets PSKU-000104/020/021 only. Database as that login: 0 Records rows in orders, order lines, shipments,
+  products, stock, moves, pallets, picks, brands, profiles; stock summary, connector, picklist and orders summary
+  refuse Records.
+- Not changed: production, Nexus (journal still the single PSKU-000001→P-01 row from 11-23), labels, carriers, stores.
+- Open (not core): the store-connector API (_wms_order_json) reports a shipped order as "open"; the portal's own
+  "Forgot password" needs the password-reset function, which dev does not have.
