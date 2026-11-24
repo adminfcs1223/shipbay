@@ -48,6 +48,9 @@ export default function PutAway() {
   const lines = (x) => (x.lines || []).map((l) => `${num(l.units)} × ${l.sku} at ${l.position || 'no position'}`).join(' · ');
   const pallets = floor?.ok ? floor.locations.filter((l) => l.kind === 'pallet' || l.kind === 'staging') : [];
   const free = pallets.filter((l) => l.status === 'open' && l.free > 0);
+  // what Nexus shows ShipBay for a position: other companies by name and count only (Nexus never sends their pallet ids)
+  const others = (l) => (l.occupants || []).filter((o) => o.company !== 'SHIPBAY');
+  const taken = pallets.filter((l) => Number(l.used) > 0 || l.status !== 'open');
   const here = rel.at ? pallets.find((l) => l.code === rel.at) : null;
   const closed = status && (!status.ok || status.connection === 'off' || !status.pallet_moves);
   const notOpen = floor?.ok && !floor.moves_enabled;
@@ -56,7 +59,8 @@ export default function PutAway() {
   return (
     <>
       <header className="pagehead">
-        <div><h1>Put away<span className="dot">.</span></h1>{floor?.ok && <p className="when" data-testid="pa-floor">Nexus floor {floor.warehouse} · map version {floor.map_version}</p>}</div>
+        <div><h1>Put away<span className="dot">.</span></h1>{floor?.ok && <p className="when" data-testid="pa-floor">Nexus floor {floor.warehouse} · map version {floor.map_version}{status?.ok && !status.pallet_moves ? ' · read-only' : ''}</p>}
+          {floor?.ok && floor.checksum && <p className="when" data-testid="pa-checksum" style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11, wordBreak: 'break-all' }}>Map checksum {floor.checksum}</p>}</div>
         {floor?.ok && <div className="glance"><div><b>{num(free.length)}</b><small>Free positions</small></div><div><b>{num(pallets.reduce((n, l) => n + (l.your_pallets || []).length, 0))}</b><small>ShipBay pallets</small></div><div><b>{num(open.length)}</b><small>Not confirmed</small></div></div>}
       </header>
       {closed && <div className="strip bad" data-testid="pa-closed"><b>Put-away through Nexus is off.</b><span>This environment is not set up to place pallets. Nothing on this screen will store a pallet.</span></div>}
@@ -106,6 +110,11 @@ export default function PutAway() {
       {waiting.length > 0 && <section className="panel pad" data-testid="pa-open">
         <header className="panelhead"><h3>Not confirmed by Nexus</h3><button className="btn sm" disabled={busy} onClick={retryAll}>Send all again</button></header>
         <ul className="sc-list">{waiting.map((o) => <li key={o.op} className="sc-row"><div><b>{o.pallet} {o.kind === 'release' ? `leaving ${o.from}` : `to ${o.to}`}</b><span>Not confirmed yet. Sent {o.attempts} time{o.attempts === 1 ? '' : 's'} by {o.by || 'staff'}.</span></div></li>)}</ul>
+      </section>}
+
+      {floor?.ok && <section className="panel pad" data-testid="pa-shared">
+        <header className="panelhead"><h3>Shared floor</h3><span>{num(taken.length)} of {num(pallets.length)} positions in use</span></header>
+        {taken.length === 0 ? <p>No position is in use.</p> : <ul className="sc-list">{taken.map((l) => <li key={l.code} className="sc-row" data-testid={`pa-pos-${l.code}`}><div><b>{l.code}</b><span>{(l.your_pallets || []).length ? `ShipBay: ${l.your_pallets.join(', ')}` : ''}{(l.your_pallets || []).length && others(l).length ? ' · ' : ''}{others(l).map((o) => `${o.company}: ${num(o.pallets)} pallet${o.pallets === 1 ? '' : 's'}`).join(' · ')}</span></div><div className="r">{l.status !== 'open' ? l.status : `${num(l.used)} of ${num(l.capacity)}`}</div></li>)}</ul>}
       </section>}
 
       {floor?.ok && <section className="panel pad">
