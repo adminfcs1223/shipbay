@@ -1,12 +1,53 @@
 # Hosted movement rehearsal: dev database and bridge ready, screens validated, runner and stages not run
 
-Updated 2026-11-24, 10:10 AM ET (dev_036 revision 2 and dev_037 APPLIED to dev and verified: next section. P-03 hold in force). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
+Updated 2026-11-24, 11:00 AM ET (integration gates: next section. ShipBay WAITING FOR CROSS-SYSTEM REHEARSAL. P-03 hold in force). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
 dev_033 and the manager pick-correction migration dev_034 are applied and verified on `shipbay-nexus-dev`. The three correction forms have now been run in a browser and the
 correction endpoints called over HTTP with real sessions (below). The movement runner is NOT deployed, no switch was set, and
 nothing was sent to Nexus. Production and `main` are untouched.
 
 **Hold (Derek, 2026-11-23 2:30 AM):** the hosted rehearsal does not start yet. Souled's P-02 placement is being prepared and
 Nexus has a destination-safety deployment pending. PSKU-000001 stays at P-01.
+
+## Integration and usability gates (Derek, 2026-11-24 10:30 AM ET). No hosted mutation. ShipBay WAITING FOR CROSS-SYSTEM REHEARSAL
+
+**Portal and WMS.** Every database call of the receiving, put-away, order, wave, pick, pack and ship screens (38 functions in
+`portal/src/pages/{PackShip,Orders,Receiving,ClientWarehouse}.jsx`, `wms/src/{Receive,Pallets,Orders,PutAway,cartons,App}`,
+and the `labels` function's `ship_order` call) matches a function on hosted dev by name and argument names, executable by
+signed-in logins and not by the public key (`wms_nexus_op_commit` stays bridge-only). The portal builds (packages installed
+in the workspace; Vite build ok, size warnings only); the WMS builds. But no ShipBay screen is connected to dev: the portal
+(dashboard.shipbay3pl.com, reachable, read only) and the WMS build are configured for the production database, the WMS is
+not deployed, the `labels` function (portal "Mark shipped") is not deployed on dev, and the synthetic logins have no
+passwords. UI-level testing so far is local: WMS browser suites (113, 79) and the screens' exact calls replayed over a local
+API with real tokens (`supabase/tests/deno/mvp-http.test.ts`). The portal's Pack & Ship screen itself was not run in a browser.
+
+**Nexus bridge vs the handoff** (nexus `a465b55`, `neutral/INTEGRATION-HANDOFF.md`; a465b55 changes no Nexus SQL against
+9826ba3, only docs, contract examples and Nexus's own tests). New `supabase/tests/bridge/contract.test.mjs` drives the real
+bridge code with a scripted Nexus: 5 of 5 — assign `{pallet,to}`, move `{pallet,to,from}`, release `{pallet,from}`, the
+journal row's Idempotency-Key and the movement key on every POST; 200 recorded only after Nexus's yes, replayed passed
+through; all 14 refusal codes of the table plus an unknown code recorded as refused with the code, nothing placed, Nexus's
+message not shown; timeout / 503 / 500 / 429 kept pending, and the retry resends the identical body with the same key; a yes
+that ShipBay cannot record leaves the position reserved (out of sync), nothing released. Against a Nexus checkout at a465b55:
+bridge 16, manager 5, workflow 6, movement 331, runner 13, bridge under Deno 4, MVP API + sync 4 — all pass.
+Differences from the handoff's advice (all fail safe, none changes data): `already_there` and `pallet_elsewhere` are recorded
+as refusals and sent to an admin (the handoff says "nothing to do" / "refresh occupancy and retry with a new key"; the
+bridge's `/reconcile` is the admin tool); a no-answer is retried by the `/pending/retry` button or runner, not by an automatic
+loop; `location_not_a_destination` has no plain-words message (falls back to "Nexus refused the request.").
+Not verified: Nexus's own acceptance suite (`neutral/test/mvp-acceptance.test.mjs`) was not run (it runs against Nexus
+staging); the deployed bridge on dev (version 7) is the same code as tested (bundle hash recorded earlier), but no hosted
+call was made today.
+
+**Holds.** P-03 hold (Nov 23 9:30 PM): for Souled's PAL-9801 P-02 → P-03 move; forbids ShipBay's switches, any assign / move /
+release in Nexus, use of P-02 / P-03, the hosted rehearsal, and dev_036 / WMS / runner deployment (dev_036 and dev_037 were
+later approved separately); in force until Derek releases it. At 15:06Z Nexus still had PAL-9801 at P-02. Standing movement
+hold (since Nov 22-23): no runner deployment or execution, no switch change, no Nexus mutation without separate approval;
+the nine-stage rehearsal needs its own approval. A test at P-50: ShipBay's switches are one setting for the whole bridge, not
+per position, so the P-03 hold must be released (or amended to allow it), AND the test needs its own authorization under
+the standing hold (it deploys a runner and sends an assign and a release). It does not need the nine-stage rehearsal approved.
+
+**Evidence for the eight hosted checks:** `supabase/dev/evidence/2026-11-24-hosted-checks.md` (file hashes, the RAISE line
+each run reported, the limitation, mechanical local reproduction — rerun today: same eight results, same eight lines).
+
+**Rehearsal procedure:** `supabase/dev/MVP-REHEARSAL.md` (prepared, not run).
 
 ## dev_036 revision 2 and dev_037 APPLIED to shipbay-nexus-dev and verified (Derek's conditional approval, 2026-11-24 9:48 AM ET)
 
