@@ -1,12 +1,53 @@
 # Hosted movement rehearsal: dev database and bridge ready, screens validated, runner and stages not run
 
-Updated 2026-11-24, 9:45 AM ET (MVP sprint: dev_036 revision 2 and dev_037 tested locally, NOT applied: next section. P-03 hold in force). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
+Updated 2026-11-24, 10:10 AM ET (dev_036 revision 2 and dev_037 APPLIED to dev and verified: next section. P-03 hold in force). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
 dev_033 and the manager pick-correction migration dev_034 are applied and verified on `shipbay-nexus-dev`. The three correction forms have now been run in a browser and the
 correction endpoints called over HTTP with real sessions (below). The movement runner is NOT deployed, no switch was set, and
 nothing was sent to Nexus. Production and `main` are untouched.
 
 **Hold (Derek, 2026-11-23 2:30 AM):** the hosted rehearsal does not start yet. Souled's P-02 placement is being prepared and
 Nexus has a destination-safety deployment pending. PSKU-000001 stays at P-01.
+
+## dev_036 revision 2 and dev_037 APPLIED to shipbay-nexus-dev and verified (Derek's conditional approval, 2026-11-24 9:48 AM ET)
+
+Target `gdoaonsasbsperqjuurm`, branch `wms-nexus-bridge`, commit 1e02888. Nothing else was deployed: no Edge Function (the
+Veeqo / Shopify sync code stays undeployed), no WMS, no runner; no switch changed; nothing sent to Nexus; no hosted order or
+movement against PSKU-000001; P-03 hold in force; production and `main` untouched.
+
+Gates (all passed, 14:49Z): local and remote HEAD 1e02888; both pending files and both rollback files committed and identical
+to 1e02888 (sha256 dev_036 a3399f51, dev_037 ed9ebc43); each file = its candidate minus `begin;`/`commit;` plus a comment
+header; no DROP, no top-level row statement, no RLS disable or bypass, every SECURITY DEFINER function with a fixed search
+path, grants only of the two read-only functions; target holds two synthetic brands and four example.test logins; every
+fingerprint equal to the 14:34Z read; no Veeqo / Shopify function deployed (only `nexus-bridge` v7 and the `bridge-smoke`
+stub), no integrations table, no order with a Shopify or Veeqo id, no pg_cron or pg_net, no other active session, no open
+wave, P-50 / P-51 free. Local tests: as in the MVP sprint section below.
+
+Applied: `dev_036_order_integrity` (14:5xZ) then `dev_037_mvp_fulfilment`; 34 migrations, each recorded once.
+
+Installed definitions equal the local build: `_order_commitment` 13e8eb45, `_order_lines_sync_guard` ecad048b,
+`_orders_direct_edit_guard` eac3f688, `_orders_history_guard` 3569e254, `create_manual_order` 47940f65 (was 1cdf8286),
+`ship_order` 750226bd (was 5e1d4974), `wms_stock_summary` f7d3b1c3; all with `search_path=public`, permissions as tested.
+10 order triggers enabled; 12 restrictive rules, all `false`; signed-in logins and the public key now read-only on orders
+(signed-in keep UPDATE for hold / release / cancel), order lines, shipments, events and picks; returns lost delete and truncate.
+
+Eight rolled-back checks ON HOSTED DEV (sent by a helper session that re-typed each file; each final RAISE line matched the
+file: 260, 179, 161, 88, 109, 248, 190, 197): regression 15/15, open box 8/8, stock safety 7/7, workflow 6/6, manager 5/5,
+ledger 9/9, order integrity 8/8, MVP 10/10 (manual order, two-picker oversell, pick, pack, ship idempotency, reconciliation,
+brand isolation, shipped-order rewrite refusals including the store sync).
+
+Fingerprints before (14:49Z) and after (15:06Z), identical: ledger 1 `afc8960b` (100 units), orders 1 `940453fc`, order lines
+1 `0e21eac4`, shipments 0, events 4 `5deb6a8e`, pallets 9 `49a8aabd`, cartons 90 `a025ccd7`, journal 1 `28ef4c90`, PSKU-000001
+stored at P-01 `56e1c5ac` with its receipt of 100, products 6 `182d4968`, activity 101 (max 227), API keys 0, demo register 0,
+waves / packages / picks 0, P-50 / P-51 free. Nexus staging 15:06Z: PSKU-000001 at P-01, PAL-9801 at P-02, 14 moves, last
+23:22:32Z Nov 23 (unchanged).
+
+Non-transactional effects of the rolled-back checks (sequences do not roll back): events id 121 → 186, activity id 1124 → 1395,
+package number 9 → 14, PSKU number 82 → 100 (the next pallet label will be PSKU-000101), unit number 285 → 380. No rows remain.
+
+Sync: no Veeqo or Shopify sync runs against dev (none deployed, no integration configured), so nothing there can error. If the
+pre-sprint sync code were pointed at a database with dev_036 r2, an order the warehouse has started on would make it stop
+with an error (the Veeqo backfill has no per-order catch) instead of rewriting the order; the undeployed new code skips and
+reports such orders.
 
 ## MVP SPRINT (Derek, 2026-11-24 9:15 AM ET): one complete, safe order path. LOCAL candidates only, NOT applied
 
