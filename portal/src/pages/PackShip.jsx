@@ -6,6 +6,12 @@ import { supabase, fn } from '../lib';
 import { ScanBox, beep, STATUS, SOURCE, dueClass, fmtDate, money, printPackingSlip } from '../ops';
 import { useBrands, BrandPicker, BrandBar } from '../shared';
 
+// Development builds only (VITE_SHIP_DIRECT=1, set by supabase/dev/owner-build.sh): no label can be bought and nothing is sent
+// to a carrier or a store. "Mark shipped" calls ship_order directly as the signed-in staff login (the same database function the
+// labels function calls, with its own staff check, idempotency and stock rules), and an order already packed in the WMS needs no
+// second unit scan. Unset (every production build): this screen is exactly as before.
+const SHIP_DIRECT = (import.meta.env && import.meta.env.VITE_SHIP_DIRECT) === '1';
+
 const OPEN = ['new', 'picked', 'packed'];
 const BOXES = [
   ['Poly mailer', '', '', ''], ['Bubble mailer', '', '', ''], ['Box 6×4×4', 6, 4, 4], ['Box 8×6×4', 8, 6, 4], ['Box 10×8×6', 10, 8, 6], ['Box 12×10×8', 12, 10, 8], ['Box 14×12×10', 14, 12, 10], ['Custom', '', '', ''],
@@ -33,7 +39,7 @@ export default function PackShip({ me, go, params, brand, setBrand }) {
   const [msg, setMsg] = useState(null);
   const [done, setDone] = useState(null);
   const [frozen, setFrozen] = useState(null); // the order just shipped: it leaves the open queue but stays on screen until Next
-  const [manual, setManual] = useState(false);
+  const [manual, setManual] = useState(SHIP_DIRECT);
   const [man, setMan] = useState({ carrier: 'USPS', service: '', tracking: '', label_cost: '' });
   const labelWin = useRef(null);
 
@@ -66,7 +72,7 @@ export default function PackShip({ me, go, params, brand, setBrand }) {
   const physical = lines.filter((l) => l.is_physical && l.qty > 0);
   const verified = physical.reduce((s, l) => s + l.qty_verified, 0);
   const units = physical.reduce((s, l) => s + l.qty, 0);
-  const complete = units > 0 && verified >= units;
+  const complete = units > 0 && (verified >= units || (SHIP_DIRECT && current?.status === 'packed'));
   const orgRow = (orgs || []).find((o) => o.id === org) || null;
 
   // a scan is either an order number (pull it up) or an item (verify it)
@@ -110,7 +116,10 @@ export default function PackShip({ me, go, params, brand, setBrand }) {
   };
   const shipManual = async (e) => {
     e.preventDefault(); setBusy('manual'); setMsg(null);
-    const r = await fn('labels', { action: 'manual', order_id: current.id, carrier: man.carrier, service: man.service, tracking: man.tracking, label_cost: man.label_cost ? Number(man.label_cost) : null, packaging: box, weight_oz: weight ? Number(weight) : null });
+    const r = SHIP_DIRECT
+      ? await supabase.rpc('ship_order', { p_order_id: current.id, p_carrier: man.carrier, p_service: man.service || null, p_tracking: String(man.tracking || '').trim(), p_label_source: 'manual', p_label_cost: man.label_cost ? Number(man.label_cost) : null, p_packaging: box || null, p_weight_oz: weight ? Number(weight) : null })
+        .then(({ data, error }) => (error ? { error: error.message } : { shipment_id: data, tracking: String(man.tracking || '').trim() }))
+      : await fn('labels', { action: 'manual', order_id: current.id, carrier: man.carrier, service: man.service, tracking: man.tracking, label_cost: man.label_cost ? Number(man.label_cost) : null, packaging: box, weight_oz: weight ? Number(weight) : null });
     setBusy(null);
     if (r.error) return setMsg({ kind: 'err', text: r.error });
     beep('done'); setDone({ ...r, carrier: man.carrier, service: man.service, manual: true }); setFrozen({ ...current, status: 'shipped' }); load();
@@ -199,10 +208,11 @@ export default function PackShip({ me, go, params, brand, setBrand }) {
                   <label>Packaging<select value={box} onChange={(e) => setBox(e.target.value)}>{BOXES.map((b) => <option key={b[0]} value={b[0]}>{b[0]}</option>)}</select></label>
                   <label>L × W × H (in)<div className="dims"><input type="number" min="0" step="0.1" value={dims.l} onChange={(e) => setDims({ ...dims, l: e.target.value })} placeholder="L" /><input type="number" min="0" step="0.1" value={dims.w} onChange={(e) => setDims({ ...dims, w: e.target.value })} placeholder="W" /><input type="number" min="0" step="0.1" value={dims.h} onChange={(e) => setDims({ ...dims, h: e.target.value })} placeholder="H" /></div></label>
                   <label>Packed weight (oz)<input type="number" min="0.1" step="0.1" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="from the scale" /></label>
-                  <button className="btn-sm primary" disabled={!complete || !weight || busy === 'rates'} onClick={getRates}>{busy === 'rates' ? 'Getting rates…' : 'Get rates'}</button>
+                  {SHIP_DIRECT ? <span className="sm">Development: label buying is off. Enter test tracking below.</span>
+                    : <button className="btn-sm primary" disabled={!complete || !weight || busy === 'rates'} onClick={getRates}>{busy === 'rates' ? 'Getting rates…' : 'Get rates'}</button>}
                 </div>
 
-                {rates && (
+                {rates && !SHIP_DIRECT && (
                   <div className="rates">
                     {rates.quotes.map((q) => (
                       <label key={q.rate_id} className={`rate ${pick === q.rate_id ? 'on' : ''}`}>

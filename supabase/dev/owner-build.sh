@@ -19,14 +19,16 @@ for app in wms portal; do
   # receiving without a booked inbound shipment (synthetic data has none), no Nexus calendar.
   ( cd "$W" && env -i PATH="$PATH" HOME="$HOME" VITE_SUPABASE_URL=$DEV_URL VITE_SUPABASE_KEY=$DEV_KEY \
       VITE_NEXUS_BRIDGE=$([ $app = wms ] && echo on || echo '') VITE_ALLOW_UNBOOKED=$([ $app = wms ] && echo 1 || echo '') \
+      VITE_PALLET_SCREEN=$([ $app = wms ] && echo 1 || echo '') VITE_SHIP_DIRECT=$([ $app = portal ] && echo 1 || echo '') \
       VITE_WMS_URL=${OWNER_WMS_URL:-} npx vite build --logLevel error --outDir "$O/$app" )
   # a fixed notice on every screen: what this is, and what does not work here (nothing is presented as working that is not)
   python3 - "$O/$app/index.html" <<'PY'
 import sys; p = sys.argv[1]; s = open(p, encoding='utf8').read()
 bar = ('<div id="dev-notice" style="position:fixed;left:0;right:0;bottom:0;z-index:2147483647;pointer-events:none;background:#0F1B2A;color:#fff;'
        'font:600 12px/1.4 Archivo,system-ui,sans-serif;padding:7px 14px;text-align:center">DEVELOPMENT COPY &middot; synthetic test data only &middot; '
-       'not connected to production. Not available here: put-away to shared positions, picking and packing (no stock), shipping and labels, '
-       'finance, CRM, store and QuickBooks connections. Errors on those screens are expected.</div><style>body{padding-bottom:34px}</style>')
+       'not connected to production. Put-away: development positions SB-01 to SB-06 only (shared P/STG positions need Nexus and are off). '
+       'Shipping: test tracking only, no label is bought, nothing is sent to a carrier or store. Not available: finance, CRM, store and QuickBooks connections.</div>'
+       '<style>body{padding-bottom:34px}</style>')
 assert '</body>' in s; open(p, 'w', encoding='utf8').write(s.replace('</body>', bar + '</body>', 1))
 PY
   printf '/*  /index.html  200\n' > "$O/$app/_redirects"

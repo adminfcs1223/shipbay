@@ -99,3 +99,20 @@ only to the isolated development database `gdoaonsasbsperqjuurm`. Nothing below 
   - The four synthetic logins and their profiles are unchanged (md5 5735979e).
 - The WMS Derek opened is https://sparkling-tartufo-ab3928.netlify.app. It serves this build (the dev notice shows), but it
   is not one of the team's sites, so it does not require a Netlify team login.
+
+## Functional MVP skeleton (Derek's dev-only plan, 11:58 ET)
+- **dev_040, applied 17:1xZ** (`supabase/dev/pending/dev_040_synthetic_positions.sql`; rollback beside it, tested locally:
+  apply, roll back, apply again).
+  - Positions SB-01..SB-06: kind pallet, not shared, zone `DEV SYNTHETIC`, pickable.
+  - Trigger `dev_synthetic_positions_only` on `wms_pallets`: a non-shared pallet or floor position must be an SB position.
+  - `nexus_registry_apply` never retires an SB position and refuses a snapshot that names one (md5 efcc3eab, same as local).
+- **`supabase/dev/mvp-ui-flow-check.sql`**: the whole owner flow, run as the synthetic logins and always rolled back.
+  ROLLBACK-OK, 6 checks, both locally and on dev. Dev's pallets, ledger and journal were unchanged afterwards.
+- **Seed** (committed, through the same functions the screens call, as the synthetic logins):
+  - MVP-A for Synthetic Records, with no stock: for the owner's own transaction.
+  - MVP-B for Synthetic Mailers: one pallet (2 × 10) at SB-06, and orders MVP-B-1 and MVP-B-2 of 5 units each.
+- **Builds** (`owner-build.sh`):
+  - The WMS gets `VITE_PALLET_SCREEN=1`, which brings back the Pallets screen (assign a position, scan, put away).
+  - The portal gets `VITE_SHIP_DIRECT=1`. In PackShip, "Mark shipped" calls `ship_order` directly. An order already packed
+    in the WMS needs no second unit scan. Rates and label buying are hidden.
+  - A production-style build is unchanged: it still calls the labels function and has no `ship_order` call.
