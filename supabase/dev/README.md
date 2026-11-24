@@ -79,4 +79,4 @@ See `DEPLOY.md` for the deployment steps and `PRODUCTION-DIFFERENCES.md` for the
 ## Not done here
 
 No Nexus credential is installed, and there is no WMS development site.
-- `ledger-hardening-check.sql`: sixth rolled-back check, for candidate 20261207 revision 2 (9 checks; check 8 is the demo-brand register). `pending/dev_035_inventory_ledger_hardening.sql` is NOT applied; local only so far. Rollback: `../candidates/20261207_inventory_ledger_hardening.rollback.sql`.
+- `ledger-hardening-check.sql`: sixth rolled-back check, for candidate 20261207 revision 2 (9 checks; check 8 is the demo-brand register). `pending/dev_035_inventory_ledger_hardening.sql` was applied to dev on 2026-11-24 00:22Z (the file's header still says NOT APPLIED; it is kept byte for byte). Rollback: `../candidates/20261207_inventory_ledger_hardening.rollback.sql`.

@@ -1,6 +1,6 @@
 # Hosted movement rehearsal: dev database and bridge ready, screens validated, runner and stages not run
 
-Updated 2026-11-23, 8:15 PM ET (stock-ledger hardening revision 2 tested locally, NOT applied: next section, parts 5 and 6; dev_034 is applied to dev and verified). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
+Updated 2026-11-23, 7:45 PM ET (stock-ledger hardening revision 2 APPLIED to dev as dev_035 and verified: next section, part 7). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
 dev_033 and the manager pick-correction migration dev_034 are applied and verified on `shipbay-nexus-dev`. The three correction forms have now been run in a browser and the
 correction endpoints called over HTTP with real sessions (below). The movement runner is NOT deployed, no switch was set, and
 nothing was sent to Nexus. Production and `main` are untouched.
@@ -8,7 +8,7 @@ nothing was sent to Nexus. Production and `main` are untouched.
 **Hold (Derek, 2026-11-23 2:30 AM):** the hosted rehearsal does not start yet. Souled's P-02 placement is being prepared and
 Nexus has a destination-safety deployment pending. PSKU-000001 stays at P-01.
 
-## Stock-ledger hardening (candidate 20261207, pending dev_035): prepared and tested LOCALLY, NOT applied anywhere
+## Stock-ledger hardening (candidate 20261207): on dev as dev_035 since 2026-11-24 00:22Z (parts 1-6 are the history; part 7 is the deployment)
 
 Derek's assignment of 2026-11-23 6:43 PM. The P-02 hold is released (Souled's placement succeeded and Nexus confirmed it); the
 movement-rehearsal hold is NOT. Nothing here was applied to hosted dev, no screen, runner or bridge was deployed, no switch was
@@ -192,6 +192,63 @@ Effects and remaining risks:
 - The reset hands a working API key for the demo brand to the caller (unchanged behaviour).
 
 **Ready for separate hosted-dev approval: yes.** Not cleared for production.
+
+### 7. dev_035 (revision 2) APPLIED to shipbay-nexus-dev and verified (approved by Derek, 2026-11-23 7:19 PM)
+
+Applied 2026-11-24 00:22:21Z as migration `dev_035_inventory_ledger_hardening` (the 32nd; recorded once). Only that file
+(commit 0ae9f77, sha256 54b16877...). No WMS, runner or bridge deployment, no switch change, nothing sent to Nexus, no demo
+reset run outside a rolled-back check, production and `main` untouched.
+
+Pre-deployment gates, all passed: target `gdoaonsasbsperqjuurm` (two synthetic brands SYNM/SYNR, four example.test logins),
+31 migrations ending dev_034, no name clash, no brand with a demo slug, client code or name, 0 API keys; the working file
+equals the committed one; contents are 1 table, 4 functions, 3 triggers, 3 access rules, 8 revokes, 2 grants, no DROP; hosted
+default privileges checked (objects made by `postgres` give functions to nobody else and tables only delete/truncate/
+references/trigger to the three API roles, which the file's explicit `revoke all` removes); the only functions that write
+brands are `wms_demo_reset`, `wms_set_client_code` (client code, admin) and `dev_security_check` (closed to logins); every
+SECURITY DEFINER function has a fixed search path; the key resolver `_wms_key_org` returns the brand of the one key row
+matching the hash and is callable by the service login only, so a demo key reaches the demo brand and nothing else, and it
+exists only in this database; rollback restores the reset text that hosted held (md5 e9a5db94).
+
+Installed state equals the local reference built from the same file:
+
+| Object | Hosted |
+|---|---|
+| `_inventory_moves_guard` | md5 88ff7ce8, definer, search_path public, executable by nobody |
+| `_inventory_moves_insert_guard` | md5 9fe58216, executable by nobody |
+| `wms_stock_correct` | md5 9d33596a, definer, signed-in logins only |
+| `wms_demo_reset` | md5 cb93563a (was e9a5db94), definer, signed-in logins only (service login removed) |
+| Triggers on the ledger | 3, enabled, definitions md5 c7c8ff6b / f019bc22 / cc563147, same as local |
+| Access rules on the ledger | the 2 old ones unchanged + 3 restrictive (`false`) |
+| Ledger privileges | public key and signed-in: SELECT only; service login and owner unchanged |
+| `wms_demo_brand` | 4 columns, 4 constraints as written, access rules on, none defined, no privilege for anon, authenticated, authenticator or service_role, 0 rows |
+| Everything else | other 161 functions `258bb9e0`, other tables' 817 grants `ab8fbb9b`, other 43 access rules `ed1a4252`, other 34 triggers `e095723b`: identical before and after |
+
+Post-deployment:
+
+| Check | Result |
+|---|---|
+| `dev_security_check()` | ROLLBACK-OK. Untrusted login: 50 attempts, 46 refused with an error, 4 returned without changing anything (profile role, pallet status, pallet delete, location); reads nothing but its own login and the 73 positions. Public key: 18 statements refused, positions readable (73). No finding relates to the ledger or the register |
+| Six rolled-back checks ON HOSTED DEV | regression 15/15, open box 8/8, stock safety 7/7, workflow 6/6, manager 5/5, ledger hardening 9/9 (includes the original exploit, 18 impersonations, register 30/30, genuine reset by floor, staff and admin, 24 direct writes refused, 22 owner/service edits refused, correction rules) |
+| Local suites on the same file | void 6, units 5, openbox 5, workflow 6, bridge 16, manager 5, wms-graft 10; movement 331 of 331; Deno 13 and 4; browser 113 and 79 |
+| Switches (read-only probe, 00:23:29Z) | bridge mode off, NEXUS_PALLET_MOVES off, NEXUS_REGISTRY_WRITES off, NEXUS_CALENDAR_WRITES off |
+| Nexus staging (read-only, after the work) | PSKU-000001 placed since 04:26:05Z, PAL-9801 since 23:22:32Z, 14 moves, last 23:22:32Z: unchanged |
+
+The six hosted checks were sent by a helper session that re-typed each file from disk; it reports each final line number
+matching the file, but the text sent was not byte-compared. The invalid-session case was tested over HTTP locally only (401);
+on hosted it would need a deployed function. The switch probe (`supabase/dev/probe/switches.ts`: reads four environment
+names, answers on/off, no database or network call) was in the `bridge-smoke` slot for about 15 seconds behind a one-time
+token; the slot holds the inert stub again (version 22, verify_jwt on, read back).
+
+Fingerprints on hosted dev, identical before the migration, after it, and after all checks: ledger 1 row `afc8960b` (100
+units), journal 1 `28ef4c90`, pallets 9 `49a8aabd`, cartons 90 `a025ccd7`, orders 1 `940453fc`, brands 2 `a8a226a9`, API keys
+0, register 0 rows, activity 101 rows (max id 227), products 6 (no demo or check products), PSKU-000001 stored at P-01
+`56e1c5ac` with its one receipt of 100.
+
+Remaining before real inventory (not changed here): direct order deletion and reassignment by admin, staff and sales; whether
+the demo reset should exist at all with real inventory, and floor access to it; sales using the older receiving and shipping
+functions and reading the whole ledger; production-only billing and inventory integrations unverified; put-away receipts
+carry no author; the manager screen and a shelf-correction screen are not deployed; a pre-existing demo brand elsewhere must
+be registered by hand.
 
 ## dev_034 applied to shipbay-nexus-dev and verified (approved by Derek, 2026-11-23 6:25 PM)
 
