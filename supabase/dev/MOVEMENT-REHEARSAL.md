@@ -8,6 +8,28 @@ nothing was sent to Nexus. Production and `main` are untouched.
 **Hold (Derek, 2026-11-23 2:30 AM):** the hosted rehearsal does not start yet. Souled's P-02 placement is being prepared and
 Nexus has a destination-safety deployment pending. PSKU-000001 stays at P-01.
 
+## P-03 HOLD (Derek, 2026-11-23 9:30 PM ET): ShipBay movements disabled while Souled moves PAL-9801 from P-02 to P-03
+
+In force until Derek releases it: no movement switch on, no hosted rehearsal, no assign / move / release in Nexus, no use of
+P-02 or P-03, PSKU-000001 stays at P-01, no deployment of dev_036, the WMS or the runner, no production or `main` change.
+dev_036 additionally waits on the Veeqo line-replacement sync and shipped-order rewriting being addressed.
+
+Read-only evidence, 2026-11-24 UTC:
+- 02:32:08Z switches (probe `supabase/dev/probe/switches.ts`, now five names): bridge mode off, NEXUS_PALLET_MOVES off,
+  NEXUS_REGISTRY_WRITES off, NEXUS_CALENDAR_WRITES off, NEXUS_TEST_FAULTS off. Probe live about 15 seconds behind a one-time
+  token; `bridge-smoke` is the inert stub again (version 24, verify_jwt on, read back).
+- 02:31Z Edge Functions on dev: `nexus-bridge` v7 (unchanged since 2026-11-23) and `bridge-smoke` (stub) only; no runner. No
+  pg_cron and no pg_net in the database, so nothing is scheduled there.
+- 02:31:33Z ShipBay dev: 32 migrations, last dev_035, no dev_036; journal 1 row, state done (`28ef4c90`), none pending,
+  refused, out of sync or undone; PSKU-000001 stored at P-01 (`56e1c5ac`) with its receipt of 100 (`afc8960b`); pallets 9
+  (`49a8aabd`: 1 stored, 8 open with no position); nothing of ShipBay's at, planned for or naming P-02 or P-03 (0 pallets, 0
+  wave stops, 0 ledger rows, 0 journal rows, 0 open waves).
+- 02:31:43Z Nexus staging (HILLSBOROUGH-TEST): PAL-9801 (SOULED) at P-02 since 23:22:32Z; P-03 open and empty; PSKU-000001
+  (SHIPBAY) at P-01 since 04:26:05Z; 14 moves in all, the last Souled's at 23:22:32Z; ShipBay has sent exactly 1, at 04:26:05Z.
+
+Limits: the switch reading is a point in time (Derek sets secrets by hand); schedules outside the database (dashboard cron,
+external callers) cannot be listed from here; three inbound bookings are `expected` on dev with no position assigned.
+
 ## Order integrity (candidate 20261208, pending dev_036): prepared and tested LOCALLY, NOT applied anywhere
 
 Derek's assignment of 2026-11-23 7:43 PM. Nothing was applied to hosted dev; no screen, runner or bridge deployed; no switch
