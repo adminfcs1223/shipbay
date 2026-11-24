@@ -99,6 +99,10 @@ export async function runMvp(io, { position = 'P-50', retries = 3, retryDelayMs 
     notes.push(`switches at start: ${switches(st)}`);
     check('switches set by hand for the run: connection staging, pallet moves on, registry and calendar writes off, test faults ' + (faults ? 'on' : 'off'),
       [st.status, st.connection, st.pallet_moves, st.registry_writes, st.calendar_writes, st.test_faults], [200, 'staging', true, false, false, !!faults]);
+    const mw = st.move_window || {};
+    notes.push(`movement authorization at start: open ${mw.open}, closes ${mw.closes_at}, ${mw.seconds_left}s left, positions ${mw.positions}, pallets ${mw.pallets || 'any'}`);
+    ok(`a movement authorization is open for ${at} with at least 5 minutes left, naming no position but P-50 / P-49`,
+      mw.open === true && mw.seconds_left >= 300 && Array.isArray(mw.positions) && mw.positions.includes(at) && mw.positions.every((p) => MVP.positions.includes(p)), mw);
     let s = await io.snapshot();
     pallet = mine(s)[0] || null;
     ok(`at most one pallet under the receiving key ${MVP.key}`, mine(s).length <= 1, mine(s).map((p) => p.psku));
@@ -141,6 +145,7 @@ export async function runMvp(io, { position = 'P-50', retries = 3, retryDelayMs 
     ok(`${pallet.psku} is counted or further along`, ['counted', 'stored', 'departed', 'off_floor'].includes(pallet.status), pallet);
 
     // ---- 3. put away at the position, through Nexus ----
+    if (['counted', 'stored'].includes(pallet.status)) ok(`the movement authorization covers ${pallet.psku}`, !mw.pallets || mw.pallets.includes(pallet.psku), mw.pallets);
     if (pallet.status === 'counted') {
       const r = await nexusWrite('/putaway', { psku: pallet.psku, location: at }, 'assign');
       ok(`put-away of ${pallet.psku} at ${at}: Nexus said yes`, r.status === 200 && r.ok === true, r);

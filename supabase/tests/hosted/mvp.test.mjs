@@ -54,7 +54,7 @@ async function run(role, uid, fn, args) {
   return as(role, uid, async (c) => (await c.query(`select public.${fn}(${keys.map((k, i) => `${k} => $${i + 1}`).join(', ')}) r`, keys.map((k) => (args[k] !== null && typeof args[k] === 'object' && !Array.isArray(args[k]) ? JSON.stringify(args[k]) : Array.isArray(args[k]) && args[k].some((x) => typeof x === 'object') ? JSON.stringify(args[k]) : args[k])))).rows[0].r);
 }
 const port = { user: (token) => ({ rpc: (fn, args) => { if (!U[token]) throw new Error('bad token'); return run('authenticated', U[token], fn, args); } }), service: { rpc: (fn, args) => run('service_role', null, fn, args) } };
-const ENV = { NEXUS_BRIDGE_MODE: 'staging', NEXUS_STAGING_API_KEY: NEXUS_KEY, NEXUS_PALLET_MOVES: 'on', SUPABASE_URL: 'https://gdoaonsasbsperqjuurm.supabase.co' };
+const ENV = { NEXUS_BRIDGE_MODE: 'staging', NEXUS_STAGING_API_KEY: NEXUS_KEY, NEXUS_PALLET_MOVES: 'on', NEXUS_MOVES_UNTIL: new Date(Date.now() + 50 * 60000).toISOString(), NEXUS_MOVES_POSITIONS: 'P-50,P-49', SUPABASE_URL: 'https://gdoaonsasbsperqjuurm.supabase.co' };
 const bridgeWith = (env) => { const handle = makeBridge({ env, fetchImpl: nexusFetch, db: port, routes: palletRoutes });
   return async (who, method, p, body, extra = {}) => { const r = await handle(new Request(`https://x.test/functions/v1/nexus-bridge${p}`, { method, headers: { ...(who ? { authorization: `Bearer ${who}`, 'content-type': 'application/json' } : {}), ...extra }, body: body ? JSON.stringify(body) : undefined })); return { ...(await r.json()), status: r.status }; }; };
 const bridges = { normal: bridgeWith(ENV), faults: bridgeWith({ ...ENV, NEXUS_TEST_FAULTS: 'on' }), off: bridgeWith({}), movesOff: bridgeWith({ ...ENV, NEXUS_PALLET_MOVES: '' }), calendar: bridgeWith({ ...ENV, NEXUS_CALENDAR_WRITES: 'on' }) };
@@ -85,7 +85,7 @@ const protectedNow = async () => ({
 test.after(async () => { await ndb.end(); const c = new pg.Client(`${base}/staging`); await c.connect(); await c.query('drop database if exists nexus_mvp_suite').catch(() => {}); await c.end(); await db.end(); });
 
 test('setup: PSKU-000001 at P-01 (as on dev), and another company\'s pallet at P-02 (as Souled\'s PAL-9801 on dev)', async () => {
-  const r = await bridges.normal('floor', 'POST', '/putaway', { psku: 'PSKU-000001', location: 'P-01' }); assert.deepEqual([r.status, r.location, Number(r.units_posted)], [200, 'P-01', 100]);
+  const r = await bridgeWith({ ...ENV, NEXUS_MOVES_POSITIONS: 'P-01' })('floor', 'POST', '/putaway', { psku: 'PSKU-000001', location: 'P-01' }); assert.deepEqual([r.status, r.location, Number(r.units_posted)], [200, 'P-01', 100]);
   const s = (await otherPlace('assign', 'PAL-9801', 'P-02', null)); assert.equal(s.ok, true, JSON.stringify(s));
   net.posts.length = 0; protectedBefore = await protectedNow();
 });

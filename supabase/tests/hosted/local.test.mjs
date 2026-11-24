@@ -43,7 +43,7 @@ async function run(role, uid, fn, args) {
   } catch (e) { await db.query('rollback'); throw e; }
 }
 const port = { user: (token) => ({ rpc: (fn, args) => { if (token === 'public') return run('anon', null, fn, args); if (!U[token]) throw new Error('bad token'); return run('authenticated', U[token], fn, args); } }), service: { rpc: (fn, args) => run('service_role', null, fn, args) } };
-const handle = makeBridge({ env: { NEXUS_BRIDGE_MODE: 'staging', NEXUS_STAGING_API_KEY: NEXUS_KEY, NEXUS_PALLET_MOVES: 'on', NEXUS_TEST_FAULTS: 'on', SUPABASE_URL: 'https://gdoaonsasbsperqjuurm.supabase.co' }, fetchImpl: nexusFetch, db: port, routes: palletRoutes, timeoutMs: 2000 });
+const handle = makeBridge({ env: { NEXUS_BRIDGE_MODE: 'staging', NEXUS_STAGING_API_KEY: NEXUS_KEY, NEXUS_PALLET_MOVES: 'on', NEXUS_MOVES_UNTIL: new Date(Date.now() + 50 * 60000).toISOString(), NEXUS_MOVES_POSITIONS: Array.from({ length: 66 }, (_, i) => 'P-' + String(i + 1).padStart(2, '0')).concat(['STG-01', 'STG-02']).join(), NEXUS_TEST_FAULTS: 'on', SUPABASE_URL: 'https://gdoaonsasbsperqjuurm.supabase.co' }, fetchImpl: nexusFetch, db: port, routes: palletRoutes, timeoutMs: 2000 });
 const bridge = async (who, method, p, body, extra = {}) => { const r = await handle(new Request(`https://x.test/functions/v1/nexus-bridge${p}`, { method, headers: { ...(who ? { authorization: `Bearer ${who}`, 'content-type': 'application/json' } : {}), ...extra }, body: body ? JSON.stringify(body) : undefined })); return { ...(await r.json()), status: r.status }; };
 const io = {
   call: bridge,

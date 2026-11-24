@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { makeBridge } from '../../functions/nexus-bridge/core.js';
 import { palletRoutes } from '../../functions/nexus-bridge/pallets.js';
 
-const ENV = { NEXUS_BRIDGE_MODE: 'staging', NEXUS_PALLET_MOVES: 'on', NEXUS_STAGING_API_KEY: 'test-key', SUPABASE_URL: 'https://gdoaonsasbsperqjuurm.supabase.co' };
+const ENV = { NEXUS_BRIDGE_MODE: 'staging', NEXUS_PALLET_MOVES: 'on', NEXUS_MOVES_UNTIL: new Date(Date.now() + 50 * 60000).toISOString(), NEXUS_MOVES_POSITIONS: Array.from({ length: 66 }, (_, i) => 'P-' + String(i + 1).padStart(2, '0')).concat(['STG-01', 'STG-02']).join(), NEXUS_STAGING_API_KEY: 'test-key', SUPABASE_URL: 'https://gdoaonsasbsperqjuurm.supabase.co' };
 const OPS = {
   wms_putaway_begin: { op: 'op-a', kind: 'assign', pallet: 'PSKU-000777', to: 'P-50', from: null, key: 'SB-ASSIGN-1' },
   wms_move_begin: { op: 'op-m', kind: 'move', pallet: 'PSKU-000777', to: 'P-51', from: 'P-50', key: 'SB-MOVE-1' },

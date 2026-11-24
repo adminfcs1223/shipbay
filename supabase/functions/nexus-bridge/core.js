@@ -15,11 +15,50 @@
 //                           it, exactly as if the network had dropped it. For rehearsing recovery. On any other database the
 //                           setting does nothing, and a request carrying the header is refused before anything is done. The
 //                           header is not in the CORS allow-list, so a browser on the WMS site cannot send it.
+//   NEXUS_MOVES_UNTIL       REQUIRED for any pallet write, in addition to NEXUS_PALLET_MOVES: an absolute time with its zone
+//                           (2026-11-24T17:30:00Z). Before it, writes may be sent; from it on, none is begun, whatever the switches
+//                           say. Missing, unreadable, or more than 60 minutes ahead of the moment of use: no write is sent. It is
+//                           read from the function's settings only; nothing a caller sends can set or extend it.
+//   NEXUS_MOVES_POSITIONS   REQUIRED with it: the positions a write may name, comma-separated (P-50). A put-away's destination,
+//                           a move's destination AND source, and a release's position must all be in it.
+//   NEXUS_MOVES_PALLETS     optional: when set, the only pallets a write may name (PSKU-000101).
+//   These three are checked twice: before ShipBay's journal is touched, and again immediately before each request to Nexus.
+//   The settings themselves do not reset: the switches stay as they were set until someone removes them.
 export const STAGING_HOST = 'ankoqruedjujyefhrmtw.supabase.co';
 export const TEST_FLOOR = 'HILLSBOROUGH-TEST';
 export const PRODUCTION_DB_REF = 'poxlczzkpztmoiixyrth';
 export const DEV_DB_HOST = 'gdoaonsasbsperqjuurm.supabase.co';
 export const FAULT_HEADER = 'x-nexus-test-fault';
+export const MOVE_WINDOW_MAX_MS = 60 * 60000;
+const AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+const listOf = (v, re, max) => { if (v === undefined || v === null || v === '') return null; const l = String(v).split(',').map((x) => x.trim().toUpperCase()); return l.length && l.length <= max && l.every((x) => re.test(x)) && new Set(l).size === l.length ? l : false; };
+const pos = (v) => (v === null || v === undefined || v === '' ? null : String(v).trim().toUpperCase().replace(/^LOC-/, ''));
+/** The time-limited movement authorization, from the function's settings only. */
+export function readMoveWindow(env = {}) {
+  const raw = String(env.NEXUS_MOVES_UNTIL || '').trim(); const until = AT.test(raw) ? Date.parse(raw) : NaN;
+  const positions = listOf(env.NEXUS_MOVES_POSITIONS, /^(P|STG)-\d{2}$/, 80); const pallets = listOf(env.NEXUS_MOVES_PALLETS, /^PSKU-\d{6}$/, 20);
+  const problem = !raw ? 'no movement authorization is set (NEXUS_MOVES_UNTIL)' : !Number.isFinite(until) ? 'the movement authorization time is not readable'
+    : !positions ? 'the movement authorization names no positions (NEXUS_MOVES_POSITIONS)' : pallets === false ? 'the movement authorization pallet list is not readable' : null;
+  return { until: Number.isFinite(until) ? until : null, positions: positions || null, pallets: pallets || null, problem };
+}
+/** null when a pallet write naming this pallet and these positions may be sent at this moment; otherwise why not. */
+export function moveAuthorization(env, now, { pallet = null, positions = [], floorCodesOnly = false } = {}) {
+  const w = readMoveWindow(env); const t = now();
+  const no = (error, why) => ({ status: 503, error, message: `${why}. Nothing was sent to Nexus.` });
+  if (w.problem) return no('move_not_authorized', w.problem[0].toUpperCase() + w.problem.slice(1));
+  if (!(t < w.until)) return no('move_window_closed', 'The movement authorization has expired');
+  if (w.until - t > MOVE_WINDOW_MAX_MS) return no('move_not_authorized', 'The movement authorization reaches more than 60 minutes ahead and is not accepted');
+  const p = pallet ? String(pallet).trim().toUpperCase() : null;
+  if (w.pallets && (!p || !w.pallets.includes(p))) return no('move_out_of_scope', `${p || 'This pallet'} is not covered by the movement authorization`);
+  // floorCodesOnly (the early check, on what was scanned): a code that is not a shared floor position is left to ShipBay's own rule,
+  // which refuses it before anything is written; the check before each request to Nexus always covers every position
+  for (const x of positions.map(pos).filter(Boolean)) if (!(floorCodesOnly && !/^(P|STG)-\d{2}$/.test(x)) && !w.positions.includes(x)) return no('move_out_of_scope', `${x} is not covered by the movement authorization`);
+  return null;
+}
+function windowStatus(env, now) {
+  const w = readMoveWindow(env); const t = now(); const left = w.until === null ? 0 : Math.floor((w.until - t) / 1000);
+  return { open: !w.problem && left > 0 && w.until - t <= MOVE_WINDOW_MAX_MS, closes_at: w.until === null ? null : new Date(w.until).toISOString(), seconds_left: Math.max(0, left), positions: w.positions, pallets: w.pallets, problem: w.problem };
+}
 const hostOf = (u) => { try { return new URL(String(u)).host; } catch { return ''; } };
 
 const no = (status, error, message) => ({ ok: false, status, error, message });
@@ -35,9 +74,11 @@ export function readConfig(env = {}) {
 }
 
 /** Calls to Nexus. status 0 means no answer arrived (network failure or timeout): the request may or may not have been applied. */
-export function nexusClient(cfg, fetchImpl, { timeoutMs = 8000, now = Date.now } = {}) {
+export function nexusClient(cfg, fetchImpl, { timeoutMs = 8000, now = Date.now, guardWrite = () => ({ error: 'move_not_authorized' }) } = {}) {
   let floorAt = 0;
   async function call(method, path, { body, idem, lose } = {}) {
+    // last line of defence: no pallet write leaves this client unless the movement authorization covers it at this moment
+    if (method !== 'GET' && path.startsWith('/v1/pallets')) { const stop = guardWrite(path, body || {}); if (stop) throw new Error(`pallet write blocked here: ${stop.error}`); }
     const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), timeoutMs);
     try {
       const r = await fetchImpl(cfg.base + path, { method, signal: ctl.signal, body: body ? JSON.stringify(body) : undefined,
@@ -75,7 +116,7 @@ export function makeBridge({ env, fetchImpl, db, routes, now = Date.now, timeout
     const send = (body, status = 200) => json(body, status, cors); const fail = (status, error, message, extra = {}) => send({ ok: false, error, message, ...extra }, status);
     const path = url.pathname.replace(/^.*\/nexus-bridge/, '').replace(/\/+$/, '') || '/';
     const cfg = readConfig(env);
-    if (req.method === 'GET' && path === '/status') return send({ ok: true, connection: cfg.ok ? cfg.mode : 'off', reason: cfg.ok ? null : cfg.error, floor: cfg.ok ? cfg.floor : null, pallet_moves: !!cfg.palletMoves, registry_writes: !!cfg.registryWrites, calendar_writes: !!cfg.calendarWrites, test_faults: !!cfg.testFaults });
+    if (req.method === 'GET' && path === '/status') return send({ ok: true, connection: cfg.ok ? cfg.mode : 'off', reason: cfg.ok ? null : cfg.error, floor: cfg.ok ? cfg.floor : null, pallet_moves: !!cfg.palletMoves, registry_writes: !!cfg.registryWrites, calendar_writes: !!cfg.calendarWrites, test_faults: !!cfg.testFaults, move_window: windowStatus(env, now) });
     if (!cfg.ok) return fail(cfg.status, cfg.error, cfg.message);
     const token = (req.headers.get('authorization') || '').match(/^Bearer\s+(\S+)$/i)?.[1];
     if (!token) return fail(401, 'sign_in', 'Sign in to the WMS first.');
@@ -97,8 +138,9 @@ export function makeBridge({ env, fetchImpl, db, routes, now = Date.now, timeout
       try { body = text ? JSON.parse(text) : {}; } catch { return fail(400, 'bad_request', 'The request is not valid JSON.'); }
       if (!body || typeof body !== 'object' || Array.isArray(body)) return fail(400, 'bad_request', 'The request is a JSON object.');
     }
-    nx = nx || nexusClient(cfg, fetchImpl, { timeoutMs, now });
-    try { return await route.run({ cfg, nx, user, service: db.service, body, query: url.searchParams, send, fail, now, fault }); }
+    nx = nx || nexusClient(cfg, fetchImpl, { timeoutMs, now, guardWrite: (_p, b) => (readConfig(env).palletMoves ? moveAuthorization(env, now, { pallet: b.pallet, positions: [b.to, b.from] }) : { error: 'pallet_moves_off' }) });
+    const authorize = (scope) => moveAuthorization(env, now, scope);
+    try { return await route.run({ cfg, nx, user, service: db.service, body, query: url.searchParams, send, fail, now, fault, authorize }); }
     catch { return fail(500, 'bridge_error', 'The request could not be completed. Nothing further was sent.'); }   // the cause is not returned or logged
   };
 }

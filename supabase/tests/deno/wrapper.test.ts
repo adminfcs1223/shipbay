@@ -67,7 +67,7 @@ globalThis.fetch = (async (input: any, init: any = {}) => {
 
 // --- the function itself, exactly as deployed ---
 for (const [k, v] of Object.entries({ SUPABASE_URL: 'http://127.0.0.1:54391', SUPABASE_ANON_KEY: ANON, SUPABASE_SERVICE_ROLE_KEY: SERVICE, NEXUS_BRIDGE_MODE: 'staging', NEXUS_STAGING_API_KEY: NEXUS_KEY,
-  NEXUS_PALLET_MOVES: 'on', BRIDGE_ALLOWED_ORIGINS: 'https://wms-dev.example.test', DENO_SERVE_ADDRESS: 'tcp:127.0.0.1:54392' })) Deno.env.set(k, v);
+  NEXUS_PALLET_MOVES: 'on', NEXUS_MOVES_UNTIL: new Date(Date.now() + 50 * 60000).toISOString(), NEXUS_MOVES_POSITIONS: Array.from({ length: 66 }, (_, i) => 'P-' + String(i + 1).padStart(2, '0')).concat(['STG-01', 'STG-02']).join(), BRIDGE_ALLOWED_ORIGINS: 'https://wms-dev.example.test', DENO_SERVE_ADDRESS: 'tcp:127.0.0.1:54392' })) Deno.env.set(k, v);
 await import('../../functions/nexus-bridge/index.ts');
 const BASE = 'http://127.0.0.1:54392/functions/v1/nexus-bridge';
 async function call(who: string | null, method: string, path: string, body?: unknown, headers: Record<string, string> = {}, base = BASE) {

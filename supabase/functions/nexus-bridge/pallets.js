@@ -14,6 +14,10 @@ const where = (op) => op.to || op.from;
 
 async function send(ctx, op) {
   const { nx, service } = ctx;
+  // checked again at the last moment. A refusal here leaves ShipBay's journal exactly as it is (the request may have been sent
+  // before, with its answer lost, so it is never marked refused here): it waits until a new authorization covers it.
+  const stop = ctx.authorize({ pallet: op.pallet, positions: [op.to, op.from] });
+  if (stop) return { status: stop.status, body: { ok: false, error: stop.error, op: op.op, waiting: true, message: `${stop.message} The request for ${op.pallet} at ${where(op)} stays waiting in ShipBay.` } };
   const lose = !!(ctx.fault && ctx.fault.lose); if (lose) ctx.fault.lose = false;   // a test fault drops one answer, once (see core.js)
   const r = await nx.call('POST', `/v1/pallets/${op.kind}`, { idem: op.key, body: nexusBody(op), lose });
   if (r.status === 200 && r.body.ok) {
@@ -36,15 +40,16 @@ async function send(ctx, op) {
 }
 
 // before any write: the switch is on and Nexus itself says this key is bound to the expected floor
-async function ready(ctx) {
+async function ready(ctx, scope = {}) {
   if (!ctx.cfg.palletMoves) return ctx.fail(503, 'pallet_moves_off', 'Placing and releasing pallets through Nexus is switched off here.');
+  const stop = ctx.authorize({ ...scope, floorCodesOnly: true }); if (stop) return ctx.fail(stop.status, stop.error, stop.message);
   const floor = await ctx.nx.floorIsExpected();
   if (floor === null) return ctx.fail(503, 'nexus_no_answer', 'Nexus did not answer. Nothing was changed. Try again.');
   if (!floor) return ctx.fail(502, 'not_the_expected_floor', 'ShipBay\'s Nexus key is not bound to the floor this build expects. Nothing was sent.');
   return null;
 }
-async function request(ctx, fn, args) {
-  const stop = await ready(ctx); if (stop) return stop;
+async function request(ctx, fn, args, scope) {
+  const stop = await ready(ctx, scope); if (stop) return stop;
   let op; try { op = await ctx.user.rpc(fn, args); } catch (e) { return ctx.fail(409, 'refused_by_shipbay', String(e?.message || 'ShipBay refused the request.')); }
   const r = await send(ctx, op); return ctx.send(r.body, r.status);
 }
@@ -78,13 +83,13 @@ export function registrySnapshot(map) {
 }
 
 export const palletRoutes = [
-  { method: 'POST', match: /^\/putaway$/, run: (ctx) => { const s = scans(ctx); return s ? request(ctx, 'wms_putaway_begin', { p_psku: s.psku, p_location: s.location }) : ctx.fail(400, 'bad_request', 'Scan the pallet label and the position.'); } },
-  { method: 'POST', match: /^\/move$/, run: (ctx) => { const s = scans(ctx); return s ? request(ctx, 'wms_move_begin', { p_psku: s.psku, p_location: s.location }) : ctx.fail(400, 'bad_request', 'Scan the pallet label and the position.'); } },
+  { method: 'POST', match: /^\/putaway$/, run: (ctx) => { const s = scans(ctx); return s ? request(ctx, 'wms_putaway_begin', { p_psku: s.psku, p_location: s.location }, { pallet: s.psku, positions: [s.location] }) : ctx.fail(400, 'bad_request', 'Scan the pallet label and the position.'); } },
+  { method: 'POST', match: /^\/move$/, run: (ctx) => { const s = scans(ctx); return s ? request(ctx, 'wms_move_begin', { p_psku: s.psku, p_location: s.location }, { pallet: s.psku, positions: [s.location] }) : ctx.fail(400, 'bad_request', 'Scan the pallet label and the position.'); } },
   // Explicit release: a person at the position states the pallet is no longer standing there, and says why it left.
   { method: 'POST', match: /^\/release$/, run: (ctx) => { const s = scans(ctx);
     if (!s) return ctx.fail(400, 'bad_request', 'Give the pallet and the position it left.');
     if (ctx.body.confirmed !== true) return ctx.fail(400, 'not_confirmed', 'Confirm at the position that the pallet is no longer standing there.');
-    return request(ctx, 'wms_release_begin', { p_psku: s.psku, p_location: s.location, p_reason: clean(ctx.body.reason), p_confirmed: true }); } },
+    return request(ctx, 'wms_release_begin', { p_psku: s.psku, p_location: s.location, p_reason: clean(ctx.body.reason), p_confirmed: true }, { pallet: s.psku, positions: [s.location] }); } },
   // What Nexus says about the floor, for the put-away screen: each position's capacity, how many stand there, which companies, and ShipBay's own pallet ids. Nexus gives no other company's ids.
   { method: 'GET', match: /^\/floor$/, run: async ({ nx, send: out, fail }) => {
     const [m, o] = await Promise.all([nx.call('GET', '/v1/map'), nx.call('GET', '/v1/occupancy')]);

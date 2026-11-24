@@ -87,7 +87,7 @@ globalThis.fetch = (async (input: any, init: any = {}) => {
 }) as typeof fetch;
 
 // --- the deployed bridge, exactly as deployed, and the runner in front of it ---
-const ENV: Record<string, string> = { SUPABASE_URL: 'https://gdoaonsasbsperqjuurm.supabase.co', SUPABASE_ANON_KEY: ANON, SUPABASE_SERVICE_ROLE_KEY: SERVICE, NEXUS_BRIDGE_MODE: 'staging', NEXUS_STAGING_API_KEY: NEXUS_KEY, NEXUS_PALLET_MOVES: 'on', NEXUS_TEST_FAULTS: 'on', DENO_SERVE_ADDRESS: 'tcp:127.0.0.1:54392' };
+const ENV: Record<string, string> = { SUPABASE_URL: 'https://gdoaonsasbsperqjuurm.supabase.co', SUPABASE_ANON_KEY: ANON, SUPABASE_SERVICE_ROLE_KEY: SERVICE, NEXUS_BRIDGE_MODE: 'staging', NEXUS_STAGING_API_KEY: NEXUS_KEY, NEXUS_PALLET_MOVES: 'on', NEXUS_MOVES_UNTIL: new Date(Date.now() + 50 * 60000).toISOString(), NEXUS_MOVES_POSITIONS: Array.from({ length: 66 }, (_, i) => 'P-' + String(i + 1).padStart(2, '0')).concat(['STG-01', 'STG-02']).join(), NEXUS_TEST_FAULTS: 'on', DENO_SERVE_ADDRESS: 'tcp:127.0.0.1:54392' };
 for (const [k, v] of Object.entries(ENV)) Deno.env.set(k, v);
 await import('../../functions/nexus-bridge/index.ts');
 const BRIDGE = 'http://127.0.0.1:54392/functions/v1/nexus-bridge';
@@ -153,7 +153,7 @@ Deno.test('the MVP rehearsal through the runner: answered when done, P-01..P-03 
   // the same bridge code, wired exactly as index.ts wires it, with the settings Derek would leave for the MVP run (test faults off)
   const { makeBridge } = await import('../../functions/nexus-bridge/core.js'); const { calendarRoutes } = await import('../../functions/nexus-bridge/calendar.js');
   const { palletRoutes } = await import('../../functions/nexus-bridge/pallets.js'); const { postgrest } = await import('../../functions/nexus-bridge/postgrest.js');
-  const env2: Record<string, string> = { ...ENV, NEXUS_TEST_FAULTS: '' };
+  const env2: Record<string, string> = { ...ENV, NEXUS_TEST_FAULTS: '', NEXUS_MOVES_POSITIONS: 'P-50' };
   const second = Deno.serve({ port: 54393, hostname: '127.0.0.1', onListen: () => {} }, makeBridge({ env: env2, fetchImpl: fetch, routes: [...calendarRoutes, ...palletRoutes], db: postgrest({ url: env2.SUPABASE_URL, anonKey: env2.SUPABASE_ANON_KEY, serviceKey: env2.SUPABASE_SERVICE_ROLE_KEY }) }) as any);
   bridgePort = 54393;
   try {
