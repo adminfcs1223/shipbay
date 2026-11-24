@@ -88,3 +88,14 @@ only to the isolated development database `gdoaonsasbsperqjuurm`. Nothing below 
   - The client login still sees 0 rows of the other brand.
 - Not provable from here: a real Auth insert (the `postgres` role cannot act as `supabase_auth_admin`). Derek's retry is the
   live test; the Auth and Postgres logs are read afterwards.
+- 16:37:47Z: an admin created the login xavier.delmonte24@gmail.com in the dashboard. Auth logged it as `user_signedup` by
+  `service_role`, which is the live proof that dev_039 works. Its profile was the default (`client_user`, no brand). The WMS
+  refused it ("isn't set up for the WMS"), because `WMS_ROLES` and `is_wms_staff()` accept only shipbay_admin, shipbay_staff
+  and wms_employee.
+- 16:4xZ: one-row update, `profiles.role = 'shipbay_admin'` for id 937a699a-…. Nothing else changed: `org_id` stays null,
+  `is_owner` false, `is_sales` false.
+  - Read as that login afterwards: `is_wms_staff` true, `is_shipbay` true, owner false; 2 brands, 6 products, 9 pallets;
+    `wms_today` and `wms_stock_summary` answer.
+  - The four synthetic logins and their profiles are unchanged (md5 5735979e).
+- The WMS Derek opened is https://sparkling-tartufo-ab3928.netlify.app. It serves this build (the dev notice shows), but it
+  is not one of the team's sites, so it does not require a Netlify team login.
