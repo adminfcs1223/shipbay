@@ -5,7 +5,9 @@ environment only. The core described here is frozen. Nothing else in this file i
 development, and no change to production. The next phase (individual feature improvements, controlled Nexus integration)
 starts from this baseline. Nexus movement switches stay off until Derek approves them separately.
 
-Git tag: `core-mvp-dev-2026-11-24` (branch `wms-nexus-bridge`, github.com/adminfcs1223/shipbay).
+Freeze point: commit **fa557ce**, published as branch `freeze/core-mvp-dev-2026-11-24` on github.com/adminfcs1223/shipbay
+(this workspace cannot push tags; to tag it on GitHub: `git tag core-mvp-dev-2026-11-24 fa557ce && git push origin core-mvp-dev-2026-11-24`).
+Do not commit to the freeze branch; new work continues on `wms-nexus-bridge` or feature branches.
 
 ## 1. What is frozen
 
@@ -22,7 +24,7 @@ Build flags of the dev builds: WMS `VITE_NEXUS_BRIDGE=on`, `VITE_ALLOW_UNBOOKED=
 build refuses output that names production, the production key, the production WMS or carrier/store hosts.
 
 Rebuild either app exactly:
-`git checkout core-mvp-dev-2026-11-24 && OWNER_WMS_URL=https://sparkling-tartufo-ab3928.netlify.app OWNER_PORTAL_URL=https://gentle-queijadas-2bc8a5.netlify.app supabase/dev/owner-build.sh /tmp/owner-build`
+`git checkout freeze/core-mvp-dev-2026-11-24 && OWNER_WMS_URL=https://sparkling-tartufo-ab3928.netlify.app OWNER_PORTAL_URL=https://gentle-queijadas-2bc8a5.netlify.app supabase/dev/owner-build.sh /tmp/owner-build`
 then zip `/tmp/owner-build/portal` (or `/wms`) and upload it to the matching Netlify site.
 
 ## 2. Database changes on dev (supabase/dev/pending)
