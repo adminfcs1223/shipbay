@@ -10,6 +10,9 @@ const day = (d) => (d ? new Date(d.length === 10 ? `${d}T12:00:00` : d).toLocale
 const when = (d) => (d ? new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—');
 const PALLET = { open: ['Being counted in', 'warn'], counted: ['Counted, going to its position', 'warn'], stored: ['Put away', 'ok'], received: ['Received', 'ok'] };
 const PROBLEM = { missing: 'Not at the location', short: 'Short', other: 'Other' };
+// An order is open while the warehouse still owes it work: the same statuses the database counts as open orders
+// (wms_stock_summary 'on_open_orders'). Shipped and cancelled orders are finished whether or not the program closed them.
+const OPEN_STATUSES = ['new', 'on_hold', 'backordered', 'picked', 'packed'];
 const TABS = [['orders', 'Orders'], ['stock', 'Stock'], ['pallets', 'Pallets'], ['problems', 'Problems'], ['deliveries', 'Deliveries'], ['connection', 'Connection']];
 
 export default function ClientWarehouse({ me, title, onChanged }) {
@@ -33,10 +36,11 @@ export default function ClientWarehouse({ me, title, onChanged }) {
 
   const orders = useMemo(() => (d?.orders || []).map((o) => {
     const lines = o.order_lines || []; const picked = lines.filter((l) => l.picked_at).length;
-    const stage = o.closed_at ? ['Closed', 'muted'] : o.status === 'picked' ? ['Ready to pack', 'ok'] : picked > 0 ? [`Being picked · ${picked} of ${lines.length}`, 'warn'] : ['Waiting to be picked', 'navy'];
-    return { ...o, lines, stage };
+    const stage = o.status === 'shipped' ? ['Shipped', 'ok'] : o.status === 'cancelled' ? ['Cancelled', 'muted'] : o.closed_at ? ['Closed', 'muted']
+      : o.status === 'packed' ? ['Packed', 'ok'] : o.status === 'picked' ? ['Ready to pack', 'ok'] : picked > 0 ? [`Being picked · ${picked} of ${lines.length}`, 'warn'] : ['Waiting to be picked', 'navy'];
+    return { ...o, lines, stage, isOpen: !o.closed_at && OPEN_STATUSES.includes(o.status) };
   }), [d]);
-  const open = orders.filter((o) => !o.closed_at); const openProblems = (d?.problems || []).filter((p) => !p.resolved_at);
+  const open = orders.filter((o) => o.isOpen); const openProblems = (d?.problems || []).filter((p) => !p.resolved_at);
   const orderNo = (id) => orders.find((o) => o.id === id)?.order_number || '';
   const stock = (d?.stock || []).filter((s) => s.active !== false);
 
