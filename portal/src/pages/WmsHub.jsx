@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib';
 import ClientWarehouse from './ClientWarehouse';
 
-const WMS_URL = 'https://wmsshipbay.netlify.app';
+import { WMS_URL } from './WmsWindow';   // the build's own WMS (VITE_WMS_URL), production by default
 const num = (n) => Number(n || 0).toLocaleString('en-US');
 const plural = (n, w) => `${num(n)} ${w}${Number(n) === 1 ? '' : 's'}`;
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

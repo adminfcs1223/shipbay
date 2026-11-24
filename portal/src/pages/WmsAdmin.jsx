@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib';
 
-const WMS_HOST = 'https://wmsshipbay.netlify.app';
+import { WMS_URL as WMS_HOST } from './WmsWindow';   // the build's own WMS (VITE_WMS_URL), production by default
 
 export function Connector({ orgs, say }) {
   const [keys, setKeys] = useState(null); const [brands, setBrands] = useState(null);

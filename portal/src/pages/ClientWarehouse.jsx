@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib';
 
-const WMS_HOST = 'https://wmsshipbay.netlify.app';
+import { WMS_URL as WMS_HOST } from './WmsWindow';   // the build's own WMS (VITE_WMS_URL), production by default
 const num = (n) => Number(n || 0).toLocaleString('en-US');
 const day = (d) => (d ? new Date(d.length === 10 ? `${d}T12:00:00` : d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '—');
 const when = (d) => (d ? new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—');

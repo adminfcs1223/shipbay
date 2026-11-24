@@ -56,3 +56,20 @@ only to the isolated development database `gdoaonsasbsperqjuurm`. Nothing below 
   Options:
   - deploy `labels` to dev with no carrier credentials, after a review that it cannot buy without them; or
   - leave shipping out of the owner trial.
+
+## Status 2026-11-24 11:20 ET (limited authorization of 11:06)
+- Netlify sites created, empty, on the existing Pro team: `shipbay-wms-dev` (33350b55…) and `shipbay-portal-dev` (25f2d276…).
+  The team's visitor access requires a Netlify team login for every project, so only team members can open them.
+- Final builds: `OWNER_WMS_URL=https://shipbay-wms-dev.netlify.app supabase/dev/owner-build.sh <out>`.
+  - The portal's WMS links now follow the build's WMS (`WmsHub`, `ClientWarehouse`, `WmsAdmin` read `WMS_URL` from
+    `WmsWindow`; the production build is unchanged).
+  - The build refuses the production WMS address.
+  - A fixed development notice lists what does not work.
+- Auth: public sign-up was already off (`disable_signup: true`). dev_038 lets Auth's admin path create a login that is
+  already confirmed; a sign-up is still refused. The owner's login is created by Derek in the dashboard (Add user, Auto
+  Confirm, password typed there). Claude then sets its profile to `shipbay_admin`.
+- Isolation, read on dev:
+  - The client login sees 0 rows of the other brand.
+  - A login with no brand sees nothing.
+  - The public key is refused.
+- Not published: this workspace cannot reach Netlify and the browser here cannot upload files. Derek uploads the two zips.
