@@ -10,6 +10,7 @@ import pg from 'npm:pg@8';
 import assert from 'node:assert/strict';
 import { makeRunner } from '../../dev/runner/runner.js';
 import { STAGES, KEEP } from '../hosted/suite.js';
+import { MVP } from '../hosted/mvp.js';
 
 const NX = Deno.env.get('NEXUS_NEUTRAL'); if (!NX) throw new Error('Set NEXUS_NEUTRAL to the extracted neutral/ folder of the nexus-neutral branch.');
 const base = 'postgres://postgres@127.0.0.1:54317';
@@ -39,7 +40,8 @@ async function rpc(fn: string, args: Record<string, unknown>, bearer: string) {
     else { const email = sessions.get(bearer); if (!email) return { status: 401, body: { message: 'JWT invalid' } }; seen.asUser.push(`${email.split('@')[0]}:${fn}`);
       await c.query('set local role authenticated'); await c.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify({ sub: LOGINS[email], role: 'authenticated' })]); }
     const keys = Object.keys(args); const call = `public.${fn}(${keys.map((k, i) => `${k} => $${i + 1}`).join(', ')})`;
-    const vals = keys.map((k) => (args[k] !== null && typeof args[k] === 'object' ? JSON.stringify(args[k]) : args[k]));
+    // a list of plain values goes in as a Postgres array (uuid[]), as PostgREST does; anything else that is an object as JSON
+    const vals = keys.map((k) => { const v: any = args[k]; return Array.isArray(v) && v.every((x) => x === null || typeof x !== 'object') ? v : v !== null && typeof v === 'object' ? JSON.stringify(v) : v; });
     let out: unknown = null;
     try { await c.query('savepoint s'); out = (await c.query(`select to_jsonb(x) r from ${call} x`, vals)).rows[0]?.r ?? null; }
     catch (e: any) { if (!/void/.test(String(e.message))) throw e; await c.query('rollback to savepoint s'); await c.query(`select ${call}`, vals); }
@@ -52,18 +54,33 @@ const supa = Deno.serve({ port: 54391, hostname: '127.0.0.1', onListen: () => {}
   if (p === '/auth/v1/admin/generate_link') { if (bearer !== SERVICE) return reply({}, 401); const { email, type } = await req.json(); if (type !== 'magiclink' || !LOGINS[email]) return reply({}, 400); const h = rnd(); links.set(h, email); return reply({ hashed_token: h }); }
   if (p === '/auth/v1/verify') { const { token_hash } = await req.json(); const email = links.get(token_hash); if (!email) return reply({}, 403); links.delete(token_hash); const t = `tok.${rnd()}${rnd()}`; sessions.set(t, email); seen.issued++; return reply({ access_token: t }); }
   if (p === '/auth/v1/user') { const email = sessions.get(bearer); return email ? reply({ id: LOGINS[email], email, role: 'authenticated' }) : reply({}, 401); }
+  // the two table requests the MVP step makes (product lookup/insert, order cancel), as the signed-in login with row security
+  if (p === '/rest/v1/skus' || p === '/rest/v1/orders') {
+    const email = sessions.get(bearer); if (!email) return reply({ message: 'JWT invalid' }, 401); const q = new URL(req.url).searchParams; const eq = (k: string) => (q.get(k) || '').replace(/^eq\./, '');
+    const c = await db.connect();
+    try {
+      await c.query('begin'); await c.query('set local role authenticated'); await c.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify({ sub: LOGINS[email], role: 'authenticated' })]);
+      seen.asUser.push(`${email.split('@')[0]}:${req.method} ${p}`); let rows: unknown[];
+      if (p === '/rest/v1/skus' && req.method === 'GET') rows = (await c.query('select id, sku, org_id from skus where org_id = $1 and sku = $2', [eq('org_id'), eq('sku')])).rows;
+      else if (p === '/rest/v1/skus' && req.method === 'POST') { const b = await req.json(); rows = (await c.query('insert into skus (org_id, sku, name, barcode) values ($1, $2, $3, $4) returning id, sku, org_id', [b.org_id, b.sku, b.name, b.barcode])).rows; }
+      else if (p === '/rest/v1/orders' && req.method === 'PATCH') { const b = await req.json(); if (Object.keys(b).join() !== 'status') throw new Error('unsupported'); rows = (await c.query('update orders set status = $2 where id = $1 returning id, status', [eq('id'), b.status])).rows; }
+      else { await c.query('rollback'); return reply({}, 405); }
+      await c.query('commit'); return reply(rows, req.method === 'POST' ? 201 : 200);
+    } catch (e: any) { await c.query('rollback').catch(() => {}); return reply({ message: String(e.message) }, 400); } finally { c.release(); }
+  }
   const fn = p.match(/^\/rest\/v1\/rpc\/([a-z_]+)$/)?.[1]; if (!fn) return reply({}, 404);
   const r = await rpc(fn, await req.json(), bearer); return reply(r.body, r.status);
 });
 
 // --- the only way out of this process: 127.0.0.1, or the fixed staging address answered by the real Nexus code ---
 const out = { posts: [] as string[] };
+let bridgePort = 54392;   // the MVP case switches to a second copy of the bridge with test faults off (54393)
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init: any = {}) => {
   const url = new URL(typeof input === 'string' ? input : input.url);
   if (url.hostname === '127.0.0.1') return realFetch(input, init);
   // the dev project's address is answered locally: its bridge function by the real index.ts, everything else by the stand-in
-  if (url.hostname === 'gdoaonsasbsperqjuurm.supabase.co') return realFetch(`http://127.0.0.1:${url.pathname.startsWith('/functions/v1/nexus-bridge') ? 54392 : 54391}${url.pathname}${url.search}`, init);
+  if (url.hostname === 'gdoaonsasbsperqjuurm.supabase.co') return realFetch(`http://127.0.0.1:${url.pathname.startsWith('/functions/v1/nexus-bridge') ? bridgePort : 54391}${url.pathname}${url.search}`, init);
   if (url.hostname !== 'ankoqruedjujyefhrmtw.supabase.co' || !url.pathname.startsWith('/functions/v1/nexus/')) throw new Error(`UNEXPECTED OUTBOUND CALL to ${url.hostname}`);
   const path = url.pathname.replace('/functions/v1/nexus', ''); if (init.method === 'POST') out.posts.push(`${path} ${init.body}`);
   return nexus(new Request(`http://nexus.local${path}${url.search}`, { method: init.method, headers: init.headers, body: init.body }));
@@ -124,6 +141,33 @@ Deno.test('who did what: floor rules as the signed-in login, recording as the br
   // the platform refused the 31st call from one function to another inside one request (observed 2026-11-23): keep every stage well under it
   for (const [stage, t] of Object.entries(totals)) { const c = (t as any)[3]; assert.ok(c.deployed + c.lossy <= 25, `${stage} makes ${c.deployed + c.lossy} calls to the bridge; the limit kept here is 25`); }
   console.log('per stage [passed, failed, writes sent, calls]:', JSON.stringify(totals));
+});
+
+Deno.test('the MVP rehearsal through the runner: answered when done, P-01..P-03 refused, nothing stored or leaked, a second run sends nothing', opt, async () => {
+  for (const p of ['P-01', 'P-02', 'P-03', 'P-30']) { const r = await get(runner, `?t=${TOKEN}&stage=mvp&position=${p}`); assert.deepEqual([r.status, r.ok, r.error, r.writes_sent], [200, false, 'position_refused', 0], p); }
+  assert.deepEqual((await get(runner, `?t=${TOKEN}&stage=mvp&until=everything`)).status, 400);
+  // this test bridge runs with test faults on (the movement stages need them); the MVP step refuses that, sending nothing
+  const n0 = out.posts.length; const refused = await get(runner, `?t=${TOKEN}&stage=mvp`);
+  assert.deepEqual([refused.ok, refused.writes_sent, out.posts.length], [false, 0, n0]); assert.match(refused.stopped_at, /^switches set by hand/);
+  assert.match(refused.notes.at(-1), /The runner cannot turn them off/);
+  // the same bridge code, wired exactly as index.ts wires it, with the settings Derek would leave for the MVP run (test faults off)
+  const { makeBridge } = await import('../../functions/nexus-bridge/core.js'); const { calendarRoutes } = await import('../../functions/nexus-bridge/calendar.js');
+  const { palletRoutes } = await import('../../functions/nexus-bridge/pallets.js'); const { postgrest } = await import('../../functions/nexus-bridge/postgrest.js');
+  const env2: Record<string, string> = { ...ENV, NEXUS_TEST_FAULTS: '' };
+  const second = Deno.serve({ port: 54393, hostname: '127.0.0.1', onListen: () => {} }, makeBridge({ env: env2, fetchImpl: fetch, routes: [...calendarRoutes, ...palletRoutes], db: postgrest({ url: env2.SUPABASE_URL, anonKey: env2.SUPABASE_ANON_KEY, serviceKey: env2.SUPABASE_SERVICE_ROLE_KEY }) }) as any);
+  bridgePort = 54393;
+  try {
+    const r = await get(runner, `?t=${TOKEN}&stage=mvp`); const failed = (r.checks || []).filter((c: any) => !c.pass);
+    assert.deepEqual(r.ok, true, `${r.stopped_at} ${r.error || ''} ${r.message || ''}\n${failed.map((c: any) => `${c.name}\n  got  ${c.got}\n  want ${c.want}`).join('\n')}\n${(r.notes || []).join('\n')}`);
+    assert.deepEqual([r.pallet && r.position, r.writes_sent, r.switches_at_end.pallet_moves], ['P-50', 3, true]);
+    assert.ok(r.calls.deployed + r.calls.lossy <= 25, `the MVP step makes ${r.calls.deployed + r.calls.lossy} calls to the bridge; the limit kept here is 25`);
+    for (const k of secrets()) assert.ok(!r.text.includes(k), 'no key or token in the result');
+    const mvpPosts = out.posts.slice(n0); assert.equal(mvpPosts.length, 2, mvpPosts.join('\n')); assert.ok(mvpPosts.every((x) => x.includes(r.pallet) && !/PSKU-000001|"P-0[123]"/.test(x)));
+    assert.ok(seen.asUser.includes('test-admin:POST /rest/v1/skus') && seen.asUser.includes('test-admin:PATCH /rest/v1/orders') && seen.asUser.includes('test-admin:ship_order') && seen.asUser.includes('test-floor:wms_wave_pack'));
+    const again = await get(runner, `?t=${TOKEN}&stage=mvp`); assert.deepEqual([again.ok, again.writes_sent, out.posts.length], [true, 0, n0 + 2], 'run again: nothing more to do');
+    const stored = await db.query(`select count(*)::int n from dev_runner_runs where stage not in (${STAGES.map((x) => `'${x}'`).join(',')})`); assert.equal(stored.rows[0].n, 0, 'the MVP step records nothing in the movement run table');
+    console.log(`MVP through the runner: ${r.passed} checks, ${r.writes_sent} writes, ${r.calls.deployed} bridge calls, ${r.calls.rpc} database calls, ${r.elapsed_ms} ms; ${MVP.sku}`);
+  } finally { bridgePort = 54392; await second.shutdown(); }
 });
 
 Deno.test({ name: 'close', ...opt, fn: async () => { await supa.shutdown(); await ndb.end(); await db.query('drop database if exists nexus_runner_test').catch(() => {}); await db.end(); setTimeout(() => Deno.exit(0), 50); } });

@@ -15,9 +15,15 @@
 // Lost answers are produced by the DEPLOYED bridge itself (its dev-only NEXUS_TEST_FAULTS setting, asked for with the header
 // x-nexus-test-fault: lose-answer on a signed-in staff request). This runner holds no bridge code and never reads the Nexus key.
 //
+// The MVP rehearsal (supabase/dev/MVP-REHEARSAL.md):  GET ?t=<token>&stage=mvp[&position=P-49][&until=preflight|receive|putaway]
+//   runs tests/hosted/mvp.js against the deployed bridge and answers with the result when it is done (no dev_runner_begin /
+//   dev_runner_finish: those accept only the nine movement stages, and the MVP step is written to be run again safely after a
+//   stop, so nothing here needs a schema change). Lost-answer faults are never asked for. It cannot change any switch.
+//
 // It never logs, returns or stores a key or a token: the result is searched for every secret it handled before it leaves.
 import { postgrest } from '../../functions/nexus-bridge/postgrest.js';
 import { runStage, STAGES } from '../../tests/hosted/suite.js';
+import { runMvp } from '../../tests/hosted/mvp.js';
 
 export const DEV_HOST = 'gdoaonsasbsperqjuurm.supabase.co';
 const PRODUCTION_DB_REF = 'poxlczzkpztmoiixyrth';
@@ -67,7 +73,21 @@ export function makeRunner({ env, fetchImpl, gate, defer = (_work) => {}, now = 
     const call = (who, method, path, body) => { count.deployed++; return send(who, method, path, body); };
     // the same deployed bridge, asked to drop Nexus's answer to this one write (it says so in its reply)
     const lossy = async (who, method, path, body) => { count.lossy++; const r = await send(who, method, path, body, { [FAULT_HEADER]: 'lose-answer' }); return { ...r, lost: r.test_fault === 'answer_lost' }; };
-    return { call, lossy, rpc: (who, fn, args) => { count.rpc++; return db.user(bearer(who)).rpc(fn, args); },
+    // two table steps the MVP rehearsal takes as the signed-in login (row security applies), over the same REST interface
+    const table = async (who, method, path, body) => { count.rpc++;
+      const r = await fetchImpl(`${url}/rest/v1/${path}`, { method, headers: { ...headers(who, body), ...(method === 'GET' ? {} : { prefer: 'return=representation' }) }, body: body ? JSON.stringify(body) : undefined });
+      const text = await r.text(); let j = null; try { j = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
+      if (!r.ok) throw new Error((j && typeof j.message === 'string' && j.message) || `The database refused the request (${r.status}).`); return j; };
+    const uuid = (v) => { if (!/^[0-9a-f-]{36}$/.test(String(v))) throw new Error('not an id'); return v; };
+    const product = async (who, row) => {
+      const have = await table(who, 'GET', `skus?select=id,sku,org_id&org_id=eq.${uuid(row.org_id)}&sku=eq.${encodeURIComponent(row.sku)}`);
+      if (!Array.isArray(have) || have.length > 1) throw new Error('The product list could not be read.'); if (have.length === 1) return have[0];
+      const made = await table(who, 'POST', 'skus?select=id,sku,org_id', { org_id: row.org_id, sku: row.sku, name: row.name, barcode: row.barcode });
+      if (!Array.isArray(made) || made.length !== 1) throw new Error('The product was not created.'); return made[0]; };
+    const cancelOrder = async (who, id) => {
+      const r = await table(who, 'PATCH', `orders?id=eq.${uuid(id)}&select=id,status`, { status: 'cancelled' });
+      if (!Array.isArray(r) || r.length !== 1 || r[0].status !== 'cancelled') throw new Error('The cancel did not change exactly one order.'); };
+    return { call, lossy, product, cancelOrder, rpc: (who, fn, args) => { count.rpc++; return db.user(bearer(who)).rpc(fn, args); },
       snapshot: () => db.service.rpc('dev_movement_snapshot', {}), faultHold: (psku, reason) => db.service.rpc('dev_fault_hold', { p_psku: psku, p_reason: reason }) };
   }
 
@@ -79,6 +99,17 @@ export function makeRunner({ env, fetchImpl, gate, defer = (_work) => {}, now = 
     if (host !== DEV_HOST || url.includes(PRODUCTION_DB_REF) || !anonKey || !serviceKey) return json({ ok: false, error: 'not_the_dev_database', message: 'This runner only works on shipbay-nexus-dev. Nothing was done.' }, 503);
 
     if (u.searchParams.has('read')) { try { return json({ ok: true, runs: await db.service.rpc('dev_runner_read', { p_stage: u.searchParams.get('read') || null }) }); } catch (e) { return json({ ok: false, error: 'not_read', message: String(e?.message || e).slice(0, 200) }, 500); } }
+    if (u.searchParams.get('stage') === 'mvp') {
+      const started = now(); const count = { deployed: 0, lossy: 0, rpc: 0 }; const secrets = [serviceKey, anonKey].filter(Boolean); let out;
+      const until = u.searchParams.get('until'); if (until && !['preflight', 'receive', 'putaway'].includes(until)) return json({ ok: false, error: 'unknown_until' }, 400);
+      try {
+        const { tokens, proof } = await signIn(); secrets.push(...Object.values(tokens));
+        const result = await runMvp(makeIo(tokens, count), { position: u.searchParams.get('position') || 'P-50', stopAfter: until || null, faults: false });
+        out = { ...result, sessions: proof, calls: count, elapsed_ms: now() - started };
+      } catch (e) { out = { ok: false, runner: 'mvp', error: 'runner_failed', message: String(e?.message || e).slice(0, 300), calls: count, elapsed_ms: now() - started }; }
+      const text = JSON.stringify(out); if (secrets.some((s) => s.length >= 12 && text.includes(s))) out = { ok: false, runner: 'mvp', error: 'withheld', message: 'The result contained a key or a token and was not returned.' };
+      return json(out);
+    }
     const stage = u.searchParams.get('stage'); if (!STAGES.includes(stage)) return json({ ok: false, error: 'unknown_stage', stages: STAGES }, 400);
     let run; try { run = await db.service.rpc('dev_runner_begin', { p_stage: stage }); } catch (e) { return json({ ok: false, error: 'not_started', message: String(e?.message || e).slice(0, 200) }, 409); }
 
