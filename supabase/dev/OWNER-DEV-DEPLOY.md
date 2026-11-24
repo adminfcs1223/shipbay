@@ -73,3 +73,18 @@ only to the isolated development database `gdoaonsasbsperqjuurm`. Nothing below 
   - A login with no brand sees nothing.
   - The public key is refused.
 - Not published: this workspace cannot reach Netlify and the browser here cannot upload files. Derek uploads the two zips.
+
+## dev_039 applied 2026-11-24 16:37Z (Derek's approval 11:35 ET), shipbay-nexus-dev only
+- The file matched commit 2768139 exactly (sha256 26fb4ddf…). Before applying, dev had triggers `dev_no_signup` and
+  `on_auth_user_created`, with `dev_no_signup` at md5 5724a296 (the dev_038 version).
+- After applying:
+  - Triggers: `dev_admin_created_only` (deferred to commit), `dev_no_signup`, `on_auth_user_created`.
+  - Function fingerprints match the locally tested ones: `dev_no_signup` 591ace2f, `dev_admin_created_only` c1bf189e.
+  - `handle_new_user` and `profiles_guard` are unchanged.
+  - Only `supabase_auth_admin` may execute the new check.
+  - The 4 logins and their profiles are unchanged (md5 5735979e).
+  - Every public table still has row security on.
+  - Auth still reports `disable_signup: true`.
+  - The client login still sees 0 rows of the other brand.
+- Not provable from here: a real Auth insert (the `postgres` role cannot act as `supabase_auth_admin`). Derek's retry is the
+  live test; the Auth and Postgres logs are read afterwards.
