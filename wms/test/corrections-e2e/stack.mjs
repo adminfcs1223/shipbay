@@ -52,6 +52,7 @@ const secret = crypto.randomBytes(32).toString('base64url'); const b64 = (o) => 
 const jwt = (c) => { const h = b64({ alg: 'HS256', typ: 'JWT' }), p = b64({ iss: 'corrections-e2e', exp: Math.floor(Date.now() / 1000) + 3600, ...c }); return `${h}.${p}.${crypto.createHmac('sha256', secret).update(`${h}.${p}`).digest('base64url')}`; };
 const keys = Object.fromEntries(Object.entries(U).map(([k, id]) => [k, jwt({ role: 'authenticated', sub: id, email: `test-${k}@example.test` })]));
 keys.anon = jwt({ role: 'anon' });
+keys.service = jwt({ role: 'service_role' });   // the store-sync test (supabase/tests/deno/sync.test.ts) acts as the Edge Functions' service login
 // a token for the admin's id signed with a DIFFERENT secret: PostgREST must refuse it
 keys.forged = (() => { const h = b64({ alg: 'HS256', typ: 'JWT' }), p = b64({ iss: 'corrections-e2e', exp: Math.floor(Date.now() / 1000) + 3600, role: 'authenticated', sub: U.admin }); return `${h}.${p}.${crypto.createHmac('sha256', crypto.randomBytes(32)).update(`${h}.${p}`).digest('base64url')}`; })();
 fs.writeFileSync(path.join(OUT, 'session.json'), JSON.stringify({ seed: SEED, keys, users: U, org: O, org2: O2, booking: bk, skus: K, pallets }, null, 1), { mode: 0o600 });

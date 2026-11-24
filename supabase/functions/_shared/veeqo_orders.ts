@@ -2,6 +2,7 @@
 // keeps Shopify out of the picture (Steel Horse) this is the single order feed. Main Veeqo API: https://api.veeqo.com
 // (x-api-key). Orders we care about are `awaiting_fulfillment`; `on_hold` lands in the hold tab.
 import { MARKETPLACE_TAGS } from './shopify_orders.ts';
+import { inWarehouseHands, isStale } from './order_lock.ts';
 
 export const VEEQO_API = 'https://api.veeqo.com';
 
@@ -34,7 +35,7 @@ export function statusForVeeqo(o: any): string {
   return 'new';
 }
 
-export async function upsertVeeqoOrder(supabase: any, orgId: string, o: any): Promise<{ id: string; created: boolean }> {
+export async function upsertVeeqoOrder(supabase: any, orgId: string, o: any): Promise<{ id: string; created: boolean; skipped?: 'stale' | 'in_warehouse'; reason?: string; order_number?: string; veeqo_status?: string }> {
   const d = o.deliver_to ?? {};
   const name = [d.first_name, d.last_name].filter(Boolean).join(' ') || d.company || o.customer?.full_name || 'Customer';
   const country = String(d.country ?? 'US').toUpperCase();
@@ -51,9 +52,15 @@ export async function upsertVeeqoOrder(supabase: any, orgId: string, o: any): Pr
     tags: [o.channel?.name, ...tags].filter(Boolean), notes: o.customer_note || o.employee_notes?.map((n: any) => n.text).join(' · ') || null, raw: o,
   };
   const st = statusForVeeqo(o);
-  const { data: existing } = await supabase.from('orders').select('id,status').eq('org_id', orgId).eq('veeqo_order_id', o.id).maybeSingle();
+  const { data: existing, error: exErr } = await supabase.from('orders').select('id,status,order_number,veeqo_updated:raw->>updated_at').eq('org_id', orgId).eq('veeqo_order_id', o.id).maybeSingle();
+  if (exErr) throw exErr;
   let orderId: string; let created = false;
   if (existing) {
+    // a retry or an older event than the one on file changes nothing
+    if (isStale(o.updated_at, existing.veeqo_updated)) return { id: existing.id, created: false, skipped: 'stale' };
+    // the warehouse has started on it: Veeqo changes nothing (not its status, address, units or lines); a person decides
+    const held = await inWarehouseHands(supabase, existing.id, existing.status);
+    if (held) return { id: existing.id, created: false, skipped: 'in_warehouse', reason: held, order_number: existing.order_number, veeqo_status: String(o.status ?? '') };
     const upd: any = { ...base }; delete upd.placed_at;
     // never regress a shipped order; keep the warehouse's picked/packed state unless Veeqo says cancelled or shipped elsewhere
     if (existing.status !== 'shipped' && existing.status !== 'cancelled') {
@@ -83,7 +90,7 @@ export async function upsertVeeqoOrder(supabase: any, orgId: string, o: any): Pr
     const { data: cur } = await supabase.from('order_lines').select('id, veeqo_line_id, qty').eq('order_id', orderId);
     const same = (cur ?? []).length === rows.length && rows.every((r) => (cur ?? []).some((c: any) => String(c.veeqo_line_id) === String(r.veeqo_line_id) && c.qty === r.qty));
     if (same) return { id: orderId, created };
-    await supabase.from('order_lines').delete().eq('order_id', orderId);
+    const { error: delErr } = await supabase.from('order_lines').delete().eq('order_id', orderId); if (delErr) throw delErr;
   }
   if (rows.length) { const { error } = await supabase.from('order_lines').insert(rows); if (error) throw error; }
   return { id: orderId, created };

@@ -1,12 +1,87 @@
 # Hosted movement rehearsal: dev database and bridge ready, screens validated, runner and stages not run
 
-Updated 2026-11-23, 8:30 PM ET (order-integrity candidate prepared and tested locally, NOT applied: next section; ledger hardening is on dev as dev_035). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
+Updated 2026-11-24, 9:45 AM ET (MVP sprint: dev_036 revision 2 and dev_037 tested locally, NOT applied: next section. P-03 hold in force). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
 dev_033 and the manager pick-correction migration dev_034 are applied and verified on `shipbay-nexus-dev`. The three correction forms have now been run in a browser and the
 correction endpoints called over HTTP with real sessions (below). The movement runner is NOT deployed, no switch was set, and
 nothing was sent to Nexus. Production and `main` are untouched.
 
 **Hold (Derek, 2026-11-23 2:30 AM):** the hosted rehearsal does not start yet. Souled's P-02 placement is being prepared and
 Nexus has a destination-safety deployment pending. PSKU-000001 stays at P-01.
+
+## MVP SPRINT (Derek, 2026-11-24 9:15 AM ET): one complete, safe order path. LOCAL candidates only, NOT applied
+
+The P-03 hold stays in force (not released). Nothing applied to hosted dev; no Edge Function, WMS or runner deployed; no
+switch changed; nothing sent to Nexus; production and `main` untouched. Hosted dev was read once (14:34Z) for before-state.
+
+### Audit (run on a local copy of dev with dev_034, dev_035 and dev_036 r1)
+
+| # | Workflow | Before the sprint |
+|---|---|---|
+| 1 | Brand account, isolation | works (client sees 0 rows of the other brand) |
+| 2 | Receive | works; a repeat request makes no second pallet |
+| 3 | Pallet ID | works (PSKU labels, carton codes) |
+| 4 | Nexus positions | works through the journal and bridge; every pallet position is a Nexus position, so storing a pallet on hosted needs the bridge switches (held off) |
+| 5 | Available / reserved / fulfilled | on hand and reserved only; no shipped figure |
+| 6 | Manual order | BROKEN: source 'manual' is invisible to every WMS screen and to the wave plan |
+| 7 | Pick | works for connector orders (plan and confirm stop overselling at positions) |
+| 8 | Pack | works |
+| 9 | Ship | BROKEN: portal "Mark shipped" always fails (label source 'manual' and box names rejected by the table); a WMS-picked order is deducted again at ship (20 → 14 → 8); a repeat makes a second shipment; an unpicked order ships with no stock check (on hand −12) |
+| 10 | Reconcile / audit | ledger and history append-only; no per-product reconciliation |
+
+Veeqo sync: deletes and re-creates lines on every change; cancels or rewrites picked / packed orders; no stale-event check.
+
+### Changes
+
+1. `supabase/candidates/20261208_order_integrity.sql` REVISION 2 (pending `dev_036`, header updated): under the service
+   login (store sync), an order that is picked, packed, shipped or has a pick / package / shipment / active wave keeps its
+   operational fields (only raw, tags, notes, marketplace, updated_at may change) and its lines cannot be added, changed or
+   deleted. New invoker trigger `_order_lines_sync_guard`; `_orders_direct_edit_guard` gains the service branch;
+   `_order_commitment` executable by service_role. Rollback updated.
+2. `supabase/candidates/20261209_mvp_fulfilment.sql` (pending `dev_037`): `ship_order` replaced (admin/staff only, order
+   lock, idempotent on same tracking, refuses other tracking / reused tracking / cancelled / on hold, maps 'manual' and box
+   names, no second deduction for WMS-picked orders and requires the whole pick, older path only from stock without a
+   position and never more than is there); `create_manual_order` replaced (admin/staff, brand-checked lines, whole
+   quantities ≥ 1, duplicate number refused, made a WMS order: source 'connector', channel 'manual'); NEW read-only
+   `wms_stock_summary(brand)`. Rollback restores both functions to the hosted text (md5 5e1d4974 / 1cdf8286, confirmed on
+   hosted 14:34Z).
+3. Edge Function code (NOT deployed): `_shared/order_lock.ts` (new), `_shared/veeqo_orders.ts`, `_shared/shopify_orders.ts`,
+   `veeqo-sync/index.ts`: skip stale events (older `updated_at` than on file) and orders in the warehouse's hands (asks
+   `_order_commitment`; fails closed), report them as `needs_review`; a line delete error now stops instead of being ignored;
+   one bad order no longer aborts the whole Veeqo sync. Pre-existing strict type errors unchanged (2 and 6), none new.
+
+### Local results
+
+| What | Result |
+|---|---|
+| `supabase/dev/mvp-check.sql` (new, rolled back) | 10 of 10: receive (repeat makes nothing), put-away at P-50 via the journal (commit twice), summary 30/30/30, isolation; three manual orders of 12 vs 30 (9 refusals incl. other brand's product, qty 0/−3, duplicate number, sales, floor, client, public key); floor wave takes O1+O2, staff wave gets nothing (O3 short, 6 on file); wrong barcode, 25 of 24, client, early pack, short package, double confirm / pack refused; ship via the portal's manual path, repeat returns the same shipment, wrong / reused / blank tracking, unknown source, sales, floor, client, public key refused; O3 refused, cancelled, refused; shipped orders not rewritable by staff, store sync or owner; reconciliation 30 received / 24 picked / 24 shipped / 6 on hand; PSKU-000001, its receipt, the journal and every prior row byte-for-byte unchanged |
+| `supabase/tests/deno/sync.test.ts` (new): the REAL sync code under Deno, service login, local API | 3 of 3 (Veeqo retry, stale, newer; Veeqo cancel on a verified order skipped and reported, DB refuses status and line changes; Shopify stale and in-warehouse). Same test on the pre-sprint sync code: 0 of 3 (it applied a stale event, qty 2 → 9) |
+| `supabase/tests/deno/mvp-http.test.ts` (new): screens' calls with real tokens through the local API | 1 of 1: manual order → wave → pack → Mark shipped (label 'manual', 'Box 8×6×4' → box_single, 'Poly mailer' → mailer) → summary; double click returns the same shipment; public key and forged token refused |
+| Migration effect on a copy of dev (dev_036 r2 + dev_037) | 13 fingerprints unchanged (other 159 functions, other grants, other access rules, other triggers, tables, ledger, orders, lines, shipments, events, pallets, journal, PSKU-000001) |
+| Rollback both, re-apply | rollback restores the 13 fingerprints, the order-table privileges, and both functions' text and permissions; re-apply gives the same state |
+| Earlier checks | regression 15, open box 8, stock safety 7, workflow 6, manager 5, ledger 9, order integrity 8 (four expectations updated to the new rules, below) |
+| Staging suites | void 6, units 5, openbox 5, workflow 6, bridge 16, manager 5, wms-graft 10, activity 3, dock 1, nexus 7, registry 1, waves 1 |
+| Movement rehearsal / runner / bridge | 331 of 331 / 13 / 4 |
+| Browser suites / WMS unit / WMS build | 113 and 79 / 56 / ok. Portal not built here (its packages are not installed in this workspace; no portal file changed) |
+
+Order-check updates: the older ship path now needs stock without a position (staged as such); sales and cross-brand refusals
+from `create_manual_order` / `ship_order` now come from the function, not the trigger; the store sync can no longer change a
+shipped order's customer (now refused) and six new store-sync refusals were added; `_order_commitment` is now executable by
+the service login.
+
+### Not covered / open
+
+- Hosted storing of any new pallet needs the Nexus bridge switches (held off). Private A-01..A-03 are shelves, not pallet
+  positions. Until the hold is released, hosted acceptance can use only stock already stored (PSKU-000001 at P-01, which
+  must not be picked).
+- Rule for any hosted test: do not create orders for PSKU-000001's product; a wave would plan it at P-01.
+- Veeqo and Shopify orders are still not WMS-pickable (source not 'connector'); they ship through Pack & Ship's older path,
+  which now only takes stock without a position. For the MVP, orders are manual.
+- The Edge Function changes are code only; the labels function itself was not run (its ship_order call was replayed).
+- Portal pages show no "shipped" column yet; the figure is in `wms_stock_summary`.
+- No UI for `wms_stock_correct`, no cycle count; put-away receipts still carry no author.
+
+**Ready for separate hosted-dev approval: yes**, as dev_036 (revision 2) then dev_037, one transaction each, followed by the
+eight rolled-back checks. Not cleared for production.
 
 ## P-03 HOLD (Derek, 2026-11-23 9:30 PM ET): ShipBay movements disabled while Souled moves PAL-9801 from P-02 to P-03
 

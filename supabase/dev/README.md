@@ -80,4 +80,5 @@ See `DEPLOY.md` for the deployment steps and `PRODUCTION-DIFFERENCES.md` for the
 
 No Nexus credential is installed, and there is no WMS development site.
 - `ledger-hardening-check.sql`: sixth rolled-back check, for candidate 20261207 revision 2 (9 checks; check 8 is the demo-brand register). `pending/dev_035_inventory_ledger_hardening.sql` was applied to dev on 2026-11-24 00:22Z (the file's header still says NOT APPLIED; it is kept byte for byte). Rollback: `../candidates/20261207_inventory_ledger_hardening.rollback.sql`.
-- `order-integrity-check.sql`: seventh rolled-back check, for candidate 20261208 (8 checks). `pending/dev_036_order_integrity.sql` is NOT applied; local only so far. Rollback: `../candidates/20261208_order_integrity.rollback.sql`.
+- `order-integrity-check.sql`: seventh rolled-back check, for candidate 20261208 revision 2 (8 checks). `pending/dev_036_order_integrity.sql` is NOT applied; local only so far. Rollback: `../candidates/20261208_order_integrity.rollback.sql`.
+- `mvp-check.sql`: eighth rolled-back check, the MVP order path end to end, for candidate 20261209 (10 checks). `pending/dev_037_mvp_fulfilment.sql` is NOT applied. Rollback: `../candidates/20261209_mvp_fulfilment.rollback.sql`. API-level tests: `../tests/deno/run-sync.sh` (store sync and MVP path through a local API).

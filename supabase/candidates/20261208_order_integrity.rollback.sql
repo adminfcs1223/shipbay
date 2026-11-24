@@ -2,7 +2,7 @@
 -- table privilege on orders, order_lines, shipments, events, wms_picks and returns again (the public key too, except on orders,
 -- where the security repair had already left it only REFERENCES and TRIGGER), and admin, staff and sales can again insert,
 -- rewrite and delete those rows directly.
--- No DROP (the database connector refuses it): the nine guard triggers are switched off, the twelve restrictive access rules
+-- No DROP (the database connector refuses it): the ten guard triggers are switched off, the twelve restrictive access rules
 -- are opened so they refuse nothing, the privileges are granted back, and the one callable function is closed to logins.
 -- Nothing written while the hardening was on is touched. Applying the candidate again turns everything back on.
 -- WARNING: after this rollback orders can again be deleted and re-homed through the API. Roll back only to recover.
@@ -12,6 +12,7 @@ alter table public.orders disable trigger orders_direct_edit_guard;
 alter table public.orders disable trigger orders_no_truncate;
 alter table public.order_lines disable trigger order_lines_history_guard;
 alter table public.order_lines disable trigger order_lines_no_truncate;
+alter table public.order_lines disable trigger order_lines_sync_guard;
 alter table public.shipments disable trigger shipments_history_guard;
 alter table public.shipments disable trigger shipments_no_truncate;
 alter table public.events disable trigger events_history_guard;
@@ -30,5 +31,5 @@ grant insert, update, delete, truncate, references, trigger on table public.ship
 grant insert, update, delete, truncate, references, trigger on table public.events to anon, authenticated;
 grant insert, update, delete, truncate, references, trigger on table public.wms_picks to anon, authenticated;
 grant delete, truncate on table public.returns to anon, authenticated;
-revoke all on function public._order_commitment(uuid) from public, anon, authenticated;
+revoke all on function public._order_commitment(uuid) from public, anon, authenticated, service_role;
 commit;

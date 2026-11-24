@@ -26,12 +26,18 @@ Deno.serve(async (req) => {
   const key = await veeqoKey(b.org_id);
   if (!key) return Response.json({ error: 'Veeqo isn’t connected for this client — connect it under Onboarding → Systems → Shipping label access.' }, { status: 409, headers: cors });
   try {
-    let imported = 0, updated = 0, total = 0;
+    let imported = 0, updated = 0, total = 0, stale = 0; const review: any[] = [], errors: any[] = [];
     for (const status of ['awaiting_fulfillment', 'on_hold', 'awaiting_stock']) {
       for (let page = 1; page <= 20; page++) {
         const list = await veeqoGet(key, `/orders?status=${status}&page_size=100&page=${page}`);
         if (!Array.isArray(list) || !list.length) break;
-        for (const o of list) { total++; const r = await upsertVeeqoOrder(admin, b.org_id, o); if (r.created) imported++; else updated++; }
+        for (const o of list) {
+          total++;
+          try {
+            const r = await upsertVeeqoOrder(admin, b.org_id, o);
+            if (r.skipped === 'stale') stale++; else if (r.skipped === 'in_warehouse') { if (review.length < 50) review.push({ order: r.order_number, veeqo_status: r.veeqo_status, warehouse: r.reason }); } else if (r.created) imported++; else updated++;
+          } catch (e) { if (errors.length < 20) errors.push({ veeqo_order_id: o?.id, error: String((e as any)?.message ?? e).slice(0, 200) }); }
+        }
         if (list.length < 100) break;
       }
     }
@@ -39,8 +45,8 @@ Deno.serve(async (req) => {
     const { data: open } = await admin.from('orders').select('id, veeqo_order_id').eq('org_id', b.org_id).eq('channel', 'veeqo').in('status', ['new', 'on_hold', 'backordered', 'picked', 'packed']).not('veeqo_order_id', 'is', null).limit(300);
     let closed = 0;
     for (const o of open ?? []) {
-      try { const v = await veeqoGet(key, `/orders/${o.veeqo_order_id}`); if (v && ['shipped', 'cancelled'].includes(String(v.status))) { await upsertVeeqoOrder(admin, b.org_id, v); closed++; } } catch { /* leave it */ }
+      try { const v = await veeqoGet(key, `/orders/${o.veeqo_order_id}`); if (v && ['shipped', 'cancelled'].includes(String(v.status))) { const r = await upsertVeeqoOrder(admin, b.org_id, v); if (r.skipped === 'in_warehouse') { if (review.length < 50) review.push({ order: r.order_number, veeqo_status: r.veeqo_status, warehouse: r.reason }); } else if (!r.skipped) closed++; } } catch { /* leave it */ }
     }
-    return Response.json({ imported, updated, total, closed }, { headers: cors });
+    return Response.json({ imported, updated, total, closed, stale, needs_review: review, errors }, { headers: cors });
   } catch (e) { return Response.json({ error: String(e?.message ?? e) }, { status: 502, headers: cors }); }
 });

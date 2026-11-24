@@ -41,8 +41,14 @@
 --      hold_reason only; from new, on hold or backordered to new, on hold or cancelled; by ShipBay admin or staff, or by the
 --      brand's own client login; and not once the order has picked units, packages, a shipment, or a place on a wave that is
 --      being picked or packed. Every such change is written to the status history with the login, by the existing trigger.
+--   5. (revision 2, 2026-11-24) The store sync cannot change an order the warehouse has started on. Under the SERVICE login
+--      (Shopify and Veeqo sync), an order that is picked, packed or shipped, or has picked units, packages, a shipment or a place
+--      on a wave being picked or packed, keeps its status, address, customer, units, number, method and dates: only raw, tags,
+--      notes, marketplace and updated_at may change, and its lines cannot be added, changed or deleted. Revision 1 still let the
+--      sync rewrite a shipped order's address and units, cancel or re-ship a packed order, and zero or re-create its lines.
+--      The refusal is loud (an error the sync records), never silent. Workflow functions are not affected (they run as owner).
 --   4. _order_commitment(order): the one new callable function. Read-only; says in words why an order can no longer be held or
---      cancelled directly, or returns nothing. Signed-in logins only; answers only for ShipBay logins and the order's own brand.
+--      cancelled directly, or returns nothing. Signed-in logins and the service login (revision 2) only; answers only for ShipBay logins and the order's own brand.
 begin;
 
 -- 4. why an order is past direct hold / cancel ---------------------------------------------------------------------------------
@@ -69,6 +75,16 @@ create or replace function public._orders_direct_edit_guard() returns trigger
 language plpgsql set search_path to 'public' as $$
 declare v_changed text[]; v_why text;
 begin
+  if current_user = 'service_role' then   -- the store sync (revision 2): an order the warehouse has started on keeps its operational fields
+    if old.status in ('picked', 'packed', 'shipped') or _order_commitment(old.id) is not null then
+      select coalesce(array_agg(n.key order by n.key), '{}') into v_changed from jsonb_each(to_jsonb(new)) n
+      where n.key not in ('updated_at', 'raw', 'tags', 'notes', 'marketplace') and n.value is distinct from (to_jsonb(old) -> n.key);
+      if v_changed <> '{}' then
+        raise exception 'Order % is % in the warehouse; the store sync cannot change its %.', old.order_number, old.status, array_to_string(v_changed, ', ') using errcode = '42501';
+      end if;
+    end if;
+    return new;
+  end if;
   if current_user not in ('authenticated', 'anon') then return new; end if;
   select coalesce(array_agg(n.key order by n.key), '{}') into v_changed from jsonb_each(to_jsonb(new)) n where n.key <> 'updated_at' and n.value is distinct from (to_jsonb(old) -> n.key);
   if v_changed = '{}' then return new; end if;
@@ -90,6 +106,20 @@ begin
     raise exception 'A hold reason can only be changed on an order that is on hold.' using errcode = '42501';
   end if;
   return new;
+end $$;
+
+-- 5. the store sync and an order's lines (revision 2). Caller's rights on purpose, as above: current_user is service_role only
+--    when the statement comes straight from the API under the service key.
+create or replace function public._order_lines_sync_guard() returns trigger
+language plpgsql set search_path to 'public' as $$
+declare o orders;
+begin
+  if current_user <> 'service_role' then return coalesce(new, old); end if;
+  select * into o from orders where id = coalesce(new.order_id, old.order_id);
+  if o.id is not null and (o.status in ('picked', 'packed', 'shipped') or _order_commitment(o.id) is not null) then
+    raise exception 'Order % is % in the warehouse; the store sync cannot change its lines.', o.order_number, o.status using errcode = '42501';
+  end if;
+  return coalesce(new, old);
 end $$;
 
 -- 2. history rules for every caller ---------------------------------------------------------------------------------------------
@@ -163,14 +193,16 @@ end $$;
 
 revoke all on function public._orders_history_guard() from public, anon, authenticated, service_role;
 revoke all on function public._orders_direct_edit_guard() from public, anon, authenticated, service_role;
-revoke all on function public._order_commitment(uuid) from public, anon, service_role;
-grant execute on function public._order_commitment(uuid) to authenticated;
+revoke all on function public._order_lines_sync_guard() from public, anon, authenticated, service_role;
+revoke all on function public._order_commitment(uuid) from public, anon;
+grant execute on function public._order_commitment(uuid) to authenticated, service_role;   -- service_role: the two guards above run with the caller's rights
 
 create or replace trigger orders_history_guard before insert or update or delete on public.orders for each row execute function public._orders_history_guard();
 create or replace trigger orders_direct_edit_guard before update on public.orders for each row execute function public._orders_direct_edit_guard();
 create or replace trigger orders_no_truncate before truncate on public.orders for each statement execute function public._orders_history_guard();
 create or replace trigger order_lines_history_guard before insert or update or delete on public.order_lines for each row execute function public._orders_history_guard();
 create or replace trigger order_lines_no_truncate before truncate on public.order_lines for each statement execute function public._orders_history_guard();
+create or replace trigger order_lines_sync_guard before insert or update or delete on public.order_lines for each row execute function public._order_lines_sync_guard();
 create or replace trigger shipments_history_guard before insert or update or delete on public.shipments for each row execute function public._orders_history_guard();
 create or replace trigger shipments_no_truncate before truncate on public.shipments for each statement execute function public._orders_history_guard();
 create or replace trigger events_history_guard before update or delete on public.events for each row execute function public._orders_history_guard();
@@ -181,6 +213,7 @@ alter table public.orders enable trigger orders_direct_edit_guard;
 alter table public.orders enable trigger orders_no_truncate;
 alter table public.order_lines enable trigger order_lines_history_guard;
 alter table public.order_lines enable trigger order_lines_no_truncate;
+alter table public.order_lines enable trigger order_lines_sync_guard;
 alter table public.shipments enable trigger shipments_history_guard;
 alter table public.shipments enable trigger shipments_no_truncate;
 alter table public.events enable trigger events_history_guard;

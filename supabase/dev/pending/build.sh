@@ -21,4 +21,7 @@ open(p,'w').write(head+"-- ===== candidate 20261207 =====\n"+strip(c))
 p='supabase/dev/pending/dev_036_order_integrity.sql'; head=open(p).read().split('-- ===== candidate')[0]
 c=open('supabase/candidates/20261208_order_integrity.sql').read()
 open(p,'w').write(head+"-- ===== candidate 20261208 =====\n"+strip(c))
+p='supabase/dev/pending/dev_037_mvp_fulfilment.sql'; head=open(p).read().split('-- ===== candidate')[0]
+c=open('supabase/candidates/20261209_mvp_fulfilment.sql').read()
+open(p,'w').write(head+"-- ===== candidate 20261209 =====\n"+strip(c))
 PY

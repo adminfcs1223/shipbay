@@ -39,8 +39,10 @@ export function statusFor(o: any, topic: string): string | null {
   return null;
 }
 
+import { inWarehouseHands, isStale } from './order_lock.ts';
+
 // Writes one Shopify order (webhook payload or REST shape — identical) into orders + order_lines. Returns the order id.
-export async function upsertShopifyOrder(supabase: any, orgId: string, o: any, topic = 'orders/updated'): Promise<{ id: string; created: boolean }> {
+export async function upsertShopifyOrder(supabase: any, orgId: string, o: any, topic = 'orders/updated'): Promise<{ id: string; created: boolean; skipped?: 'stale' | 'in_warehouse'; reason?: string }> {
   const addr = o.shipping_address ?? {};
   const isIntl = !!addr.country_code && addr.country_code !== 'US';
   const physical = (o.line_items ?? []).filter((li: any) => li.requires_shipping !== false);
@@ -56,9 +58,13 @@ export async function upsertShopifyOrder(supabase: any, orgId: string, o: any, t
   };
   const st = statusFor(o, topic);
 
-  const { data: existing } = await supabase.from('orders').select('id,status').eq('org_id', orgId).eq('shopify_order_id', o.id).maybeSingle();
+  const { data: existing, error: exErr } = await supabase.from('orders').select('id,status,shopify_updated:raw->>updated_at').eq('org_id', orgId).eq('shopify_order_id', o.id).maybeSingle();
+  if (exErr) throw exErr;
   let orderId: string; let created = false;
   if (existing) {
+    if (isStale(o.updated_at, existing.shopify_updated)) return { id: existing.id, created: false, skipped: 'stale' };
+    const held = await inWarehouseHands(supabase, existing.id, existing.status);
+    if (held) return { id: existing.id, created: false, skipped: 'in_warehouse', reason: held };
     const upd: any = { ...base }; delete upd.placed_at;
     if (st && existing.status !== 'shipped') upd.status = st;
     const { error } = await supabase.from('orders').update(upd).eq('id', existing.id); if (error) throw error;
