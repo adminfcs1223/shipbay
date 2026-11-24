@@ -3,8 +3,10 @@
 // WMS calls this bridge with the user's own ShipBay login, and the bridge holds the key.
 //
 // What this build can connect to: Nexus STAGING and its test floor only.
-//   NEXUS_BRIDGE_MODE       unset or "off": every route answers 503 and nothing is called. "staging": the staging service.
-//                           Any other value (including "production") is refused: there is no production connection in this build.
+//   NEXUS_BRIDGE_MODE       unset or "off": every route answers 503 and nothing is called. "staging": the test floor
+//                           HILLSBOROUGH-TEST, never from the production database. "production": the real floor HILLSBOROUGH,
+//                           only from ShipBay's production database and only with NEXUS_PRODUCTION_API_KEY. Anything else: refused.
+//   NEXUS_PRODUCTION_API_KEY ShipBay's key for the real floor (production mode only). Same handling as the staging key.
 //   NEXUS_STAGING_API_KEY   ShipBay's staging key. Read here, sent only to the fixed staging host, never logged or returned.
 //   NEXUS_PALLET_MOVES      "on" to allow put-away, moves and releases. Anything else: those routes answer 503.
 //   NEXUS_REGISTRY_WRITES   "on" to allow the position list to be written into ShipBay. Anything else: the sync route only reports.
@@ -26,6 +28,7 @@
 //   The settings themselves do not reset: the switches stay as they were set until someone removes them.
 export const STAGING_HOST = 'ankoqruedjujyefhrmtw.supabase.co';
 export const TEST_FLOOR = 'HILLSBOROUGH-TEST';
+export const REAL_FLOOR = 'HILLSBOROUGH';   // the real floor; Nexus binds each key to one floor, and every write first checks the key's floor is this one
 export const PRODUCTION_DB_REF = 'poxlczzkpztmoiixyrth';
 export const DEV_DB_HOST = 'gdoaonsasbsperqjuurm.supabase.co';
 export const FAULT_HEADER = 'x-nexus-test-fault';
@@ -65,10 +68,19 @@ const no = (status, error, message) => ({ ok: false, status, error, message });
 export function readConfig(env = {}) {
   const mode = env.NEXUS_BRIDGE_MODE || 'off';
   if (mode === 'off') return no(503, 'bridge_off', 'The Nexus connection is switched off here.');
-  if (mode !== 'staging') return no(503, 'mode_not_available', 'Only the staging connection exists in this build. Production is not enabled.');
-  if (String(env.SUPABASE_URL || '').includes(PRODUCTION_DB_REF)) return no(503, 'wrong_database', 'The staging connection does not run on the production database.');
-  if (!env.NEXUS_STAGING_API_KEY) return no(503, 'not_configured', 'The Nexus staging key is not set.');
-  return { ok: true, mode, base: `https://${STAGING_HOST}/functions/v1/nexus`, key: env.NEXUS_STAGING_API_KEY, floor: TEST_FLOOR,
+  const onProduction = String(env.SUPABASE_URL || '').includes(PRODUCTION_DB_REF);
+  let key, floor;
+  if (mode === 'staging') {
+    if (onProduction) return no(503, 'wrong_database', 'The staging connection does not run on the production database.');
+    if (!env.NEXUS_STAGING_API_KEY) return no(503, 'not_configured', 'The Nexus staging key is not set.');
+    key = env.NEXUS_STAGING_API_KEY; floor = TEST_FLOOR;
+  } else if (mode === 'production') {
+    // the real floor: only from ShipBay's production database, only with the production key (never the staging key)
+    if (!onProduction) return no(503, 'not_production_database', 'The production connection runs only on ShipBay\'s production database.');
+    if (!env.NEXUS_PRODUCTION_API_KEY) return no(503, 'not_configured', 'The Nexus production key is not set.');
+    key = env.NEXUS_PRODUCTION_API_KEY; floor = REAL_FLOOR;
+  } else return no(503, 'mode_not_available', 'Unknown connection mode. Use staging or production.');
+  return { ok: true, mode, base: `https://${STAGING_HOST}/functions/v1/nexus`, key, floor,
     palletMoves: env.NEXUS_PALLET_MOVES === 'on', registryWrites: env.NEXUS_REGISTRY_WRITES === 'on', calendarWrites: env.NEXUS_CALENDAR_WRITES === 'on',
     testFaults: env.NEXUS_TEST_FAULTS === 'on' && hostOf(env.SUPABASE_URL) === DEV_DB_HOST };
 }

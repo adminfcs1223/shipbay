@@ -72,7 +72,7 @@ const at = async (code) => { const o = await asSouled('GET', '/v1/occupancy'); r
 test.after(async () => { await ndb.end(); await db.query('drop database if exists nexus_bridge_test').catch(() => {}); await db.end(); });
 
 test('off by default; production is not a mode; the staging connection will not run on the production database; no key, no connection', async () => {
-  for (const [env, code] of [[{}, 'bridge_off'], [{ ...ON, NEXUS_BRIDGE_MODE: 'production' }, 'mode_not_available'], [{ ...ON, SUPABASE_URL: 'https://poxlczzkpztmoiixyrth.supabase.co' }, 'wrong_database'], [{ ...ON, NEXUS_STAGING_API_KEY: '' }, 'not_configured']]) {
+  for (const [env, code] of [[{}, 'bridge_off'], [{ ...ON, NEXUS_BRIDGE_MODE: 'production' }, 'not_production_database'], [{ ...ON, NEXUS_BRIDGE_MODE: 'live' }, 'mode_not_available'], [{ ...ON, SUPABASE_URL: 'https://poxlczzkpztmoiixyrth.supabase.co' }, 'wrong_database'], [{ ...ON, NEXUS_STAGING_API_KEY: '' }, 'not_configured']]) {
     const before = net.calls.length; const r = await bridgeWith(env)('floor', 'POST', '/putaway', { psku: 'X', location: 'P-01' }); assert.equal(r.status, 503); assert.equal(r.error, code); assert.equal(net.calls.length, before, 'Nexus was not called');
   }
   const s = await bridgeWith({})(null, 'GET', '/status'); assert.deepEqual([s.connection, s.pallet_moves, s.calendar_writes], ['off', false, false]); assert.ok(!JSON.stringify(await bridge(null, 'GET', '/status')).includes(KEYS.shipbay));
