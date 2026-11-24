@@ -107,6 +107,34 @@ matches on message text it may need a look after applying).
 **Safe to apply to isolated shipbay-nexus-dev: yes**, as dev_035, one transaction, with the six rolled-back checks and
 `dev_security_check()` run afterwards. **Not cleared for production** until the production-only writers are listed.
 
+### 5. dev_035 approved 2026-11-23 7:02 PM, NOT applied: pre-deployment review found a way around it (STOPPED)
+
+Derek approved applying dev_035 to dev with a stop rule: stop if a security assumption differs from the tested candidate.
+Pre-deployment item 8 (trigger exceptions must not be usable by an ordinary login) FAILED on the demo-brand exception:
+
+- The append-only trigger allows deleting ledger rows of the brand whose slug is `demo-brand` (for `wms_demo_reset`).
+- Admin, staff and sales can edit `orgs` (rule `shipbay_all_orgs`, no trigger on `orgs`), so they can rename a real brand's
+  slug to `demo-brand`. Admin, staff and floor can run `wms_demo_reset()`.
+- Reproduced locally on a copy of dev with dev_035 applied (rolled back): a STAFF login renamed Synthetic Records to
+  `demo-brand`, ran the demo reset, and the brand's ledger row (PSKU-000001's receipt in that copy) was deleted. The reset also
+  deletes that brand's orders, order lines, waves and picks; that part exists today, without dev_035.
+- Hosted dev has the same conditions (read-only check 00:1xZ): `orgs` writable by those logins, no trigger on `orgs`,
+  `wms_demo_reset` open to signed-in logins. Section 4 above said the exception was "limited to the demo brand"; that was
+  wrong as a security statement, because the label is editable.
+
+Checked at the same time and closed: pallets, cartons and units cannot be edited directly by any login (read-only access rules;
+an admin's edits and deletes touched 0 rows, ledger unchanged), so the stock triggers cannot be driven from the API.
+
+Pre-deployment items that passed: target is `shipbay-nexus-dev`, 31 migrations ending dev_032 > dev_033 > dev_034; the dev_035
+body equals the candidate minus `begin;`/`commit;` plus a 9-line comment header, unchanged since 282cb60; it holds 3 functions,
+3 triggers, 3 trigger-enable lines, 3 access rules, 4 revokes, 1 grant, no DROP and no row statement outside the new function.
+Before-state on hosted: ledger 1 row `afc8960b`, journal 1 row `28ef4c90`, PSKU-000001 stored at P-01 `56e1c5ac`, pallets 9
+`49a8aabd`, cartons 90 `a025ccd7`, orders 1 `940453fc` (the last three use this section's formula, md5 of the rows as JSON).
+Nothing was written to hosted dev.
+
+Trial fix (local, rolled back, not a file yet): a trigger on `orgs` refusing a rename to `demo-brand`. With it the staff
+rename is refused, the demo reset still runs twice, and the real brand's ledger row survives.
+
 ## dev_034 applied to shipbay-nexus-dev and verified (approved by Derek, 2026-11-23 6:25 PM)
 
 Applied as migration `dev_034_manager_pick_corrections` (the 31st). The WMS screen is NOT deployed anywhere; on dev the
