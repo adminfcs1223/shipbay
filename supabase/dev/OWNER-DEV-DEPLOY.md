@@ -1,0 +1,58 @@
+# Owner access to the WMS and portal on shipbay-nexus-dev (PREPARED, NOT DEPLOYED)
+
+Prepared 2026-11-24. The goal: Derek can sign in and use the WMS and portal with synthetic data. The apps are connected
+only to the isolated development database `gdoaonsasbsperqjuurm`. Nothing below has been done on any hosted service.
+
+## What is ready
+- `supabase/dev/owner-build.sh <empty folder>` builds `wms/` and `portal/` against dev with the dev public key. It writes
+  each site's own `_redirects` (app only; nothing is proxied) and `_headers` (noindex, no framing, no-store). It stops if
+  any built file names the production database or key, or a carrier or store API host.
+- Built and checked locally on 2026-11-24. Both sign-in screens render. The only production reference left in the output
+  is the WMS's own refusal check.
+- These builds do NOT use `wms/netlify.toml` or `portal/netlify.toml`. Those files set the production database and proxy
+  `/api/orders`, `/oauth/*` and `/webhooks/*` to production functions. A Netlify build linked to the repository would use
+  them, so the dev sites must be uploaded as folders, never built from the repo.
+
+## Why production cannot be reached
+- Each build names the dev database only. The script refuses otherwise.
+- Dev has no `labels`, sync, `owner`, `integrations` or `wms-login` functions and no `platform_secrets` table. No carrier,
+  store or QuickBooks key exists there, so no label can be bought.
+- Dev has only the 4 synthetic logins and the 2 synthetic brands.
+- The dev bridge talks only to the Nexus staging test floor, and its switches are off.
+
+## Hosted steps (each needs Derek's go-ahead; Derek does the password step himself)
+1. **Dev Auth settings:**
+   - Turn off new user sign-ups.
+   - Set the Site URL to the dev WMS address.
+2. **Passwords for the synthetic logins:** Derek runs this in the dev SQL editor, once per login, with a password of his
+   choosing. The password is never typed into a chat.
+   `update auth.users set encrypted_password = crypt('<password>', gen_salt('bf')) where email = 'test-admin@example.test';`
+   - test-admin = ShipBay admin (Derek's own use)
+   - test-floor = floor
+   - test-client = brand client
+3. **Netlify:** create two new sites with no repository link, named `shipbay-wms-dev` and `shipbay-portal-dev`. Upload
+   `<out>/wms` and `<out>/portal` by "deploy a folder".
+   - Addresses: `https://shipbay-wms-dev.netlify.app` and `https://shipbay-portal-dev.netlify.app`.
+   - No custom domain.
+   - Turn on visitor password protection if the plan allows it. The data is synthetic and every screen needs a sign-in.
+4. **WMS sign-in:** use "Admin sign-in with email". Employee number + PIN needs the `wms-login` function, which is not on dev.
+
+## What the owner can do with steps 1-4 (no hold released)
+- **WMS:** Today, Orders, Receive for Synthetic Records or Synthetic Mailers, printable carton labels, carton scan and count.
+- **Portal:** sign-in, orders, inventory and the manual order form.
+- The portal's CRM, finance, quotes, integrations and admin pages need tables and functions dev does not have. They will
+  show errors there.
+- **Put-away is blocked, so there is no stock, picking or shipping yet.** Every pallet position on dev (P-01..P-66,
+  STG-01, STG-02) is a shared Nexus position. The bridge is off, and the movement hold applies.
+
+## Optional decisions that would complete the loop without Nexus
+- **A. ShipBay-only synthetic positions on dev.** Insert, for example, `SB-01`..`SB-06`
+  (`kind pallet, shared false, pickable true`). Then build the WMS with `VITE_PALLET_SCREEN=1`, which brings back the pallet
+  section removed on 2026-11-21, in the dev build only.
+  - Verified locally in a rolled-back transaction: receive, count, assign to SB-01, put away, stock posted (5 on hand), with
+    no Nexus call.
+  - Wave pick and pack then work from those positions.
+- **B. Shipping from the UI.** The portal's manual "mark shipped" goes through the `labels` function, which is not on dev.
+  Options:
+  - deploy `labels` to dev with no carrier credentials, after a review that it cannot buy without them; or
+  - leave shipping out of the owner trial.

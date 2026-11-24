@@ -118,18 +118,23 @@ no key or token in the result; nothing stored in `dev_runner_runs`). Movement su
    at dev; the synthetic logins have no passwords; Derek runs nothing else during the window). On Nexus's side ShipBay
    cannot block other companies: the Nexus team is asked not to place at P-49/P-50 during the window; a late occupant only
    makes the put-away refuse (`location_full`), which stops the run with nothing to undo.
-7. **Switches**: Derek sets `NEXUS_BRIDGE_MODE=staging`, `NEXUS_PALLET_MOVES=on` on dev only; the other three stay unset.
-   The runner refuses to start otherwise.
+7. **Bridge with the movement cutoff deployed first** (commit `423e863`, nexus-bridge version 8 on dev). The deployed version 7
+   has no cutoff. **Settings** (Derek, dev only): `NEXUS_BRIDGE_MODE=staging`, `NEXUS_PALLET_MOVES=on`,
+   `NEXUS_MOVES_UNTIL=<UTC time 30 minutes ahead, e.g. 2026-11-24T18:30:00Z>`, `NEXUS_MOVES_POSITIONS=P-50`, and
+   `NEXUS_MOVES_PALLETS=<the next pallet label, read just before>`. If that pallet label is wrong, the put-away is refused
+   before anything is sent; correct it and run again. Registry, calendar and test-fault switches stay unset. The runner
+   refuses to start without an open window of at least 5 minutes naming only P-50/P-49.
 8. **Run**: deploy the bundle to `bridge-smoke` (verify_jwt off, token gate, 15-minute expiry); `?stage=mvp&until=preflight`
    (no writes); then `?stage=mvp`. A stop: read the result; if it stopped after a Nexus write and that write is waiting, only
    `/pending/retry` or a rerun of `stage=mvp`; out of sync → `/reconcile` and report, nothing released automatically.
-9. **Restore and verify, in this order, whatever the outcome**: Derek deletes both switches; `GET /status` reads
+9. **Restore and verify, in this order, whatever the outcome**: from `NEXUS_MOVES_UNTIL` on, the bridge sends no pallet write
+   whatever the switches say (cutoff.test.mjs). The settings do not reset themselves: Derek deletes all five; `GET /status` reads
    connection off; the inert 410 stub back in `bridge-smoke` with verify_jwt on, read back; section 4 read-only checks.
 10. **Permissions needed**: release or amendment of the P-03 hold for this procedure; authorization under the movement hold
     for the two Nexus writes, the runner deploy to `bridge-smoke` and the dev records listed in 3; Derek at the keyboard to set
     and delete the switches.
 
-**Limitation (unresolved): switch restoration cannot be guaranteed by the runner.** It cannot change secrets. If the run
+**Limitation (resolved in code 2026-11-24, commit `423e863`, not yet deployed): the switches still need removing by hand, but a deployed cutoff stops every new Nexus write at its absolute time. What follows was the situation before it.** It cannot change secrets. If the run
 stops, the platform kills it, or the connection drops, both switches stay ON until Derek deletes them. What limits the
 exposure: no caller but the runner exists on dev (step 6); the runner slot goes back to the stub; Nexus's floor switch and
 revoking ShipBay's Nexus key are further stops on the Nexus side. A guaranteed off would need a code change (for example the
