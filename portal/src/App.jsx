@@ -230,6 +230,8 @@ const Ico = {
 const STAFF_NAV = [
   { group: 'Warehouse' },
   { key: 'wms', label: 'WMS', icon: Ico.receiving, page: WmsWindow },
+  // development builds only (VITE_SHIP_DIRECT=1): Pack & Ship back in the menu for manual orders and test-tracking shipments
+  ...((import.meta.env && import.meta.env.VITE_SHIP_DIRECT) === '1' ? [{ key: 'pack', label: 'Pack & Ship', icon: Ico.receiving, page: PackShip }] : []),
   { key: 'wmsbilling', label: 'Billing', icon: Ico.quotes, page: WmsBilling },
   { group: 'Sales', salesOnly: true },
   { key: 'apptsetting', label: 'Appt. Setting', icon: Ico.appt, page: ApptSetting, salesOnly: true },

@@ -32,7 +32,9 @@ bar = ('<div id="dev-notice" style="position:fixed;left:0;right:0;bottom:0;z-ind
 assert '</body>' in s; open(p, 'w', encoding='utf8').write(s.replace('</body>', bar + '</body>', 1))
 PY
   printf '/*  /index.html  200\n' > "$O/$app/_redirects"
-  printf '/*\n  X-Robots-Tag: noindex, nofollow\n  X-Frame-Options: DENY\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  Cache-Control: no-store\n' > "$O/$app/_headers"
+  # the WMS may be framed by the development portal only (its WMS window); the portal by nothing
+  FA="'none'"; [ $app = wms ] && [ -n "${OWNER_PORTAL_URL:-}" ] && FA="$OWNER_PORTAL_URL"
+  printf "/*\n  X-Robots-Tag: noindex, nofollow\n  Content-Security-Policy: frame-ancestors %s\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin\n  Cache-Control: no-store\n" "$FA" > "$O/$app/_headers"
   rm -rf "$W"
 done
 # the production reference may appear only inside the WMS's own refusal check (includes(`<ref>`)); a carrier or store API host never
