@@ -1,12 +1,105 @@
 # Hosted movement rehearsal: dev database and bridge ready, screens validated, runner and stages not run
 
-Updated 2026-11-23, 7:45 PM ET (stock-ledger hardening revision 2 APPLIED to dev as dev_035 and verified: next section, part 7). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
+Updated 2026-11-23, 8:30 PM ET (order-integrity candidate prepared and tested locally, NOT applied: next section; ledger hardening is on dev as dev_035). Step 1 (development database), step 2 (updated bridge) and the stock safety migrations dev_032
 dev_033 and the manager pick-correction migration dev_034 are applied and verified on `shipbay-nexus-dev`. The three correction forms have now been run in a browser and the
 correction endpoints called over HTTP with real sessions (below). The movement runner is NOT deployed, no switch was set, and
 nothing was sent to Nexus. Production and `main` are untouched.
 
 **Hold (Derek, 2026-11-23 2:30 AM):** the hosted rehearsal does not start yet. Souled's P-02 placement is being prepared and
 Nexus has a destination-safety deployment pending. PSKU-000001 stays at P-01.
+
+## Order integrity (candidate 20261208, pending dev_036): prepared and tested LOCALLY, NOT applied anywhere
+
+Derek's assignment of 2026-11-23 7:43 PM. Nothing was applied to hosted dev; no screen, runner or bridge deployed; no switch
+set; nothing sent to Nexus; production and `main` untouched. Hosted dev was not read or written for this task (the audit used
+the local copy built to dev's state, whose schema fingerprints matched hosted at the dev_035 deployment).
+
+### 1. Audit
+
+Tables: `orders`, `order_lines`, `shipments`, `events` (status history), `returns`, `wms_picks`, `wms_waves`, `wms_wave_orders`,
+`wms_wave_tasks`, `wms_wave_task_lines`, `wms_packages`. There is no billing or invoice table in the dev schema.
+
+| Table | Direct privileges of signed-in logins before | Who the access rules let write |
+|---|---|---|
+| `orders` | insert, update, delete, truncate | admin, staff, sales: everything. Client: update of its own new / on-hold orders, ANY column |
+| `order_lines`, `shipments`, `events` | insert, update, delete, truncate (public key too, by grant) | admin, staff, sales: everything |
+| `returns` | insert, update, delete, truncate | admin, staff, sales: everything; client: insert for its brand |
+| `wms_picks` | all granted, but only a read rule: no direct write possible | nobody |
+| waves, wave orders, tasks, packages | read only | nobody |
+
+Cascades: deleting an order deletes its lines (and their wave task lines), wave links, packages and SHIPMENTS; `returns` keep
+the row with the order blanked. A line with pick rows blocks the delete (foreign key), so only un-picked orders could be
+deleted, but a shipped order with no pick rows (the older pack station) goes with its shipment and postage. Deleting a brand
+cascades to its orders, shipments, events and returns. `events` is the only record of who held, cancelled or shipped an order.
+
+Legitimate writers: the definer functions `create_manual_order`, `scan_pack`, `reset_pack`, `ship_order`, `wms_pick_scan`,
+`wms_unpick`, `wms_pick_correct`, `wms_wave_start/confirm/unconfirm/to_pack/pack`, `wms_api_create_order`,
+`wms_api_close_order`, `wms_demo_reset`, and the trigger `log_status_event` (all owned by postgres, SECURITY DEFINER, fixed
+search path); the Edge Functions `shopify-sync`, `shopify-webhook`, `veeqo-sync`, `labels`, `shopify-fulfill`, all under the
+service key; and ONE direct write by a login: the portal Orders page sets `status` (+ `hold_reason`) for hold, release, cancel.
+The Veeqo sync deletes and re-creates an order's lines on every sync.
+
+Sales: the portal gives a sales-only login the sales navigation, not the warehouse screens. Its order, pack, ship and receiving
+rights exist only because `is_shipbay()` counts the sales role. Nothing in the repository needs them.
+
+Also found: `create_manual_order` does not check that a product belongs to the order's brand, so an admin, staff or sales login
+could create an order for brand A that picks brand B's stock.
+
+**Not verifiable (production only):** any other integration, scheduled job or admin screen that inserts, deletes or re-homes
+orders, lines or shipments with a LOGIN's rights rather than the service key; anything that edits or prunes `events`; billing
+functions that may read or write shipments; whether production has returns screens that delete.
+
+### 2. The candidate (`supabase/candidates/20261208_order_integrity.sql`; no DROP; no existing function, rule or row changed)
+
+1. Privileges revoked from the public key and signed-in logins: insert, delete, truncate on `orders`; every write on
+   `order_lines`, `shipments`, `events`, `wms_picks`; delete and truncate on `returns`. Twelve restrictive access rules repeat
+   the refusals. `orders` UPDATE stays for the portal. SELECT and the service login unchanged.
+2. `_orders_history_guard` (trigger, every caller incl. service login and owner): orders and shipments are never deleted
+   (except the registered demo brand's); status history is never edited or deleted; an order's brand, id, creation time and
+   author never change; shipped stays shipped; a line stays on its order and its product must be the order's brand's; a
+   shipment stays on its order and brand; a line with pick, pack, wave or shipment history is never deleted; no truncate; a
+   sales login cannot change orders, lines or shipments by any path.
+3. `_orders_direct_edit_guard` (trigger, only statements that come straight from the API): status and hold_reason only; from
+   new / on hold / backordered to new / on hold / cancelled; admin, staff or the brand's own client; refused once the order
+   has picked units, packages, a shipment or a place on a wave being picked or packed. The existing trigger writes each
+   change to the status history with the login.
+4. `_order_commitment(order)`: read-only, signed-in only, answers for ShipBay logins and the order's own brand.
+
+Pending: `supabase/dev/pending/dev_036_order_integrity.sql` (NOT applied). Rollback:
+`supabase/candidates/20261208_order_integrity.rollback.sql` (no DROP: nine triggers off, twelve rules opened, privileges
+granted back, the function closed).
+
+### 3. Local results
+
+| What | Result |
+|---|---|
+| New `supabase/dev/order-integrity-check.sql` (rolled back) | 8 of 8: 126 direct writes refused (6 identities x 21); 66 re-homing / rewriting attempts refused or touching nothing; 12 hold / cancel attempts on orders with work started refused; legitimate hold, release, cancel by admin, staff, client with history naming the login; 40 of 40 refused for the service login and owner; service-login sync operations work; sales refused by the four older functions; cross-brand manual order refused; pack, ship, wave pick, demo reset work |
+| The same check on the rolled-back (vulnerable) database | FAILS at the first case (admin deletes an order) |
+| Over the local API, real tokens | delete order, insert order, delete history: 403 for admin, staff, floor, client, 401 for public key and forged token; move to another brand: 403 (floor: 0 rows); portal's hold, release, cancel: 200; un-cancel, set shipped, client address rewrite: 403; client on another brand's order: 0 rows |
+| Migration effect on a copy of dev | 13 fingerprints identical before and after: other 161 functions, other tables' grants, the other 43 access rules, other 24 triggers, table count, ledger, orders, lines, events, pallets, journal, PSKU-000001, SELECT and service grants on the six tables |
+| Rollback, re-apply | rollback restores the 13 fingerprints and the login privileges exactly; re-apply gives the same state; check 8 of 8 |
+| Earlier checks | regression 15, open box 8, stock safety 7, workflow 6, manager 5, ledger 9 |
+| Staging suites | void 6, units 5, openbox 5, workflow 6, bridge 16, manager 5, wms-graft 10, activity 3, dock 1, nexus 7, registry 1, waves 1 |
+| Movement suite / Deno / browser / unit | 331 of 331 / 13 and 4 / 113 and 79 / 56 |
+
+Not tested: the portal itself in a browser (its one call was replayed over HTTP); the Edge Functions end to end (their
+statements were run as the service login); sales as its own session (stand-in, as before).
+
+### 4. Risks and decisions
+
+- Veeqo sync: once an order has pick, pack, wave or shipment history, the sync's delete-and-recreate of its lines is refused
+  and that order's sync errors, instead of silently wiping the wave's planned lines. Right outcome, but the sync code should
+  stop deleting lines. Shopify sync is not affected.
+- The service login can still overwrite the address and units of a shipped order (the store sync does on every update). Not
+  restricted: it would break the sync. Shipped status itself is locked.
+- Un-cancelling an order is no longer possible from the portal (it has no button for it); the store sync still can.
+- A brand with any order can no longer be deleted.
+- Sales loses create_manual_order, scan_pack, reset_pack, ship_order and direct hold / cancel. `receive_inbound` (ledger side)
+  is NOT covered here and sales can still call it; sales still reads orders, shipments and the ledger.
+- `returns`: only delete is closed; admin, staff, sales can still insert and edit returns (no screen in the repository uses it).
+- No reason is recorded for a cancel (the table has `hold_reason` only); who and when are recorded.
+
+**Ready for separate hosted-dev approval: yes** (needs dev_035, which is on dev). Not cleared for production.
 
 ## Stock-ledger hardening (candidate 20261207): on dev as dev_035 since 2026-11-24 00:22Z (parts 1-6 are the history; part 7 is the deployment)
 

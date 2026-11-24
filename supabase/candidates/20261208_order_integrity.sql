@@ -1,0 +1,210 @@
+-- CANDIDATE. Tested on the local synthetic database only. Not applied to shipbay-nexus-dev, not applied to production.
+-- Derek's request, 2026-11-23 7:43 PM: close direct deletion, rewriting and re-homing of orders. Needs dev_035 (the demo-brand
+-- register wms_demo_brand).
+--
+-- Before: every signed-in login holds INSERT, UPDATE, DELETE and TRUNCATE on orders, order_lines, shipments and events, and the
+-- access rules let ShipBay admin, staff AND sales use them on any row. So through the API those logins can:
+--   - delete an order: its lines, wave links, packages and SHIPMENTS (carrier, tracking, label cost, postage billed) go with it;
+--   - move an order to another brand (org_id), or point an order line at another brand's product, so that a wave picks that
+--     other company's stock for it;
+--   - rewrite a picked, packed or shipped order (status, address, units), and insert, edit or delete shipments;
+--   - edit or delete the status history (events), which is the only record of who held, cancelled or shipped an order;
+--   - delete a brand that has orders: everything above cascades away.
+-- A client login can rewrite any column of its own new or on-hold orders (the access rule only limits the status).
+--
+-- Who writes these tables legitimately (audited on the dev schema and the repository):
+--   - functions owned by postgres, SECURITY DEFINER, fixed search_path: create_manual_order, scan_pack, reset_pack, ship_order,
+--     wms_pick_scan, wms_unpick, wms_pick_correct, wms_wave_start/confirm/unconfirm/to_pack/pack, wms_api_create_order,
+--     wms_api_close_order, wms_demo_reset, and the status-history trigger log_status_event;
+--   - Edge Functions under the SERVICE login: store sync (shopify-sync, shopify-webhook, veeqo-sync), labels, shopify-fulfill;
+--   - ONE direct write by a signed-in login: the portal's Orders page sets status (hold, release, cancel) and hold_reason.
+-- None of the first two relies on a login's own table privileges.
+--
+-- What this does (no DROP; no existing function, access rule or row is changed):
+--   1. Privileges. Revoked from the public key and signed-in logins: INSERT, DELETE, TRUNCATE (and REFERENCES, TRIGGER) on
+--      orders; every write on order_lines, shipments, events and wms_picks; DELETE and TRUNCATE on returns. UPDATE on orders
+--      stays, for the portal's hold / release / cancel, and is confined by 3. SELECT is untouched everywhere. The service
+--      login's privileges are not changed. Restrictive access rules repeat each refusal, whatever is granted later.
+--   2. History rules for EVERY caller, the service login and postgres included (trigger function _orders_history_guard):
+--        - an order is never deleted, except an order of the registered demo brand (wms_demo_reset). So a brand with orders
+--          can no longer be deleted; shipments, packages and wave links can no longer be lost through an order;
+--        - a shipment is never deleted (same exception); a status-history row is never edited or deleted;
+--        - an order's brand, id, creation time and author never change; a shipped order's status stays shipped;
+--        - an order line stays on its order, and its product must be a product of the order's brand;
+--        - a shipment stays on its order and carries that order's brand;
+--        - an order line with pick, pack or wave history is never deleted (the Veeqo sync deletes and re-creates lines:
+--          that keeps working for an order nobody has started on, and is now refused, loudly, once work has started);
+--        - none of the four tables can be truncated;
+--        - a SALES login cannot change orders, lines or shipments by any path, the older functions included (the portal shows
+--          sales logins no warehouse screen).
+--   3. What a signed-in login may still change directly on an order (trigger function _orders_direct_edit_guard): status and
+--      hold_reason only; from new, on hold or backordered to new, on hold or cancelled; by ShipBay admin or staff, or by the
+--      brand's own client login; and not once the order has picked units, packages, a shipment, or a place on a wave that is
+--      being picked or packed. Every such change is written to the status history with the login, by the existing trigger.
+--   4. _order_commitment(order): the one new callable function. Read-only; says in words why an order can no longer be held or
+--      cancelled directly, or returns nothing. Signed-in logins only; answers only for ShipBay logins and the order's own brand.
+begin;
+
+-- 4. why an order is past direct hold / cancel ---------------------------------------------------------------------------------
+create or replace function public._order_commitment(p_order uuid) returns text
+language plpgsql stable security definer set search_path to 'public' as $$
+declare o orders; n int;
+begin
+  select * into o from orders where id = p_order;
+  if o.id is null then return null; end if;
+  if auth.uid() is not null and not (is_shipbay() or is_wms_staff() or o.org_id = current_org_id()) then return null; end if;
+  if exists (select 1 from shipments s where s.order_id = o.id) then return 'it has a shipment'; end if;
+  if exists (select 1 from wms_packages k where k.order_id = o.id) then return 'it has been packed'; end if;
+  if exists (select 1 from wms_picks k where k.order_id = o.id and k.undone_at is null)
+     or exists (select 1 from order_lines l where l.order_id = o.id and (l.picked_at is not null or coalesce(l.qty_verified, 0) > 0)) then return 'it has picked units'; end if;
+  select w.seq into n from wms_wave_orders wo join wms_waves w on w.id = wo.wave_id where wo.order_id = o.id and w.status in ('picking', 'packing') limit 1;
+  if n is not null then return 'it is on wave ' || n || ', which is being picked or packed'; end if;
+  return null;
+end $$;
+
+-- 3. the only direct edit a signed-in login may make ----------------------------------------------------------------------------
+-- Runs with the caller's rights on purpose: current_user is 'authenticated' (or 'anon') only when the statement comes straight
+-- from the API. Inside the workflow functions it is their owner, and under the service key it is service_role.
+create or replace function public._orders_direct_edit_guard() returns trigger
+language plpgsql set search_path to 'public' as $$
+declare v_changed text[]; v_why text;
+begin
+  if current_user not in ('authenticated', 'anon') then return new; end if;
+  select coalesce(array_agg(n.key order by n.key), '{}') into v_changed from jsonb_each(to_jsonb(new)) n where n.key <> 'updated_at' and n.value is distinct from (to_jsonb(old) -> n.key);
+  if v_changed = '{}' then return new; end if;
+  if not (v_changed <@ array['status', 'hold_reason']) then
+    raise exception 'Only an order''s hold, release and cancel can be changed here (not %).', array_to_string(v_changed, ', ') using errcode = '42501';
+  end if;
+  if not (wms_nexus_admin() or old.org_id = current_org_id()) then
+    raise exception 'Only ShipBay admin or staff, or the brand itself, can hold or cancel an order.' using errcode = '42501';
+  end if;
+  if new.status is distinct from old.status then
+    if old.status not in ('new', 'on_hold', 'backordered') or new.status not in ('new', 'on_hold', 'cancelled') then
+      raise exception 'An order that is % cannot be set to % here.', old.status, new.status using errcode = '42501';
+    end if;
+    v_why := _order_commitment(old.id);
+    if v_why is not null then
+      raise exception 'Order % cannot be held or cancelled here: %. Undo that work first.', old.order_number, v_why using errcode = '42501';
+    end if;
+  elsif old.status <> 'on_hold' then
+    raise exception 'A hold reason can only be changed on an order that is on hold.' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+
+-- 2. history rules for every caller ---------------------------------------------------------------------------------------------
+create or replace function public._orders_history_guard() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+declare v_org uuid; v_demo uuid;
+begin
+  if tg_op = 'TRUNCATE' then raise exception 'Order history cannot be emptied (%).', tg_table_name using errcode = '42501'; end if;
+
+  if tg_table_name = 'events' then   -- UPDATE or DELETE only
+    if tg_op = 'DELETE' and not exists (select 1 from orgs g where g.id = old.org_id) then return old; end if;   -- its brand is being deleted (a brand with orders or stock cannot be)
+    raise exception 'The status history cannot be edited or deleted.' using errcode = '42501';
+  end if;
+
+  if auth.uid() is not null and exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'shipbay_sales') then
+    raise exception 'A sales login cannot change orders or shipments.' using errcode = '42501';
+  end if;
+  select d.org_id into v_demo from wms_demo_brand d;
+
+  if tg_table_name = 'orders' then
+    if tg_op = 'INSERT' then return new; end if;
+    if tg_op = 'DELETE' then
+      if old.org_id = v_demo then return old; end if;   -- the registered demo brand's sample orders are rebuilt by wms_demo_reset
+      raise exception 'An order cannot be deleted. Cancel it instead. (A brand with orders cannot be deleted either.)' using errcode = '42501';
+    end if;
+    if new.id is distinct from old.id or new.org_id is distinct from old.org_id or new.created_at is distinct from old.created_at or new.created_by is distinct from old.created_by then
+      raise exception 'An order''s brand, id, creation time and author cannot be changed.' using errcode = '42501';
+    end if;
+    if old.status = 'shipped' and new.status is distinct from old.status then
+      raise exception 'Order % has shipped; its status cannot be changed.', old.order_number using errcode = '42501';
+    end if;
+    return new;
+  end if;
+
+  if tg_table_name = 'order_lines' then
+    if tg_op = 'DELETE' then
+      select o.org_id into v_org from orders o where o.id = old.order_id;
+      if v_org is null or v_org = v_demo then return old; end if;   -- its order is being deleted (only a demo order can be), or it is a demo line
+      if old.picked_at is not null or coalesce(old.qty_verified, 0) > 0 or exists (select 1 from wms_picks k where k.line_id = old.id)
+         or exists (select 1 from wms_wave_task_lines t where t.line_id = old.id) or exists (select 1 from wms_packages k where k.order_id = old.order_id) or exists (select 1 from shipments s where s.order_id = old.order_id) then
+        raise exception 'An order line with pick, pack, wave or shipment history cannot be deleted.' using errcode = '42501';
+      end if;
+      return old;
+    end if;
+    if tg_op = 'UPDATE' and (new.id is distinct from old.id or new.order_id is distinct from old.order_id) then
+      raise exception 'An order line cannot be moved to another order.' using errcode = '42501';
+    end if;
+    select o.org_id into v_org from orders o where o.id = new.order_id;
+    if new.sku_id is not null and not exists (select 1 from skus s where s.id = new.sku_id and s.org_id = v_org) then
+      raise exception 'An order line must be for a product of the order''s own brand.' using errcode = '23514';
+    end if;
+    return new;
+  end if;
+
+  if tg_table_name = 'shipments' then
+    if tg_op = 'DELETE' then
+      select o.org_id into v_org from orders o where o.id = old.order_id;
+      if v_org is null or old.org_id = v_demo then return old; end if;   -- its (demo) order is being deleted, or it is a demo shipment
+      raise exception 'A shipment cannot be deleted.' using errcode = '42501';
+    end if;
+    if tg_op = 'UPDATE' and (new.id is distinct from old.id or new.order_id is distinct from old.order_id or new.org_id is distinct from old.org_id or new.created_at is distinct from old.created_at) then
+      raise exception 'A shipment cannot be moved to another order or brand.' using errcode = '42501';
+    end if;
+    if not exists (select 1 from orders o where o.id = new.order_id and o.org_id = new.org_id) then
+      raise exception 'A shipment must carry the brand of its own order.' using errcode = '23514';
+    end if;
+    return new;
+  end if;
+  return coalesce(new, old);
+end $$;
+
+revoke all on function public._orders_history_guard() from public, anon, authenticated, service_role;
+revoke all on function public._orders_direct_edit_guard() from public, anon, authenticated, service_role;
+revoke all on function public._order_commitment(uuid) from public, anon, service_role;
+grant execute on function public._order_commitment(uuid) to authenticated;
+
+create or replace trigger orders_history_guard before insert or update or delete on public.orders for each row execute function public._orders_history_guard();
+create or replace trigger orders_direct_edit_guard before update on public.orders for each row execute function public._orders_direct_edit_guard();
+create or replace trigger orders_no_truncate before truncate on public.orders for each statement execute function public._orders_history_guard();
+create or replace trigger order_lines_history_guard before insert or update or delete on public.order_lines for each row execute function public._orders_history_guard();
+create or replace trigger order_lines_no_truncate before truncate on public.order_lines for each statement execute function public._orders_history_guard();
+create or replace trigger shipments_history_guard before insert or update or delete on public.shipments for each row execute function public._orders_history_guard();
+create or replace trigger shipments_no_truncate before truncate on public.shipments for each statement execute function public._orders_history_guard();
+create or replace trigger events_history_guard before update or delete on public.events for each row execute function public._orders_history_guard();
+create or replace trigger events_no_truncate before truncate on public.events for each statement execute function public._orders_history_guard();
+-- (a rollback only switches the triggers off; applying this file again must switch them back on)
+alter table public.orders enable trigger orders_history_guard;
+alter table public.orders enable trigger orders_direct_edit_guard;
+alter table public.orders enable trigger orders_no_truncate;
+alter table public.order_lines enable trigger order_lines_history_guard;
+alter table public.order_lines enable trigger order_lines_no_truncate;
+alter table public.shipments enable trigger shipments_history_guard;
+alter table public.shipments enable trigger shipments_no_truncate;
+alter table public.events enable trigger events_history_guard;
+alter table public.events enable trigger events_no_truncate;
+
+-- 1. privileges ---------------------------------------------------------------------------------------------------------------
+revoke insert, delete, truncate, references, trigger on table public.orders from public, anon, authenticated;
+revoke insert, update, delete, truncate, references, trigger on table public.order_lines from public, anon, authenticated;
+revoke insert, update, delete, truncate, references, trigger on table public.shipments from public, anon, authenticated;
+revoke insert, update, delete, truncate, references, trigger on table public.events from public, anon, authenticated;
+revoke insert, update, delete, truncate, references, trigger on table public.wms_picks from public, anon, authenticated;
+revoke delete, truncate on table public.returns from public, anon, authenticated;
+
+-- restrictive access rules (created once; ALTER keeps them closed if this file is applied again)
+do $$ declare r record; p text;
+begin
+  for r in select * from (values ('orders', 'insert'), ('orders', 'delete'), ('order_lines', 'insert'), ('order_lines', 'update'), ('order_lines', 'delete'),
+      ('shipments', 'insert'), ('shipments', 'update'), ('shipments', 'delete'), ('events', 'insert'), ('events', 'update'), ('events', 'delete'), ('returns', 'delete')) v(tbl, cmd) loop
+    p := r.tbl || '_no_direct_' || r.cmd;
+    if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = r.tbl and policyname = p) then
+      execute format('create policy %I on public.%I as restrictive for %s to public %s', p, r.tbl, r.cmd,
+        case r.cmd when 'insert' then 'with check (false)' when 'update' then 'using (false) with check (false)' else 'using (false)' end);
+    end if;
+    execute format('alter policy %I on public.%I %s', p, r.tbl, case r.cmd when 'insert' then 'with check (false)' when 'update' then 'using (false) with check (false)' else 'using (false)' end);
+  end loop;
+end $$;
+commit;
