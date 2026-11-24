@@ -26,13 +26,13 @@ const server = http.createServer((req, res) => {
   if (p.startsWith('/rest/v1/')) { res.writeHead(404); res.end('{}'); return; }
   const f = path.resolve(BUILD, '.' + p); const file = f.startsWith(BUILD + path.sep) && fs.existsSync(f) && fs.statSync(f).isFile() ? f : path.join(BUILD, 'putaway.html');
   res.setHeader('Content-Type', { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff' }[path.extname(file)] || 'application/octet-stream'); fs.createReadStream(file).pipe(res);
-}).listen(4631, '127.0.0.1');
+}).listen(Number(process.env.PORT || 4631), '127.0.0.1');
 (async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROME || undefined }); const outside = []; const errors = [];
   const ctx = await browser.newContext({ viewport: { width: 1320, height: 1100 } });
   await ctx.route('**/*', (r) => { const h = new URL(r.request().url()).hostname; if (h === '127.0.0.1') return r.fallback(); outside.push(r.request().url()); return r.abort(); });
   const p = await ctx.newPage(); p.on('pageerror', (e) => errors.push(e.message));
-  await p.goto('http://127.0.0.1:4631/'); await p.waitForSelector('[data-testid=pa-shared]');
+  await p.goto(`http://127.0.0.1:${process.env.PORT || 4631}/`); await p.waitForSelector('[data-testid=pa-shared]');
   const head = norm(await p.locator('[data-testid=pa-floor]').innerText());
   ok(head === 'Nexus floor HILLSBOROUGH-TEST · map version 4 · read-only', `header: ${head}`);
   ok(norm(await p.locator('[data-testid=pa-checksum]').innerText()) === `Map checksum ${SUM}`, 'full map checksum shown');

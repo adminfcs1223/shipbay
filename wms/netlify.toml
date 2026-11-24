@@ -9,6 +9,10 @@
   VITE_SUPABASE_URL = "https://poxlczzkpztmoiixyrth.supabase.co"
   VITE_SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBveGxjenprcHp0bW9paXh5cnRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc2MTAyNDYsImV4cCI6MjEwMzE4NjI0Nn0.Jo9epu0FhaSHhLs9ChL1-zNYoGKSxroM47PuAY5pD00"
 
+  # The shared-floor screen (Put away) through ShipBay's bridge, on the production database only. Placing pallets stays
+  # off until the bridge's own movement settings are switched on.
+  VITE_NEXUS_BRIDGE = "production"
+
 [[headers]]
   for = "/*"
   [headers.values]

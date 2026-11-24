@@ -4,10 +4,12 @@
 //   VITE_NEXUS_BRIDGE=on:    the Put-away tab appears and talks to the bridge of the database this build points at.
 // This build refuses to use the bridge of ShipBay's production database, whatever the setting says: the bridge it would
 // find there is staging-only and would refuse too, and the floor must not be shown a put-away screen that cannot work.
-const ON = ((import.meta.env && import.meta.env.VITE_NEXUS_BRIDGE) || '') === 'on';
+//   VITE_NEXUS_BRIDGE=production: the same screen on ShipBay's production database (the real floor), and only there.
+const FLAG = ((import.meta.env && import.meta.env.VITE_NEXUS_BRIDGE) || '');
 const BASE = (import.meta.env && import.meta.env.VITE_SUPABASE_URL) || ''; const KEY = (import.meta.env && import.meta.env.VITE_SUPABASE_KEY) || '';
 export const PRODUCTION_DB_REF = 'poxlczzkpztmoiixyrth';
-export const BRIDGE = ON && !!BASE && !BASE.includes(PRODUCTION_DB_REF);
+const ON_PRODUCTION = BASE.includes(PRODUCTION_DB_REF);
+export const BRIDGE = !!BASE && ((FLAG === 'on' && !ON_PRODUCTION) || (FLAG === 'production' && ON_PRODUCTION));
 
 let tokenOf = async () => null;
 /** The app tells the bridge client how to get the signed-in user's access token. */

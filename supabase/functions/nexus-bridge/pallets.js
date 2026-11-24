@@ -53,6 +53,10 @@ async function request(ctx, fn, args, scope) {
   let op; try { op = await ctx.user.rpc(fn, args); } catch (e) { return ctx.fail(409, 'refused_by_shipbay', String(e?.message || 'ShipBay refused the request.')); }
   const r = await send(ctx, op); return ctx.send(r.body, r.status);
 }
+// The real floor starts blank: a position may hold stock that is not on any system, so every placement there needs the employee's
+// confirmation, at the position, that it is physically empty. Refused before ShipBay's journal or Nexus is touched.
+const unconfirmed = (ctx) => (ctx.cfg.mode === 'production' && ctx.body.confirmed_clear !== true
+  ? ctx.fail(400, 'location_not_confirmed', 'Look at the position and confirm it is physically empty before placing a pallet there. Nothing was sent.') : null);
 const scans = (ctx) => { const psku = clean(ctx.body.psku), location = clean(ctx.body.location); return psku && location ? { psku, location } : null; };
 
 // ShipBay's journal next to Nexus's occupancy. Admin or staff only. Read-only: it reports, it corrects nothing.
@@ -83,8 +87,8 @@ export function registrySnapshot(map) {
 }
 
 export const palletRoutes = [
-  { method: 'POST', match: /^\/putaway$/, run: (ctx) => { const s = scans(ctx); return s ? request(ctx, 'wms_putaway_begin', { p_psku: s.psku, p_location: s.location }, { pallet: s.psku, positions: [s.location] }) : ctx.fail(400, 'bad_request', 'Scan the pallet label and the position.'); } },
-  { method: 'POST', match: /^\/move$/, run: (ctx) => { const s = scans(ctx); return s ? request(ctx, 'wms_move_begin', { p_psku: s.psku, p_location: s.location }, { pallet: s.psku, positions: [s.location] }) : ctx.fail(400, 'bad_request', 'Scan the pallet label and the position.'); } },
+  { method: 'POST', match: /^\/putaway$/, run: (ctx) => { const s = scans(ctx); if (s && unconfirmed(ctx)) return unconfirmed(ctx); return s ? request(ctx, 'wms_putaway_begin', { p_psku: s.psku, p_location: s.location }, { pallet: s.psku, positions: [s.location] }) : ctx.fail(400, 'bad_request', 'Scan the pallet label and the position.'); } },
+  { method: 'POST', match: /^\/move$/, run: (ctx) => { const s = scans(ctx); if (s && unconfirmed(ctx)) return unconfirmed(ctx); return s ? request(ctx, 'wms_move_begin', { p_psku: s.psku, p_location: s.location }, { pallet: s.psku, positions: [s.location] }) : ctx.fail(400, 'bad_request', 'Scan the pallet label and the position.'); } },
   // Explicit release: a person at the position states the pallet is no longer standing there, and says why it left.
   { method: 'POST', match: /^\/release$/, run: (ctx) => { const s = scans(ctx);
     if (!s) return ctx.fail(400, 'bad_request', 'Give the pallet and the position it left.');

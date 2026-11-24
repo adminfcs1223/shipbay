@@ -16,6 +16,7 @@ const NO_PALLET_RESET = ['location_full', 'location_blocked', 'location_unavaila
 export default function PutAway() {
   const [mode, setMode] = useState('putaway');
   const [psku, setPsku] = useState(null); const [busy, setBusy] = useState(false);
+  const [clear, setClear] = useState(null);              // real floor: the position waiting for the employee's "it is physically empty"
   const [last, setLast] = useState(null);                // { tone: 'ok' | 'bad' | 'wait', title, text, again? }
   const [floor, setFloor] = useState(null); const [status, setStatus] = useState(null); const [open, setOpen] = useState([]);
   const [rel, setRel] = useState({ at: null, reason: '', sure: false });   // release: the position scanned, why, and the confirmation
@@ -28,7 +29,7 @@ export default function PutAway() {
     if (s.ok && s.connection !== 'off') { const r = await bridge('/reconcile'); setExc(r.ok ? r.exceptions || null : null); }   // 403 for floor staff: the section simply does not show
   };
   useEffect(() => { refresh(); const t = setInterval(refresh, 60000); return () => clearInterval(t); }, []);
-  const pick = (m) => { setMode(m); setPsku(null); setLast(null); setRel({ at: null, reason: '', sure: false }); };
+  const pick = (m) => { setMode(m); setPsku(null); setClear(null); setLast(null); setRel({ at: null, reason: '', sure: false }); };
 
   const call = async (path, body, done) => {
     setBusy(true); setLast(null); const r = await bridge(path, { method: 'POST', body }); setBusy(false);
@@ -37,7 +38,7 @@ export default function PutAway() {
     else { beep('bad'); setLast({ tone: 'bad', title: r.error === 'out_of_sync' ? 'Needs an admin.' : 'Not done.', text: r.message || 'The request was refused.' }); if (!NO_PALLET_RESET.includes(r.error)) setPsku(null); }
     refresh();
   };
-  const place = (p, to) => call(mode === 'move' ? '/move' : '/putaway', { psku: p, location: to },
+  const place = (p, to, confirmedClear = false) => call(mode === 'move' ? '/move' : '/putaway', { psku: p, location: to, ...(confirmedClear ? { confirmed_clear: true } : {}) },
     (r) => ({ title: `${r.psku} is at ${r.location}.`, text: mode === 'move' ? `Moved from ${r.from}. Quantity unchanged.` : `${num(r.units_posted)} units are on the shelf count.` }));
   const release = (p) => call('/release', { psku: p, location: rel.at, reason: rel.reason, confirmed: true }, (r) => ({ title: `${r.from} is free.`, text: r.note ? `${r.psku} left the floor. ${r.note}` : r.pallet_status === 'off_floor' ? `${r.psku} is off the shared floor and still in ShipBay custody. Its stock is kept.` : `${r.psku} left the floor. Its stock was not changed.` }));
   const retryAll = async () => { setBusy(true); const r = await bridge('/pending/retry', { method: 'POST' }); setBusy(false);
@@ -53,6 +54,7 @@ export default function PutAway() {
   const taken = pallets.filter((l) => Number(l.used) > 0 || l.status !== 'open');
   const here = rel.at ? pallets.find((l) => l.code === rel.at) : null;
   const closed = status && (!status.ok || status.connection === 'off' || !status.pallet_moves);
+  const realFloor = status?.floor === 'HILLSBOROUGH';   // the real floor: every placement needs the employee's confirmation that the position is empty
   const notOpen = floor?.ok && !floor.moves_enabled;
   const waiting = open.filter((o) => o.state === 'pending'); const broken = open.filter((o) => o.state === 'out_of_sync');
 
@@ -74,7 +76,9 @@ export default function PutAway() {
           ? <ScanBox key="p" autoFocus placeholder="Scan the pallet label" onScan={(c) => { setLast(null); setPsku(normPsku(c)); }} />
           : (<>
             <div className="hold" data-testid="pa-pallet" style={{ marginBottom: 12 }}><b>{psku}</b> · now scan the position it is standing in. <button className="btn sm" onClick={() => setPsku(null)}>Different pallet</button></div>
-            <ScanBox key="l" autoFocus placeholder={busy ? 'Asking Nexus…' : 'Scan the position label'} onScan={(c) => { if (!busy) place(psku, loc(c)); }} />
+            <ScanBox key="l" autoFocus placeholder={busy ? 'Asking Nexus…' : 'Scan the position label'} onScan={(c) => { if (busy) return; if (realFloor) setClear(loc(c)); else place(psku, loc(c)); }} />
+            {realFloor && clear && <div className="hold" data-testid="pa-confirm" style={{ marginTop: 12 }}><b>Look at {clear} now.</b> Place {psku} only if nothing is standing there, including stock that is not on the system.
+              <div style={{ marginTop: 10, display: 'flex', gap: 8 }}><button className="btn" data-testid="pa-confirm-yes" disabled={busy} onClick={() => { const to = clear; setClear(null); place(psku, to, true); }}>{clear} is empty: place {psku}</button><button className="btn sm" onClick={() => setClear(null)}>No, pick another position</button></div></div>}
           </>))}
         {mode === 'release' && (!rel.at
           ? <ScanBox key="r" autoFocus placeholder="Go to the position and scan its label" onScan={(c) => { setLast(null); setRel({ at: loc(c), reason: '', sure: false }); }} />
