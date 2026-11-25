@@ -6,7 +6,7 @@
 //   NEXUS_BRIDGE_MODE       unset or "off": every route answers 503 and nothing is called. "staging": the test floor
 //                           HILLSBOROUGH-TEST, never from the production database. "production": the real floor HILLSBOROUGH,
 //                           only from ShipBay's production database and only with NEXUS_PRODUCTION_API_KEY. Anything else: refused.
-//   NEXUS_PRODUCTION_API_KEY ShipBay's key for the real floor (production mode only). Same handling as the staging key.
+//   NEXUS_PRODUCTION_READ_KEY ShipBay's key for the real floor (production mode only; NEXUS_PRODUCTION_API_KEY also read). Same handling.
 //   NEXUS_STAGING_API_KEY   ShipBay's staging key. Read here, sent only to the fixed staging host, never logged or returned.
 //   NEXUS_PALLET_MOVES      "on" to allow put-away, moves and releases. Anything else: those routes answer 503.
 //   NEXUS_REGISTRY_WRITES   "on" to allow the position list to be written into ShipBay. Anything else: the sync route only reports.
@@ -77,8 +77,9 @@ export function readConfig(env = {}) {
   } else if (mode === 'production') {
     // the real floor: only from ShipBay's production database, only with the production key (never the staging key)
     if (!onProduction) return no(503, 'not_production_database', 'The production connection runs only on ShipBay\'s production database.');
-    if (!env.NEXUS_PRODUCTION_API_KEY) return no(503, 'not_configured', 'The Nexus production key is not set.');
-    key = env.NEXUS_PRODUCTION_API_KEY; floor = REAL_FLOOR;
+    const prodKey = env.NEXUS_PRODUCTION_READ_KEY || env.NEXUS_PRODUCTION_API_KEY;   // ShipBay's company-scoped key for the real floor
+    if (!prodKey) return no(503, 'not_configured', 'The Nexus production key is not set.');
+    key = prodKey; floor = REAL_FLOOR;
   } else return no(503, 'mode_not_available', 'Unknown connection mode. Use staging or production.');
   return { ok: true, mode, base: `https://${STAGING_HOST}/functions/v1/nexus`, key, floor,
     palletMoves: env.NEXUS_PALLET_MOVES === 'on', registryWrites: env.NEXUS_REGISTRY_WRITES === 'on', calendarWrites: env.NEXUS_CALENDAR_WRITES === 'on',

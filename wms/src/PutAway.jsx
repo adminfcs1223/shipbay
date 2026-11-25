@@ -13,6 +13,41 @@ const MODES = [['putaway', 'Put away'], ['move', 'Move a stored pallet'], ['rele
 const REASONS = [['shipped_out', 'Shipped out'], ['emptied_and_removed', 'Emptied and removed'], ['moved_off_shared_floor', 'Moved off the shared floor'], ['correction', 'Correction (admin only)']];
 const NO_PALLET_RESET = ['location_full', 'location_blocked', 'location_unavailable', 'location_not_found'];
 
+// The shared floor exactly as Nexus draws it: its grid, its blocks and landmarks, every position at Nexus's own x/y, and what
+// Nexus says stands there. ShipBay keeps no copy: this is read fresh from Nexus each refresh. Other companies appear by name only.
+function FloorMap({ floor }) {
+  const grid = floor.layout?.grid || {}; const cols = Number(grid.cols) || 5; const rows = Number(grid.rows) || 18;
+  const occ = new Map((floor.locations || []).map((l) => [l.code, l]));
+  const cells = (floor.positions || []).filter((p) => p.x && p.y);
+  const blocks = (floor.layout?.blocks || []).filter((b) => b.key === 'walkway');
+  const marks = (floor.landmarks || []);
+  const tone = (p, o) => (p.status !== 'open' ? 'off' : !o || !Number(o.used) ? 'free' : (o.your_pallets || []).length ? 'mine' : 'other');
+  const colors = { free: ['#fff', '#cfd6df'], mine: ['#fff1e8', '#ff6b15'], other: ['#e9eef5', '#0f1b2a'], off: ['#f3f3f3', '#9aa3ad'] };
+  const edge = (where) => marks.filter((m) => m.edge === where);
+  const strip = (where) => <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 4, margin: '4px 0' }}>{edge(where).map((m) => <div key={m.key} style={{ gridColumn: `${m.x[0]} / ${m.x[1] + 1}`, textAlign: 'center', fontSize: 11, color: '#5a6473', letterSpacing: '.04em' }}>{m.label}</div>)}</div>;
+  return (
+    <div data-testid="pa-map">
+      {strip('top')}
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 34px)`, gap: 4 }}>
+        {blocks.map((b) => <div key={b.key} style={{ gridColumn: `${b.x[0]} / ${b.x[1] + 1}`, gridRow: `${b.y[0]} / ${b.y[1] + 1}`, background: 'repeating-linear-gradient(0deg,#f7f6f3,#f7f6f3 10px,#efeee9 10px,#efeee9 20px)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#8a93a3', writingMode: 'vertical-rl' }}>{b.label}</div>)}
+        {cells.map((p) => { const o = occ.get(p.code); const t = tone(p, o); const [bg, bd] = colors[t];
+          const who = o && Number(o.used) ? (o.occupants || []).map((x) => x.company === 'SHIPBAY' ? 'ShipBay' : x.company).join(', ') : '';
+          return <div key={p.code} data-testid={`map-${p.code}`} data-tone={t} title={`${p.code} · ${p.status}${who ? ` · ${who}` : ' · empty in Nexus'}${(o?.your_pallets || []).length ? ` · ${o.your_pallets.join(', ')}` : ''}`}
+            style={{ gridColumn: p.x, gridRow: p.y, background: bg, border: `1.5px solid ${bd}`, borderRadius: 4, padding: '2px 6px', fontSize: 11, lineHeight: 1.25, overflow: 'hidden', fontVariantNumeric: 'tabular-nums' }}>
+            <b>{p.code}</b><div style={{ fontSize: 10, color: '#5a6473', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.status !== 'open' ? p.status : who || 'empty'}</div></div>; })}
+      </div>
+      {strip('bottom')}
+      <p style={{ fontSize: 12, color: '#5a6473', marginTop: 10 }}>
+        <span style={{ borderLeft: '10px solid #cfd6df', paddingLeft: 6, marginRight: 14 }}>Empty in Nexus</span>
+        <span style={{ borderLeft: '10px solid #ff6b15', paddingLeft: 6, marginRight: 14 }}>ShipBay</span>
+        <span style={{ borderLeft: '10px solid #0f1b2a', paddingLeft: 6, marginRight: 14 }}>Another company</span>
+        <span style={{ borderLeft: '10px solid #9aa3ad', paddingLeft: 6 }}>Not open</span>
+        {' '}· "Empty in Nexus" is not a promise the floor is clear: look before placing.
+      </p>
+    </div>
+  );
+}
+
 export default function PutAway() {
   const [mode, setMode] = useState('putaway');
   const [psku, setPsku] = useState(null); const [busy, setBusy] = useState(false);
@@ -114,6 +149,11 @@ export default function PutAway() {
       {waiting.length > 0 && <section className="panel pad" data-testid="pa-open">
         <header className="panelhead"><h3>Not confirmed by Nexus</h3><button className="btn sm" disabled={busy} onClick={retryAll}>Send all again</button></header>
         <ul className="sc-list">{waiting.map((o) => <li key={o.op} className="sc-row"><div><b>{o.pallet} {o.kind === 'release' ? `leaving ${o.from}` : `to ${o.to}`}</b><span>Not confirmed yet. Sent {o.attempts} time{o.attempts === 1 ? '' : 's'} by {o.by || 'staff'}.</span></div></li>)}</ul>
+      </section>}
+
+      {floor?.ok && (floor.positions || []).some((p) => p.x && p.y) && <section className="panel pad">
+        <header className="panelhead"><h3>Warehouse map</h3><span>{num((floor.positions || []).length)} positions · {num((floor.locations || []).filter((l) => Number(l.used) > 0).length)} in use · from Nexus, refreshed every minute</span></header>
+        <FloorMap floor={floor} />
       </section>}
 
       {floor?.ok && <section className="panel pad" data-testid="pa-shared">
