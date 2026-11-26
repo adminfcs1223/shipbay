@@ -685,3 +685,34 @@ label input.bignum { height: 59px; font-size: 26px; font-weight: 800; font-varia
 .sc-tools .sc-dot { margin-right: 0; } .sc-tools .sc-dot.other { background: var(--ink); box-shadow: 0 0 0 1.5px currentColor; }
 
 .sc-row.tentative { border-left-style: dashed; }
+
+/* Warehouse Map: the real Nexus floor. White open, blue Souled, orange ShipBay, grey unknown or error. */
+.wm-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr); gap: 18px; align-items: start; margin-top: 18px; }
+@media (max-width: 1100px) { .wm-layout { grid-template-columns: 1fr; } }
+.wm-floor { max-width: 620px; margin: 0 auto; }
+.wm-floor.wm-off { min-height: 320px; display: flex; align-items: center; justify-content: center; background: #c9cdd3; color: #3a414b; border-radius: var(--r); font-weight: 600; }
+.wm-sides { display: grid; gap: 6px; padding: 0 12px 4px; font-size: 12px; font-weight: 700; color: var(--muted); text-align: center; }
+.wm-wall { display: grid; gap: 0; height: 22px; align-items: stretch; }
+.wm-wall .wm-solid { border-top: 5px solid var(--ink); }
+.wm-wall.bottom .wm-solid { border-top: 0; border-bottom: 5px solid var(--ink); }
+.wm-door { display: flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 700; color: var(--ink); border-top: 5px dashed #FF6B15; margin: 0 3px; }
+.wm-wall.bottom .wm-door { border-top: 0; border-bottom: 5px dashed #FF6B15; }
+.wm-grid { display: grid; gap: 5px; padding: 8px 12px; border-left: 5px solid var(--ink); border-right: 5px solid var(--ink); background: #F7F6F3; }
+.wm-walk { background: repeating-linear-gradient(0deg, #f1efea, #f1efea 12px, #e8e6e0 12px, #e8e6e0 24px); border-radius: 4px; display: flex; align-items: center; justify-content: center; }
+.wm-walk span { writing-mode: vertical-rl; font-size: 12px; font-weight: 700; color: #8a93a3; letter-spacing: .08em; }
+.wm-stglabel { align-self: center; text-align: center; font-size: 11px; font-weight: 700; color: var(--muted); }
+.wm-tile { display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1.5px solid; border-radius: 5px; padding: 0 4px; font: inherit; cursor: pointer; min-width: 0; overflow: hidden; }
+.wm-tile b { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.wm-tile small { font-size: 10px; font-weight: 600; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; opacity: .92; }
+.wm-tile.sel { outline: 3px solid var(--ink); outline-offset: 1px; }
+.wm-tile:focus-visible { outline: 3px solid #FF6B15; outline-offset: 1px; }
+.wm-legend { display: flex; flex-wrap: wrap; gap: 16px; justify-content: center; margin-top: 12px; font-size: 13px; color: var(--muted); }
+.wm-legend i { display: inline-block; width: 14px; height: 14px; border: 1.5px solid; border-radius: 3px; vertical-align: -2px; margin-right: 6px; }
+.wm-legend b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.wm-act .scanbox { margin-bottom: 4px; }
+.wm-seg { width: 100%; margin-bottom: 18px; }
+.wm-seg button { flex: 1; padding: 0 10px; height: 46px; font-size: 14px; }
+.wm-step { display: block; font-weight: 700; font-size: 14px; margin: 14px 0 6px; }
+.wm-confirm { margin-top: 14px; }
+.wm-warn { color: var(--red); font-weight: 600; margin: 8px 0 0; }
+.wm-act .sm, .wm-mappanel .sm { font-size: 13px; color: var(--muted); }

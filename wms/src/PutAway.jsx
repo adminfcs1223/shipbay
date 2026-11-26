@@ -1,3 +1,4 @@
+// SUPERSEDED in the app by WarehouseMap.jsx (2026-11-25). Kept only for the staging put-away browser tests in test/putaway-e2e.
 // WMS → Put away: place, move and release pallets on the shared floor. ShipBay checks its own rules, Nexus decides who
 // stands where, and only then does ShipBay record it. Every answer on this screen comes from ShipBay's bridge; the browser
 // never talks to Nexus. Only present in a build made with VITE_NEXUS_BRIDGE=on.

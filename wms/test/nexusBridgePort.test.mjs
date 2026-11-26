@@ -11,7 +11,7 @@ test('database port: the user\'s own token for user calls, the service key only 
   await assert.rejects(db.user('T').rpc('boom', {}), /already holds a ShipBay pallet/); await assert.rejects(db.user('T').rpc('x; drop table y', {}), /bad function name/);
 });
 test('settings: off unless set to staging; the Nexus address is fixed and cannot be set from outside; both write switches default to off', () => {
-  assert.equal(readConfig({}).error, 'bridge_off'); assert.equal(readConfig({ NEXUS_BRIDGE_MODE: 'production', NEXUS_STAGING_API_KEY: 'k' }).error, 'mode_not_available');
+  assert.equal(readConfig({}).error, 'bridge_off'); assert.equal(readConfig({ NEXUS_BRIDGE_MODE: 'production', NEXUS_STAGING_API_KEY: 'k' }).error, 'not_production_database'); assert.equal(readConfig({ NEXUS_BRIDGE_MODE: 'live', NEXUS_STAGING_API_KEY: 'k' }).error, 'mode_not_available');
   const c = readConfig({ NEXUS_BRIDGE_MODE: 'staging', NEXUS_STAGING_API_KEY: 'k', NEXUS_BASE: 'https://evil.example', NEXUS_HOST: 'evil.example' });
   assert.equal(c.base, `https://${STAGING_HOST}/functions/v1/nexus`); assert.deepEqual([c.palletMoves, c.calendarWrites, c.floor], [false, false, 'HILLSBOROUGH-TEST']);
 });

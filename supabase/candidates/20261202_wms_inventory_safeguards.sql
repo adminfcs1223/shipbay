@@ -222,7 +222,11 @@ begin
   end if;
   return new;
 end $$;
-drop trigger if exists wms_pallets_shared_gate on public.wms_pallets;
-create trigger wms_pallets_shared_gate before insert or update on public.wms_pallets for each row execute function public._wms_shared_position_gate();
+-- Created only if missing (no trigger is removed): production has never had it.
+do $trg$ begin
+  if not exists (select 1 from pg_trigger where tgname = 'wms_pallets_shared_gate' and tgrelid = 'public.wms_pallets'::regclass) then
+    create trigger wms_pallets_shared_gate before insert or update on public.wms_pallets for each row execute function public._wms_shared_position_gate();
+  end if;
+end $trg$;
 revoke all on function public._wms_shared_position_gate() from public, anon, authenticated;
 commit;

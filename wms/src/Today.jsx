@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from './lib';
 import { ENABLED as CALENDAR } from './nexusSource.js';
+import { BRIDGE } from './nexusBridge.js';
 
 const num = (n) => Number(n || 0).toLocaleString('en-US');
 const plural = (n, w, ws) => `${num(n)} ${Number(n) === 1 ? w : ws || `${w}s`}`;
@@ -76,7 +77,7 @@ export default function Today({ me, go, openBrand }) {
           <div className="floor">
             <button onClick={() => go('receive')}><b>{num(d.pallets.received_today)}</b><small>Received today</small></button>
             <button onClick={() => go('pallets')}><b className={d.pallets.to_scan ? 'hot' : ''}>{num(d.pallets.to_scan)}</b><small>Cartons to scan in</small></button>
-            <button onClick={() => go('pallets')}><b className={d.pallets.to_put_away ? 'hot' : ''}>{num(d.pallets.to_put_away)}</b><small>To put away</small></button>
+            <button onClick={() => go(BRIDGE ? 'map' : 'pallets')}><b className={d.pallets.to_put_away ? 'hot' : ''}>{num(d.pallets.to_put_away)}</b><small>To put away</small></button>
           </div>
           <button className="btn big go" onClick={() => go('receive')}>Receive a pallet</button>
         </section>

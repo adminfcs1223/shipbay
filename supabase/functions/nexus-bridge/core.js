@@ -2,11 +2,15 @@
 // Function (index.ts) and under `node --test`. The browser never talks to Nexus and never holds a Nexus key: the signed-in
 // WMS calls this bridge with the user's own ShipBay login, and the bridge holds the key.
 //
-// What this build can connect to: Nexus STAGING and its test floor only.
+// What this build can connect to: the Nexus test floor (staging) or the real floor (production).
 //   NEXUS_BRIDGE_MODE       unset or "off": every route answers 503 and nothing is called. "staging": the test floor
 //                           HILLSBOROUGH-TEST, never from the production database. "production": the real floor HILLSBOROUGH,
-//                           only from ShipBay's production database and only with NEXUS_PRODUCTION_API_KEY. Anything else: refused.
-//   NEXUS_PRODUCTION_READ_KEY ShipBay's key for the real floor (production mode only; NEXUS_PRODUCTION_API_KEY also read). Same handling.
+//                           only from ShipBay's production database. Anything else: refused.
+//   NEXUS_PRODUCTION_READ_KEY ShipBay's read key for the real floor: maps and occupancy (production mode only).
+//   NEXUS_PRODUCTION_API_KEY  ShipBay's read + move key for the real floor: the ONLY key a placement, move or release is sent
+//                           with (it also reads when no read key is set). Not set: every pallet write is refused here.
+//                           In production the time window below does not apply: a placement needs the switch, this key, an
+//                           employee's confirmation at the position, and ShipBay's own rules; Nexus then decides.
 //   NEXUS_STAGING_API_KEY   ShipBay's staging key. Read here, sent only to the fixed staging host, never logged or returned.
 //   NEXUS_PALLET_MOVES      "on" to allow put-away, moves and releases. Anything else: those routes answer 503.
 //   NEXUS_REGISTRY_WRITES   "on" to allow the position list to be written into ShipBay. Anything else: the sync route only reports.
@@ -46,8 +50,13 @@ export function readMoveWindow(env = {}) {
 }
 /** null when a pallet write naming this pallet and these positions may be sent at this moment; otherwise why not. */
 export function moveAuthorization(env, now, { pallet = null, positions = [], floorCodesOnly = false } = {}) {
-  const w = readMoveWindow(env); const t = now();
   const no = (error, why) => ({ status: 503, error, message: `${why}. Nothing was sent to Nexus.` });
+  if ((env.NEXUS_BRIDGE_MODE || 'off') === 'production') {
+    // the real floor in daily use: only shared floor positions may be named; Nexus and ShipBay's rules decide the rest
+    for (const x of positions.map(pos).filter(Boolean)) if (!(floorCodesOnly && !/^(P|STG)-\d{2}$/.test(x)) && !/^(P|STG)-\d{2}$/.test(x)) return no('move_out_of_scope', `${x} is not a shared floor position`);
+    return null;
+  }
+  const w = readMoveWindow(env); const t = now();
   if (w.problem) return no('move_not_authorized', w.problem[0].toUpperCase() + w.problem.slice(1));
   if (!(t < w.until)) return no('move_window_closed', 'The movement authorization has expired');
   if (w.until - t > MOVE_WINDOW_MAX_MS) return no('move_not_authorized', 'The movement authorization reaches more than 60 minutes ahead and is not accepted');
@@ -69,7 +78,7 @@ export function readConfig(env = {}) {
   const mode = env.NEXUS_BRIDGE_MODE || 'off';
   if (mode === 'off') return no(503, 'bridge_off', 'The Nexus connection is switched off here.');
   const onProduction = String(env.SUPABASE_URL || '').includes(PRODUCTION_DB_REF);
-  let key, floor;
+  let key, floor, moveKey = null;
   if (mode === 'staging') {
     if (onProduction) return no(503, 'wrong_database', 'The staging connection does not run on the production database.');
     if (!env.NEXUS_STAGING_API_KEY) return no(503, 'not_configured', 'The Nexus staging key is not set.');
@@ -77,12 +86,13 @@ export function readConfig(env = {}) {
   } else if (mode === 'production') {
     // the real floor: only from ShipBay's production database, only with the production key (never the staging key)
     if (!onProduction) return no(503, 'not_production_database', 'The production connection runs only on ShipBay\'s production database.');
-    const prodKey = env.NEXUS_PRODUCTION_READ_KEY || env.NEXUS_PRODUCTION_API_KEY;   // ShipBay's company-scoped key for the real floor
-    if (!prodKey) return no(503, 'not_configured', 'The Nexus production key is not set.');
-    key = prodKey; floor = REAL_FLOOR;
+    const readKey = String(env.NEXUS_PRODUCTION_READ_KEY || env.NEXUS_PRODUCTION_API_KEY || '').trim();   // ShipBay's company-scoped keys for the real floor
+    if (!readKey) return no(503, 'not_configured', 'The Nexus production key is not set.');
+    key = readKey; moveKey = String(env.NEXUS_PRODUCTION_API_KEY || '').trim() || null; floor = REAL_FLOOR;
   } else return no(503, 'mode_not_available', 'Unknown connection mode. Use staging or production.');
-  return { ok: true, mode, base: `https://${STAGING_HOST}/functions/v1/nexus`, key, floor,
-    palletMoves: env.NEXUS_PALLET_MOVES === 'on', registryWrites: env.NEXUS_REGISTRY_WRITES === 'on', calendarWrites: env.NEXUS_CALENDAR_WRITES === 'on',
+  if (mode === 'staging') moveKey = key;
+  return { ok: true, mode, base: `https://${STAGING_HOST}/functions/v1/nexus`, key, moveKey, floor,
+    palletMoves: env.NEXUS_PALLET_MOVES === 'on' && !!moveKey, registryWrites: env.NEXUS_REGISTRY_WRITES === 'on', calendarWrites: env.NEXUS_CALENDAR_WRITES === 'on',
     testFaults: env.NEXUS_TEST_FAULTS === 'on' && hostOf(env.SUPABASE_URL) === DEV_DB_HOST };
 }
 
@@ -95,7 +105,7 @@ export function nexusClient(cfg, fetchImpl, { timeoutMs = 8000, now = Date.now, 
     const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), timeoutMs);
     try {
       const r = await fetchImpl(cfg.base + path, { method, signal: ctl.signal, body: body ? JSON.stringify(body) : undefined,
-        headers: { authorization: `Bearer ${cfg.key}`, ...(body ? { 'content-type': 'application/json' } : {}), ...(idem ? { 'idempotency-key': idem } : {}) } });
+        headers: { authorization: `Bearer ${method !== 'GET' && path.startsWith('/v1/pallets') ? cfg.moveKey : cfg.key}`, ...(body ? { 'content-type': 'application/json' } : {}), ...(idem ? { 'idempotency-key': idem } : {}) } });
       let j = null; try { j = await r.json(); } catch { /* not JSON */ }
       if (lose) return { status: 0, body: { ok: false, error: 'no_answer' }, lost: true };   // test fault: Nexus answered (and applied it); the answer is dropped here
       return { status: r.status, body: j && typeof j === 'object' ? j : { ok: false, error: 'bad_answer' } };
@@ -129,7 +139,7 @@ export function makeBridge({ env, fetchImpl, db, routes, now = Date.now, timeout
     const send = (body, status = 200) => json(body, status, cors); const fail = (status, error, message, extra = {}) => send({ ok: false, error, message, ...extra }, status);
     const path = url.pathname.replace(/^.*\/nexus-bridge/, '').replace(/\/+$/, '') || '/';
     const cfg = readConfig(env);
-    if (req.method === 'GET' && path === '/status') return send({ ok: true, connection: cfg.ok ? cfg.mode : 'off', reason: cfg.ok ? null : cfg.error, floor: cfg.ok ? cfg.floor : null, pallet_moves: !!cfg.palletMoves, registry_writes: !!cfg.registryWrites, calendar_writes: !!cfg.calendarWrites, test_faults: !!cfg.testFaults, move_window: windowStatus(env, now) });
+    if (req.method === 'GET' && path === '/status') return send({ ok: true, connection: cfg.ok ? cfg.mode : 'off', reason: cfg.ok ? null : cfg.error, floor: cfg.ok ? cfg.floor : null, pallet_moves: !!cfg.palletMoves, move_key: cfg.ok ? !!cfg.moveKey : false, registry_writes: !!cfg.registryWrites, calendar_writes: !!cfg.calendarWrites, test_faults: !!cfg.testFaults, move_window: cfg.ok && cfg.mode === 'production' ? null : windowStatus(env, now) });
     if (!cfg.ok) return fail(cfg.status, cfg.error, cfg.message);
     const token = (req.headers.get('authorization') || '').match(/^Bearer\s+(\S+)$/i)?.[1];
     if (!token) return fail(401, 'sign_in', 'Sign in to the WMS first.');

@@ -1,16 +1,15 @@
 // ShipBay WMS (wms.shipbay3pl.com). Same database as the dashboard. The floor signs in with an employee number + PIN
 // (created in the dashboard's Admin settings); admins can also use their dashboard email login.
-// Receiving (product → pallets + cartons → labels), Pallets (carton scan → put-away → received), Locations (the map).
+// Receiving (product → pallets + cartons → labels), Warehouse Map (the real Nexus floor: place, register, move, release, position labels).
 import { useEffect, useRef, useState } from 'react';
 import { PALLET_SCREEN, supabase, WMS_ROLES, EMBED, PARENT_ORIGINS, setAccess, signOut, getAccess } from './lib';
 import Today from './Today';
 import Orders from './Orders';
 import Receive from './Receive.jsx';
 import Pallets from './Pallets.jsx';
-import NexusFrame from './NexusFrame.jsx';
 import SharedCalendar from './SharedCalendar.jsx';
 import { ENABLED as CALENDAR } from './nexusSource.js';
-import PutAway from './PutAway.jsx';
+import WarehouseMap from './WarehouseMap.jsx';
 import { BRIDGE, useBridgeToken } from './nexusBridge.js';
 import VersionWatch from './VersionWatch.jsx';
 
@@ -20,10 +19,9 @@ const NAV = [
   ['today', 'Dashboard', 'M4 5h16v15H4zM4 10h16M8 3v4M16 3v4'],
   ['calendar', 'Calendar', 'M4 5h16v15H4zM4 10h16M8 3v4M16 3v4M8 14h3M13 14h3'],
   ['receive', 'Receiving', 'M3 7h13l5 5v7H3zM16 7v5h5M7 19v-5h6v5'],
-  ['putaway', 'Put away', 'M12 3v10M8 9l4 4 4-4M4 15h16v5H4z'],
+  ['map', 'Warehouse Map', 'M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15M15 6v15'],
   ['pallets', 'Pallets', 'M3 6h18v5H3zM5 11v7M19 11v7M12 11v7M3 18h18'],
   ['orders', 'Orders', 'M6 4h12v17l-3-2-3 2-3-2-3 2zM9 9h6M9 13h6'],
-  ['locations', 'Locations', 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z'],
 ];
 
 function Embedded() {
@@ -65,7 +63,9 @@ function Standalone() {
 }
 
 function Shell({ me }) {
-  const [page, setPage] = useState(() => (['#receive', ...(PALLET_SCREEN ? ['#pallets'] : []), '#orders', '#locations', ...(CALENDAR ? ['#calendar'] : []), ...(BRIDGE ? ['#putaway'] : [])].includes(window.location.hash) ? window.location.hash.slice(1) : 'today'));
+  // the old #putaway and #locations addresses open the Warehouse Map, which replaced both
+  const [page, setPage] = useState(() => { const h = window.location.hash; if (BRIDGE && ['#map', '#putaway', '#locations'].includes(h)) return 'map';
+    return ['#receive', ...(PALLET_SCREEN ? ['#pallets'] : []), '#orders', ...(CALENDAR ? ['#calendar'] : [])].includes(h) ? h.slice(1) : 'today'; });
   const [startBrand, setStartBrand] = useState(null);   // a brand handed from Today to Orders
   const [orgs, setOrgs] = useState(null);
   const [pallets, setPallets] = useState(null);
@@ -94,7 +94,7 @@ function Shell({ me }) {
     <div className="wms">
       <aside className="rail">
         <div className="mark"><img src="/brand/13-mono-horizontal-white.svg" alt="shipbay." /><span>WMS</span></div>
-        <nav>{NAV.filter(([k]) => (PALLET_SCREEN || k !== 'pallets') && (CALENDAR || k !== 'calendar') && (BRIDGE || k !== 'putaway')).map(([k, label, d]) => (
+        <nav>{NAV.filter(([k]) => (PALLET_SCREEN || k !== 'pallets') && (CALENDAR || k !== 'calendar') && (BRIDGE || k !== 'map')).map(([k, label, d]) => (
           <button key={k} className={page === k ? 'on' : ''} onClick={() => { setFind(''); setPage(k); setNavTick((t) => t + 1); }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>{label}
           </button>
@@ -112,8 +112,7 @@ function Shell({ me }) {
         {page === 'receive' && <Receive me={me} orgs={orgs} pallets={pallets} brandName={brandName} merge={merge} open={open} />}
         {PALLET_SCREEN && page === 'pallets' && <Pallets key={navTick} me={me} orgs={orgs} pallets={pallets} locations={locations} brandName={brandName} merge={merge} find={find} setFind={setFind} />}
         {CALENDAR && page === 'calendar' && <SharedCalendar key={navTick} go={(k) => { setFind(''); setPage(k); }} />}
-        {BRIDGE && page === 'putaway' && <PutAway key={navTick} />}
-        {page === 'locations' && <NexusFrame />}
+        {BRIDGE && page === 'map' && <WarehouseMap key={navTick} go={(k) => { setFind(''); setPage(k); }} />}
         <div className="phonewho"><span>{me.full_name || me.email}{me.employee_no ? ` · Employee ${me.employee_no}` : ''}</span><button onClick={() => signOut()}>{me.employee_no ? 'Switch employee' : 'Sign out'}</button></div>
       </main>
     </div>

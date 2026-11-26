@@ -357,7 +357,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
       </div>
 
       <section className="panel">
-        <div className="panelhead"><h3>{PALLET_SCREEN ? 'Not finished' : 'Waiting for put-away in Nexus'}</h3><span>{waiting.length} pallet{waiting.length === 1 ? '' : 's'}</span></div>
+        <div className="panelhead"><h3>{PALLET_SCREEN ? 'Not finished' : 'Waiting for the Warehouse Map'}</h3><span>{waiting.length} pallet{waiting.length === 1 ? '' : 's'}</span></div>
         {pallets === null ? <div className="empty">Loading…</div> : waiting.length === 0 ? <div className="empty">Every pallet is put away.</div> : (
           <table className="grid pick">
             <thead><tr><th>PSKU#</th><th>Brand</th><th>Product</th><th className="n">Cartons</th><th>Received</th><th>By</th><th>Next step</th></tr></thead>

@@ -1,4 +1,4 @@
-// Edge Function "nexus-bridge": the thin host around core.js. Deployed to shipbay-nexus-dev only. Deploy with verify_jwt on.
+// Edge Function "nexus-bridge": the thin host around core.js. Deployed to shipbay-nexus-dev (staging mode) and to ShipBay production (production mode, the real floor). Deploy with verify_jwt on.
 // Every decision is in core.js, calendar.js and pallets.js, which are tested under Node; this file only wires them to Deno.
 import { makeBridge } from './core.js';
 import { calendarRoutes } from './calendar.js';
