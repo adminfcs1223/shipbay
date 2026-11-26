@@ -55,7 +55,7 @@ export function labelHtml(p, brand) {
       <div class="brand" style="font-size: calc(var(--u) * ${brandSize(brand)})">${esc(brand)}</div>
     </header>
     <div class="pskurow">
-      <div><small>PSKU#</small><div class="psku">${esc(p.psku)}</div></div>
+      <div><small>Pallet ID</small><div class="psku">${esc(p.psku)}</div></div>
       <div class="of">${p.fba || p.cle ? `${p.fba && p.cle ? '<em class="fba sm">FBA</em><em class="fba sm">NCC</em>' : p.fba ? '<em class="fba">FBA</em>' : '<em class="fba">NCC</em>'}` : `<small>Pallet</small><b>${p.batch_pos}<i>of</i>${p.batch_size}</b>`}</div>
     </div>
     <div class="bc">${barcodeSvg(p.psku)}</div>

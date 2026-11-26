@@ -10,6 +10,7 @@ import { printPalletLabels, printCartonLabels, cartonCodes, linesOf, firstLabell
 import { fetchCartons, attachCartons, sameLabels, findReceipt, lookupBookedReceipt } from './cartons.js';
 import { LabelPreview, CartonPreview, CartonSizePicker, CartonTurnPicker, useCartonSize, StatusTag, beep } from './parts.jsx';
 import { progressText } from './bookingProgress';
+import BookShipment from './BookShipment.jsx';
 
 const num = (n) => Number(n || 0).toLocaleString();
 let lineId = 0;
@@ -50,6 +51,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
   const [corrupt, setCorrupt] = useState(!!loaded?.bad);   // a saved Receive record that cannot be read: hold the station
   const [org, setOrg] = useState(() => { if (flight) return flight.form.org; if (saved) return saved.org; try { return localStorage.getItem('wms-brand') || ''; } catch { return ''; } });
   const [products, setProducts] = useState(null);
+  const [booking_new, setBookingNew] = useState(false);   // the Book a shipment form is open
   const [lines, setLines] = useState(() => (flight ? flight.form.lines.map((l) => ({ ...newLine(), ...l, id: ++lineId })) : saved ? saved.lines.map((l) => ({ ...newLine(), ...l, id: ++lineId })) : [newLine()]));
   const [count, setCount] = useState(flight?.form.count || saved?.count || 1);
   // Optional booking link (separate database entrypoint, wms_receive_booking). Empty = unbooked receiving, unchanged.
@@ -265,12 +267,14 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
       </div>}
       {err && <div className="strip bad"><b>Not received.</b><span>{err}</span><button className="x" onClick={() => setErr(null)} aria-label="Dismiss">×</button></div>}
 
+      {booking_new ? <BookShipment orgs={orgs} org={org} onCancel={() => setBookingNew(false)} onBooked={(id, o) => { setBookingNew(false); loadDue(); if (o === org) loadBookings(org); else { wantBooking.current = id; setOrg(o); } }} />
+        : <p className="sm" style={{ margin: '0 0 12px' }}>A shipment not booked yet? <button type="button" className="btn sm" data-testid="book-open" onClick={() => setBookingNew(true)}>Book a shipment</button> · A pallet with no shipment: Warehouse Map → Create a pallet.</p>}
       <div className="station">
         <form className="panel entry" onSubmit={receive}>
           <fieldset className="lockset" disabled={locked}>
           {NEED_SHIPMENT && <div className="duelist" data-testid="due">
             <div className="step"><i>·</i><h3>Shipments to receive</h3><span>tap the one at the dock</span></div>
-            {due === null ? <div className="empty">Loading shipments…</div> : due.length === 0 ? <div className="empty">Nothing is booked. Book the shipment in Nexus (Calendar) first.</div> : due.map((d) => (
+            {due === null ? <div className="empty">Loading shipments…</div> : due.length === 0 ? <div className="empty">Nothing is booked. Use Book a shipment above.</div> : due.map((d) => (
               <button type="button" key={d.id} className={`due ${d.id === booking ? 'on' : ''}`} onClick={() => pickDue(d)} aria-pressed={d.id === booking}>
                 <b>{d.brand}</b><span>{d.reference}</span>
                 <small>{d.expected_at ? new Date(d.expected_at + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'No date'} · {d.received_pallets} of {d.expected_pallets} pallets in{d.lines.length ? ' · ' + d.lines.map((x) => `${x.sku} × ${num(x.qty)}`).join(', ') : ' · no items listed'}</small>
@@ -284,7 +288,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
             ))}</div>
           )}
 
-          {org && bookings && bookings.length === 0 && NEED_SHIPMENT && <div className="strip bad" data-testid="no-shipment"><span>No shipment is booked for this brand. Book it in Nexus (Calendar) first, then receive against it.</span></div>}
+          {org && bookings && bookings.length === 0 && NEED_SHIPMENT && <div className="strip bad" data-testid="no-shipment"><span>No shipment is booked for this brand. Use Book a shipment above, or create the pallet without a shipment under Warehouse Map → Create a pallet.</span></div>}
           {org && bookings && bookings.length > 0 && (<>
             <div className="step"><i>·</i><h3>Shipment</h3><span>{NEED_SHIPMENT ? 'which delivery is this?' : 'optional'}</span></div>
             <div className="bookingrow" data-testid="booking">
@@ -360,7 +364,7 @@ export default function Receive({ me, orgs, pallets, brandName, merge, open }) {
         <div className="panelhead"><h3>{PALLET_SCREEN ? 'Not finished' : 'Waiting for the Warehouse Map'}</h3><span>{waiting.length} pallet{waiting.length === 1 ? '' : 's'}</span></div>
         {pallets === null ? <div className="empty">Loading…</div> : waiting.length === 0 ? <div className="empty">Every pallet is put away.</div> : (
           <table className="grid pick">
-            <thead><tr><th>PSKU#</th><th>Brand</th><th>Product</th><th className="n">Cartons</th><th>Received</th><th>By</th><th>Next step</th></tr></thead>
+            <thead><tr><th>Pallet ID</th><th>Brand</th><th>Product</th><th className="n">Cartons</th><th>Received</th><th>By</th><th>Next step</th></tr></thead>
             <tbody>{waiting.map((p) => (
               <tr key={p.id} onClick={() => open(p.psku)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && open(p.psku)}>
                 <td className="code">{p.psku}</td><td><b>{brandName(p.org_id)}</b></td>

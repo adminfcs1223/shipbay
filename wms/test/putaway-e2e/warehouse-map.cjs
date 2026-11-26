@@ -16,15 +16,22 @@ positions.find((p) => p.code === 'P-66').status = 'blocked';
 const at = new Map([['P-05', { company: 'SOULED', id: 'SOULED-PAL-9' }]]);
 const occupancy = () => positions.filter((p) => p.kind !== 'dock').map((p) => { const o = at.get(p.code); return { code: p.code, kind: p.kind, status: p.status, capacity: 1, used: o ? 1 : 0, free: o ? 0 : 1, occupants: o ? [{ company: o.company, pallets: 1 }] : [], your_pallets: o && o.company === 'SHIPBAY' ? [o.id] : [] }; });
 const where = (id) => [...at].find(([, o]) => o.id === id)?.[0] || null;
-const seen = []; let floorReads = 0;
+const seen = []; let floorReads = 0; const created = [];
 const PALLETS = { 'PSKU-000040': { id: 'u40', psku: 'PSKU-000040', org_id: 'vm', status: 'counted', item_name: 'VM135 records', units_total: 300, held: false }, 'PSKU-000041': { id: 'u41', psku: 'PSKU-000041', org_id: 'vm', status: 'counted', item_name: 'VM135 mailers', units_total: 500, held: false } };
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x'); const p = decodeURIComponent(u.pathname); let raw = '';
   req.on('data', (c) => { raw += c; }); req.on('end', () => {
     const send = (code, out) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(out)); };
-    if (p === '/rest/v1/rpc/wms_brands') return send(200, [{ id: 'vm', name: 'Vinyl Moon' }]);
+    if (p === '/rest/v1/rpc/wms_brands') return send(200, [{ id: 'vm', name: 'Vinyl Moon' }, { id: 'demo', name: 'Demo Brand' }]);
     if (p === '/rest/v1/rpc/wms_mark_printed') return send(200, null);
-    if (p === '/rest/v1/wms_pallets') { const id = (u.searchParams.get('psku') || '').replace(/^eq\./, ''); const row = PALLETS[id]; return row ? send(200, row) : send(406, { code: 'PGRST116', message: 'no rows' }); }
+    if (p === '/rest/v1/wms_pallets') {
+      const bk = (u.searchParams.get('batch_key') || '').replace(/^eq\./, ''); if (bk) return send(200, Object.values(PALLETS).filter((x) => x.batch_key === bk));
+      const ids = (u.searchParams.get('psku') || '').replace(/^in\.\(|\)$/g, '').split(','); return send(200, ids.map((i) => PALLETS[i]).filter(Boolean));
+    }
+    if (p === '/rest/v1/rpc/wms_products') return send(200, [{ id: 'sku1', sku: 'DEMO-TEE', name: 'Demo tee' }, { id: 'sku2', sku: 'DEMO-CAP', name: 'Demo cap' }]);
+    if (p === '/rest/v1/rpc/wms_bookings') return send(200, []);
+    if (p === '/rest/v1/rpc/wms_create_pallet') { const b = JSON.parse(raw); created.push(b);
+      PALLETS['SB-PAL-000042'] = { id: 'u42', psku: 'SB-PAL-000042', org_id: b.p_org, status: 'open', item_name: 'Demo tee', units_total: null, held: false, batch_key: b.p_key, batch_pos: 1 }; return send(200, [PALLETS['SB-PAL-000042']]); }
     if (p === '/rest/v1/wms_cartons') return send(200, []);
     if (p.startsWith('/rest/v1/')) return send(404, {});
     if (p.startsWith('/functions/v1/nexus-bridge')) {
@@ -98,7 +105,19 @@ const tone = (p, c) => p.locator(`[data-testid="map-${c}"]`).getAttribute('data-
   // position labels and the way to create a pallet
   await p.locator('[data-testid="map-P-07"]').click(); await p.locator('[data-testid=wm-print-one]').click(); await p.locator('[data-testid=wm-print-all]').click();
   ok(await p.locator('[data-testid=wm-print-all]').innerText() === 'Print all 68', 'position labels: one or all 68');
-  await p.locator('[data-testid=wm-create]').click(); ok(await p.evaluate(() => window.__went) === 'receive', 'Create a pallet opens Receiving');
+  // create a pallet without a shipment, then it is ready to place
+  await p.locator('[data-testid=mode-place]').click();
+  await p.locator('[data-testid=wm-create]').click(); await p.waitForSelector('[data-testid=cp-form]');
+  await p.locator('[data-testid=cp-brand]').selectOption('demo'); await p.waitForSelector('[data-testid=cp-product]');
+  await p.locator('[data-testid=cp-find]').fill('tee'); await p.locator('[data-testid=cp-product]').selectOption('sku1');
+  await p.locator('[data-testid=cp-cartons]').fill('2'); await p.locator('[data-testid=cp-upc]').fill('12');
+  ok(await p.locator('[data-testid=cp-create]').isDisabled(), 'create needs a source and a reason without a shipment');
+  await p.locator('[data-testid=cp-source]').selectOption('found_on_floor'); await p.locator('[data-testid=cp-reason]').fill('Stage 1 live test pallet');
+  await p.locator('[data-testid=cp-create]').click(); await p.waitForSelector('[data-testid=cp-made]');
+  const c0 = created[0]; ok(c0 && c0.p_org === 'demo' && c0.p_source === 'found_on_floor' && c0.p_reason === 'Stage 1 live test pallet' && c0.p_lines[0].sku === 'sku1' && c0.p_lines[0].cartons === 2 && c0.p_lines[0].units_per_carton === 12, 'wms_create_pallet called with product, quantities, source and reason');
+  ok(/SB-PAL-000042/.test(await p.locator('[data-testid=cp-id]').innerText()), 'new id is SB-PAL-000042');
+  await p.locator('[data-testid=cp-place]').click(); await p.waitForSelector('[data-testid=pa-pallet-info]');
+  ok(/SB-PAL-000042/.test(await p.locator('[data-testid=pa-pallet]').innerText()), 'the new pallet is ready to place');
   ok(outside.length === 0, 'nothing leaves 127.0.0.1'); ok(errors.length === 0, `no page errors ${errors.join(' | ')}`);
   await p.screenshot({ path: '/tmp/wm-map.png', fullPage: true });
   await browser.close(); server.close(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

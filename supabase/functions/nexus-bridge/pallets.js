@@ -9,7 +9,16 @@
 import { inWords } from './core.js';
 
 const clean = (v) => (typeof v === 'string' && v.trim().length >= 1 && v.trim().length <= 64 ? v.trim() : null);
-const nexusBody = (op) => (op.kind === 'assign' ? { pallet: op.pallet, to: op.to } : op.kind === 'move' ? { pallet: op.pallet, to: op.to, from: op.from } : { pallet: op.pallet, from: op.from });
+// The real floor (forward-only) takes a pallet into a position only with the floor's confirmation that it is physically empty:
+// confirmed_empty: true and confirmed_by: who checked (2 to 80 characters). ShipBay sends it only for a request whose employee
+// confirmed at the position (the bridge refuses /putaway and /move on the real floor without it), naming that employee.
+const confirmer = (op) => { const n = String(op.by || '').trim().slice(0, 80); return n.length >= 2 ? n : 'ShipBay floor staff'; };
+const nexusBody = (op, cfg = {}) => {
+  const b = op.kind === 'assign' ? { pallet: op.pallet, to: op.to } : op.kind === 'move' ? { pallet: op.pallet, to: op.to, from: op.from } : { pallet: op.pallet, from: op.from };
+  if (cfg.mode === 'production' && op.kind !== 'release') { b.confirmed_empty = true; b.confirmed_by = confirmer(op); }
+  return b;
+};
+export { nexusBody };
 const where = (op) => op.to || op.from;
 
 async function send(ctx, op) {
@@ -19,7 +28,7 @@ async function send(ctx, op) {
   const stop = ctx.authorize({ pallet: op.pallet, positions: [op.to, op.from] });
   if (stop) return { status: stop.status, body: { ok: false, error: stop.error, op: op.op, waiting: true, message: `${stop.message} The request for ${op.pallet} at ${where(op)} stays waiting in ShipBay.` } };
   const lose = !!(ctx.fault && ctx.fault.lose); if (lose) ctx.fault.lose = false;   // a test fault drops one answer, once (see core.js)
-  const r = await nx.call('POST', `/v1/pallets/${op.kind}`, { idem: op.key, body: nexusBody(op), lose });
+  const r = await nx.call('POST', `/v1/pallets/${op.kind}`, { idem: op.key, body: nexusBody(op, ctx.cfg), lose });
   if (r.status === 200 && r.body.ok) {
     try {
       const done = await service.rpc('wms_nexus_op_commit', { p_op: op.op });
@@ -36,7 +45,7 @@ async function send(ctx, op) {
     return { status: 503, body: { ok: false, error: 'nexus_no_answer', pending: true, op: op.op, message: `Nexus did not answer. Nothing is confirmed for ${op.pallet} at ${where(op)}. Send it again.`, ...(r.lost ? { test_fault: 'answer_lost' } : {}) } };
   }
   await service.rpc('wms_nexus_op_note', { p_op: op.op, p_state: 'refused', p_http: r.status, p_error: r.body.error || 'refused' });
-  return { status: r.status, body: { ok: false, error: r.body.error || 'refused', message: inWords(r.body.error, { pallet: op.pallet, to: where(op) }) } };
+  return { status: r.status, body: { ok: false, error: r.body.error || 'refused', nexus_http: r.status, request: op.key, message: inWords(r.body.error, { pallet: op.pallet, to: where(op), http: r.status, request: op.key }) } };
 }
 
 // before any write: the switch is on and Nexus itself says this key is bound to the expected floor

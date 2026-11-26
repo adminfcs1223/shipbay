@@ -59,7 +59,7 @@ export function FloorMap({ locations, pallets, brandName, target, onPick, onOpen
           return (
             <button type="button" key={l.id} disabled={!can} className={`cell ${here ? 'here' : occ ? 'full' : ''} ${shelf ? 'floor' : l.kind}`} onClick={() => (occ ? onOpen?.(occ) : onPick?.(l))} title={occ ? `${occ.psku} · ${brandName(occ.org_id)}` : here ? 'This pallet goes here' : l.shared ? 'Shared position: Nexus confirms it when the pallet is scanned there under Put away' : 'Free'}>
               <b>{l.code}</b>
-              <small>{here ? 'Goes here' : occ ? <>{occ.psku.replace('PSKU-', '')}<br />{brandName(occ.org_id)}</> : shelf ? 'Open-box shelf' : l.shared ? 'Nexus' : l.kind === 'floor' ? (many ? `${many} pallet${many > 1 ? 's' : ''}` : 'Floor area') : 'Free'}</small>
+              <small>{here ? 'Goes here' : occ ? <>{occ.psku.replace(/^(SB-PAL|PSKU)-/, '')}<br />{brandName(occ.org_id)}</> : shelf ? 'Open-box shelf' : l.shared ? 'Nexus' : l.kind === 'floor' ? (many ? `${many} pallet${many > 1 ? 's' : ''}` : 'Floor area') : 'Free'}</small>
             </button>
           );
         })}</div>
@@ -92,9 +92,20 @@ export function ScanBox({ onScan, placeholder, value, onChange, autoFocus }) {
   );
 }
 
-/** "123", "psku 123", "PSKU-000123" → "PSKU-000123"; anything else comes back trimmed and upper-cased. */
+/** "123", "psku 123", "PSKU-000123" → "PSKU-000123"; "SB-PAL 40", "SB-PAL-000040" → "SB-PAL-000040"; anything else comes back
+ *  trimmed and upper-cased. Pallet ids made from 2026-11-26 on are SB-PAL-…; older ones stay PSKU-…. Both share one number
+ *  sequence, so a number alone belongs to exactly one pallet: use palletIds() to look it up under both forms. */
 export function normPsku(s) {
   const t = String(s || '').trim().toUpperCase();
+  const sb = t.match(/^SB[\s-]*PAL[\s-]*(\d{1,9})$/); if (sb) return `SB-PAL-${sb[1].padStart(6, '0')}`;
   const m = t.match(/^(?:PSKU[\s-]*)?(\d{1,9})$/);
   return m ? `PSKU-${m[1].padStart(6, '0')}` : t;
 }
+/** Every pallet id a scan or typed entry can mean: a number alone is looked up as both SB-PAL-… and PSKU-…. */
+export function palletIds(s) {
+  const t = String(s || '').trim().toUpperCase();
+  const n = t.match(/^(\d{1,9})$/); if (n) return [`SB-PAL-${n[1].padStart(6, '0')}`, `PSKU-${n[1].padStart(6, '0')}`];
+  return [normPsku(t)];
+}
+/** The short number shown on a map tile: SB-PAL-000040 / PSKU-000040 → #000040. */
+export const palletShort = (id) => String(id || '').replace(/^(SB-PAL|PSKU)-/, '#');

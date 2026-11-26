@@ -5,10 +5,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, fmtStamp, sameDay } from './lib';
 import { printPalletLabels, printCartonLabels, printUnitLabels, linesOf, firstLabelled } from './label';
 import { fetchCartons, checkCartons } from './cartons.js';
-import { LabelPreview, CartonPreview, CartonSizePicker, CartonTurnPicker, useCartonSize, ScanBox, StatusTag, FloorMap, beep, normPsku } from './parts.jsx';
+import { LabelPreview, CartonPreview, CartonSizePicker, CartonTurnPicker, useCartonSize, ScanBox, StatusTag, FloorMap, beep, normPsku, palletIds } from './parts.jsx';
 
 const WHEN = [['open', 'Not finished'], ['today', 'Today'], ['week', '7 days'], ['all', 'All']];
-const cartonOf = (code) => { const m = String(code).trim().toUpperCase().match(/^C(\d{6})(\d{2,3})$/); return m ? { psku: `PSKU-${m[1]}`, seq: Number(m[2]), code: m[0] } : null; };
+const cartonOf = (code) => { const m = String(code).trim().toUpperCase().match(/^C(\d{6})(\d{2,3})$/); return m ? { num: m[1], psku: `pallet #${m[1]}`, seq: Number(m[2]), code: m[0] } : null; };
 const locCode = (s) => String(s).trim().toUpperCase().replace(/^LOC-/, '');
 
 export default function Pallets({ orgs, pallets, locations, brandName, merge, find, setFind }) {
@@ -21,7 +21,7 @@ export default function Pallets({ orgs, pallets, locations, brandName, merge, fi
   useEffect(() => { if (find && pallets) { const p = pallets.find((x) => x.psku === find); if (p) setSel(p.id); setFind(''); } }, [find, pallets]);
 
   const list = useMemo(() => {
-    const t = q.trim().toLowerCase(); const want = normPsku(q).toLowerCase(); const weekAgo = Date.now() - 7 * 864e5;
+    const t = q.trim().toLowerCase(); const want = palletIds(q).map((x) => x.toLowerCase()); const weekAgo = Date.now() - 7 * 864e5;
     return (pallets || []).filter((p) => {
       if (org && p.org_id !== org) return false;
       if (!t) {
@@ -30,7 +30,7 @@ export default function Pallets({ orgs, pallets, locations, brandName, merge, fi
         if (when === 'week' && new Date(p.received_at).getTime() < weekAgo) return false;
         return true;
       }
-      return p.psku.toLowerCase() === want || p.psku.toLowerCase().includes(t) || (p.item_name || '').toLowerCase().includes(t) || (p.item_no || '').toLowerCase().includes(t) || (p.notes || '').toLowerCase().includes(t) || brandName(p.org_id).toLowerCase().includes(t);
+      return want.includes(p.psku.toLowerCase()) || p.psku.toLowerCase().includes(t) || (p.item_name || '').toLowerCase().includes(t) || (p.item_no || '').toLowerCase().includes(t) || (p.notes || '').toLowerCase().includes(t) || brandName(p.org_id).toLowerCase().includes(t);
     });
   }, [pallets, q, org, when, orgs]);
   const cur = (pallets || []).find((p) => p.id === sel) || null;
@@ -45,7 +45,7 @@ export default function Pallets({ orgs, pallets, locations, brandName, merge, fi
       if (error) { beep('bad'); return setMsg(error.message); }
       beep(data.already ? 'bad' : 'ok'); setQ(''); setSel(data.pallet_id); return setMsg(data.already ? `Carton ${data.seq} of ${data.psku} was already scanned.` : null);
     }
-    const want = normPsku(code); const p = (pallets || []).find((x) => x.psku === want);
+    const want = palletIds(code); const p = (pallets || []).find((x) => want.includes(x.psku));
     if (p) { beep('ok'); setQ(''); setSel(p.id); setMsg(null); } else { beep('bad'); setQ(code); setMsg(`${want} is not on file.`); }
   };
 
@@ -72,7 +72,7 @@ export default function Pallets({ orgs, pallets, locations, brandName, merge, fi
       <section className="panel">
         {pallets === null ? <div className="empty">Loading…</div> : list.length === 0 ? <div className="empty">{q.trim() ? 'No pallets match.' : when === 'open' ? 'Every pallet is put away.' : 'No pallets here.'}</div> : (
           <table className="grid pick">
-            <thead><tr><th>PSKU#</th><th>Brand</th><th>Product</th><th className="n">Cartons</th><th>Position</th><th>Received</th><th>By</th><th>Status</th></tr></thead>
+            <thead><tr><th>Pallet ID</th><th>Brand</th><th>Product</th><th className="n">Cartons</th><th>Position</th><th>Received</th><th>By</th><th>Status</th></tr></thead>
             <tbody>{list.map((p) => (
               <tr key={p.id} className={p.status === 'void' ? 'void' : ''} onClick={() => setSel(p.id)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setSel(p.id)}>
                 <td className="code">{p.psku}</td><td><b>{brandName(p.org_id)}</b></td>
@@ -142,9 +142,9 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
   const scanCarton = async (raw) => {
     setScanV('');
     let c = cartonOf(raw);
-    if (!c && /^\d{1,3}$/.test(raw.trim()) && total) { const seq = Number(raw); const row = cartons.find((x) => x.seq === seq && !x.cle); if (row) c = { psku: p.psku, seq, code: row.code }; }
-    if (!c) { const other = (pallets || []).find((x) => x.psku === normPsku(raw)); if (other && other.id !== p.id) return onOpen(other); return say('bad', /^PSKU/i.test(raw.trim()) ? 'That is the pallet label. Scan the small label on each carton.' : `${raw.trim()} is not a carton label.`); }
-    if (c.psku !== p.psku) return say('bad', `Carton ${c.seq} belongs to ${c.psku}, not this pallet. Set it aside.`);
+    if (!c && /^\d{1,3}$/.test(raw.trim()) && total) { const seq = Number(raw); const row = cartons.find((x) => x.seq === seq && !x.cle); if (row) c = { num: p.psku.replace(/^\D+/, ''), psku: p.psku, seq, code: row.code }; }
+    if (!c) { const other = (pallets || []).find((x) => palletIds(raw).includes(x.psku)); if (other && other.id !== p.id) return onOpen(other); return say('bad', /^(PSKU|SB[\s-]*PAL)/i.test(raw.trim()) ? 'That is the pallet label. Scan the small label on each carton.' : `${raw.trim()} is not a carton label.`); }
+    if (c.num !== p.psku.replace(/^\D+/, '')) return say('bad', `Carton ${c.seq} belongs to ${c.psku}, not this pallet. Set it aside.`);
     const { data, error } = await supabase.rpc('wms_scan_carton', { p_code: c.code });
     if (error) return say('bad', error.message);
     setCartons((cs) => cs.map((x) => (x.seq === data.seq ? { ...x, scanned_at: x.scanned_at || new Date().toISOString() } : x)));
@@ -164,10 +164,10 @@ function Workspace({ p, pallets, locations, brandName, merge, onBack, onOpen }) 
   };
   const scanPutaway = async (raw) => {
     setScanV(''); const t = raw.trim(); let next = { ...got };
-    if (normPsku(t) === p.psku) next.psku = true;
+    if (palletIds(t).includes(p.psku)) next.psku = true;
     else if (loc && locCode(t) === loc.code.toUpperCase()) next.loc = true;
     else if ((locations || []).some((l) => l.code.toUpperCase() === locCode(t))) return say('bad', `${p.psku} goes to ${loc?.code || 'a position picked on the map'}, not ${locCode(t)}.`);
-    else if (/^PSKU|^\d+$/i.test(t)) return say('bad', `That is ${normPsku(t)}, not ${p.psku}.`);
+    else if (/^PSKU|^SB[\s-]*PAL|^\d+$/i.test(t)) return say('bad', `That is ${normPsku(t)}, not ${p.psku}.`);
     else return say('bad', `${t} is not a position or a pallet label.`);
     setGot(next);
     if (!(next.loc && next.psku)) { beep('ok'); return setFeed({ kind: 'ok', text: next.loc ? `${loc.code} confirmed. Now scan the pallet label.` : `Pallet confirmed. Now scan the position label at ${loc?.code || 'its position'}.` }); }

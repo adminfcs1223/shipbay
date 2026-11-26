@@ -12,7 +12,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { bridge } from './nexusBridge.js';
 import { supabase } from './lib.js';
-import { ScanBox, beep, normPsku, StatusTag } from './parts.jsx';
+import { ScanBox, beep, palletIds, palletShort, StatusTag } from './parts.jsx';
+import CreatePallet from './CreatePallet.jsx';
 import { printLocationLabels, printPalletLabels } from './label.js';
 import { fetchCartons, attachCartons } from './cartons.js';
 
@@ -75,7 +76,7 @@ function Floor({ floor, selected, onPick }) {
           return (
             <button key={p.code} type="button" data-testid={`map-${p.code}`} data-tone={t} className={`wm-tile${selected === p.code ? ' sel' : ''}`} onClick={() => onPick(p.code)}
               title={`${p.code} · ${c.label}${who && t !== 'open' ? ` · ${who}` : ''}`} style={{ gridColumn: p.x, gridRow: `${row(p.x, p.y)} / span 2`, background: c.bg, borderColor: c.bd, color: c.fg }}>
-              <b>{p.code}</b>{t !== 'open' && <small>{t === 'shipbay' && (o.your_pallets || []).length === 1 ? o.your_pallets[0].replace('PSKU-', '#') : who}</small>}
+              <b>{p.code}</b>{t !== 'open' && <small>{t === 'shipbay' && (o.your_pallets || []).length === 1 ? palletShort(o.your_pallets[0]) : who}</small>}
             </button>);
         })}
       </div>
@@ -96,7 +97,7 @@ export default function WarehouseMap({ go }) {
   const [reason, setReason] = useState(''); const [sure, setSure] = useState(false);
   const [busy, setBusy] = useState(false); const [last, setLast] = useState(null);
   const [floor, setFloor] = useState(null); const [status, setStatus] = useState(null); const [open, setOpen] = useState([]); const [exc, setExc] = useState(null);
-  const [fixSure, setFixSure] = useState({}); const [brands, setBrands] = useState([]); const [at0, setAt0] = useState(null);
+  const [fixSure, setFixSure] = useState({}); const [brands, setBrands] = useState([]); const [at0, setAt0] = useState(null); const [creating, setCreating] = useState(false);
 
   const refresh = async () => {
     const [s, f, p] = await Promise.all([bridge('/status'), bridge('/floor'), bridge('/pending')]);
@@ -118,10 +119,12 @@ export default function WarehouseMap({ go }) {
 
   const reset = (keepMode = true) => { setPsku(null); setPallet(null); setAt(''); setReason(''); setSure(false); if (!keepMode) setLast(null); };
   const pick = (m) => { setMode(m); reset(); setLast(null); };
+  // a scanned label is exact; a number alone is looked up as both SB-PAL-… and PSKU-… (one number sequence, so at most one matches)
   const identify = async (raw) => {
-    const id = normPsku(raw); setPsku(id); setPallet({ loading: true }); setLast(null);
-    const { data, error } = await supabase.from('wms_pallets').select('*').eq('psku', id).maybeSingle();
-    setPallet(error ? { error: error.message } : data || { missing: true });
+    const ids = palletIds(raw); setPsku(ids[0]); setPallet({ loading: true }); setLast(null);
+    const { data, error } = await supabase.from('wms_pallets').select('*').in('psku', ids).limit(2);
+    const row = (data || [])[0] || null; if (row) setPsku(row.psku);
+    setPallet(error ? { error: error.message } : row || { missing: true });
   };
   const tap = (code) => { setAt(code); if (mode === 'release' && !psku) { const mine = occ.get(code)?.your_pallets || []; if (mine.length === 1) identify(mine[0]); } };
 
@@ -142,7 +145,7 @@ export default function WarehouseMap({ go }) {
     (r) => (how === 'record' ? { title: `${r.psku} is recorded at ${r.location}.`, text: 'ShipBay now matches Nexus.' } : { title: `${o.to} is free.`, text: `Nexus no longer holds ${o.pallet} there. ShipBay's record was not changed.` }));
   const reprint = async () => {
     let rows = []; try { rows = await fetchCartons(supabase, [pallet.id]); } catch { /* the label prints without carton lines */ }
-    const [p] = attachCartons([pallet], rows); printPalletLabels([p], (x) => brandOf(x.org_id));
+    const [p] = attachCartons([pallet], rows).pallets; printPalletLabels([p], (x) => brandOf(x.org_id));
     supabase.rpc('wms_mark_printed', { p_ids: [pallet.id] }).then(() => {}, () => {});
   };
   const printPositions = (codes) => printLocationLabels(codes.map((c) => ({ code: c, zone: (floor.layout?.blocks || []).find((b) => b.key === pos.get(c)?.block)?.label || pos.get(c)?.block || (c.startsWith('STG') ? 'Staging' : '') })));
@@ -186,7 +189,7 @@ export default function WarehouseMap({ go }) {
           <div className="seg wm-seg">{MODES.map(([k, label]) => <button key={k} data-testid={`mode-${k}`} className={mode === k ? 'on' : ''} onClick={() => pick(k)}>{label}</button>)}</div>
 
           <label className="wm-step">1 · {steps.p}</label>
-          {!psku ? <ScanBox key={`p-${mode}`} autoFocus placeholder="e.g. 40 or PSKU-000040" onScan={identify} />
+          {!psku ? <ScanBox key={`p-${mode}`} autoFocus placeholder="e.g. 40 or SB-PAL-000040" onScan={identify} />
             : (<div className="hold" data-testid="pa-pallet"><b>{psku}</b>{' '}
               {pallet?.loading ? 'Looking it up…' : pallet?.missing ? <span>is not a ShipBay pallet. Check the label, or create it in Receiving.</span> : pallet?.error ? <span>could not be looked up: {pallet.error}</span>
                 : (<><span data-testid="pa-pallet-info">{brandOf(pallet.org_id) || 'Unknown brand'} · {pallet.item_name || (pallet.mixed ? 'Mixed pallet' : '—')}{pallet.units_total ? ` · ${num(pallet.units_total)} units` : ''} · </span><StatusTag s={pallet.status} />{pallet.held && <span className="tag bad">HOLD</span>}
@@ -220,7 +223,8 @@ export default function WarehouseMap({ go }) {
                 <p className="sm">Frees {at} in Nexus. The pallet's stock is not changed.</p></>)}
             </div>)}
 
-          <p className="sm" style={{ marginTop: 18 }}>A new pallet gets its ID and label in Receiving. <button className="btn sm" data-testid="wm-create" onClick={() => go && go('receive')}>Create a pallet</button></p>
+          {creating ? <CreatePallet brands={brands} onCancel={() => setCreating(false)} onDone={(p) => { setCreating(false); setMode('place'); reset(); identify(p.psku); }} />
+            : <p className="sm" style={{ marginTop: 18 }}>A pallet that is not on the system yet: <button className="btn sm" data-testid="wm-create" onClick={() => { setCreating(true); setLast(null); }}>Create a pallet</button></p>}
         </section>
       </div>
 

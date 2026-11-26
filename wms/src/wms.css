@@ -716,3 +716,13 @@ label input.bignum { height: 59px; font-size: 26px; font-weight: 800; font-varia
 .wm-confirm { margin-top: 14px; }
 .wm-warn { color: var(--red); font-weight: 600; margin: 8px 0 0; }
 .wm-act .sm, .wm-mappanel .sm { font-size: 13px; color: var(--muted); }
+.wm-create { margin-top: 18px; }
+.wm-create .wm-step input, .wm-create .wm-step select { display: block; width: 100%; margin-top: 6px; height: 42px; border: 1.5px solid var(--line-2); border-radius: var(--r-sm); padding: 0 10px; font: inherit; background: #fff; }
+.wm-create .wm-step select[size] { height: auto; padding: 4px; }
+.cp-line { border-top: 1px solid var(--line-2); padding-top: 8px; margin-top: 10px; }
+.cp-picked { display: flex; gap: 8px; align-items: center; margin-top: 6px; font-weight: 500; }
+.cp-picked em { color: var(--muted); font-style: normal; }
+.bookgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.bookgrid label { display: flex; flex-direction: column; gap: 6px; font-weight: 700; font-size: 14px; }
+.bookgrid label.wide { grid-column: 1 / -1; }
+.bookgrid input, .bookgrid select { height: 42px; border: 1.5px solid var(--line-2); border-radius: var(--r-sm); padding: 0 10px; font: inherit; font-weight: 500; background: #fff; }

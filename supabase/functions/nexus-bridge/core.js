@@ -168,8 +168,9 @@ export function makeBridge({ env, fetchImpl, db, routes, now = Date.now, timeout
   };
 }
 
-/** Plain words for the floor, for each Nexus refusal. Nexus's own message is not passed on. */
-export function inWords(error, { pallet, to } = {}) {
+/** Plain words for the floor, for each Nexus refusal. Nexus's own message is not passed on. Unknown codes name the code,
+ *  the HTTP status and the request id, so an admin can find the exact request in ShipBay's journal and in Nexus. */
+export function inWords(error, { pallet, to, http, request } = {}) {
   return ({
     location_full: `${to} is taken in Nexus. Pick another position.`,
     location_blocked: `${to} is blocked in Nexus.`,
@@ -183,5 +184,12 @@ export function inWords(error, { pallet, to } = {}) {
     forbidden: 'ShipBay\'s Nexus key is not allowed to place pallets.',
     unauthorized: 'Nexus did not accept ShipBay\'s key.',
     idempotency_key_reused: 'Nexus has seen this request with different details. Stop and tell an admin.',
-  })[error] || 'Nexus refused the request.';
+    location_not_confirmed: `Nexus did not receive the confirmation that ${to} is physically empty, so nothing was placed. Confirm at the position and try again; if it repeats, tell an admin.`,
+    location_not_a_destination: `${to} cannot take a pallet in Nexus. Pick a pallet or staging position.`,
+    floor_not_ready: 'The shared floor is not open for placements in Nexus yet. Nothing was placed. Tell an admin.',
+    floor_not_empty: 'Nexus refused because the floor is not in the state it expects. Nothing was placed. Tell an admin.',
+    capacity_below_occupancy: `${to} holds more pallets in Nexus than its capacity allows. Tell an admin.`,
+    bad_request: 'Nexus could not read the request. Nothing was placed. Tell an admin.',
+    not_found: 'Nexus does not offer this action. Nothing was placed. Tell an admin.',
+  })[error] || `Nexus refused the request${[error, http && `HTTP ${http}`].filter(Boolean).length ? ` (${[error, http && `HTTP ${http}`].filter(Boolean).join(', ')})` : ''}. Nothing was placed.${request ? ` Request ${request}.` : ''} Tell an admin.`;
 }
