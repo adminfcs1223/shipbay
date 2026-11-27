@@ -42,14 +42,36 @@ export function toneOf(p, o) {
 // The floor drawn from Nexus's own layout: its grid, blocks and landmarks, each position at Nexus's x/y. The staging block is set
 // apart from the pallet rows; the building's walls are drawn around it with openings where Nexus marks the exit, dock,
 // entrance and prep area. Tapping a position picks it.
+// A shared zone (Nexus kind "zone", map 5+): one outlined rectangle drawn from its layout block, never tiles, never counted in the
+// position totals. ShipBay's own pallets are listed with their inbound / outbound status; another company appears as counts only.
+export const zoneOf = (floor) => (floor?.layout?.blocks || []).filter((b) => b.location && Array.isArray(b.x) && Array.isArray(b.y));
+function Zone({ b, o, sel, onPick, row }) {
+  const mine = (o?.your_pallets_status || []).length ? o.your_pallets_status : (o?.your_pallets || []).map((p) => ({ pallet: p, zone_status: null }));
+  const others = (o?.occupants || []).filter((x) => String(x.company || '').toUpperCase() !== 'SHIPBAY' && Number(x.pallets) > 0);
+  const off = !o || o.status !== 'open';
+  return (
+    <button type="button" data-testid={`map-${b.location}`} data-zone="1" className={`wm-zone${sel ? ' sel' : ''}${off ? ' off' : ''}`} onClick={() => onPick(b.location)}
+      title={`${b.label} · ${b.location} · shared${off ? ` · ${o ? o.status : 'no data'}` : ''}`} style={{ gridColumn: `${b.x[0]} / ${b.x[1] + 1}`, gridRow: `${row(b.x[0], b.y[0])} / ${row(b.x[0], b.y[1]) + 2}` }}>
+      <b>{b.label}</b><small>{b.location} · shared{off ? ` · ${o ? o.status : 'no data'}` : ''}</small>
+      <span className="wm-zone-chips">
+        {mine.length > 0 && <i className="sb" data-testid="zone-shipbay">ShipBay {mine.length}</i>}
+        {others.map((x) => <i key={x.company} className={String(x.company).toUpperCase() === 'SOULED' ? 'so' : 'ot'} data-testid={`zone-${String(x.company).toLowerCase()}`}>{String(x.company).toUpperCase() === 'SOULED' ? 'Souled' : x.company} {x.pallets}{x.inbound != null ? ` (${x.inbound} in · ${x.outbound} out)` : ''}</i>)}
+        {!mine.length && !others.length && !off && <i className="em">Empty</i>}
+      </span>
+      {mine.length > 0 && <span className="wm-zone-mine">{mine.slice(0, 4).map((m) => <em key={m.pallet}>{palletShort(m.pallet)}{m.zone_status ? ` · ${m.zone_status}` : ''}</em>)}{mine.length > 4 && <em>+{mine.length - 4} more</em>}</span>}
+    </button>);
+}
+
 function Floor({ floor, selected, onPick }) {
   const grid = floor.layout?.grid || {}; const cols = Number(grid.cols) || 5; const rows = Number(grid.rows) || 18;
-  const blocks = floor.layout?.blocks || []; const stg = blocks.find((b) => b.key === 'staging');
+  const blocks = floor.layout?.blocks || []; const stg = blocks.find((b) => b.key === 'staging'); const zones = zoneOf(floor);
+  // rows above row 1 (map 5: the zone at y = -2..0). Positions keep their y; the drawing is shifted down by top_rows.
+  const top = Math.max(Number(grid.top_rows) || 0, ...zones.map((z) => 1 - Math.min(...z.y)), 0);
   // half-row grid: every position spans two lines; the staging block (and only its columns) drops one full row so it stands apart
   const inStg = (x, y) => stg && x >= stg.x[0] && x <= stg.x[1] && y >= stg.y[0];
-  const row = (x, y) => 2 * y - 1 + (inStg(x, y) ? 2 : 0);
+  const row = (x, y) => 2 * (y + top) - 1 + (inStg(x, y) ? 2 : 0);
   const cells0 = (floor.positions || []).filter((p) => p.x && p.y);
-  const total = Math.max(2 * rows, ...cells0.map((p) => row(p.x, p.y) + 1));
+  const total = Math.max(2 * (rows + top), ...cells0.map((p) => row(p.x, p.y) + 1));
   const occ = new Map((floor.locations || []).map((l) => [l.code, l]));
   const cells = cells0;
   const walk = blocks.find((b) => b.key === 'walkway'); const marks = floor.landmarks || [];
@@ -60,7 +82,7 @@ function Floor({ floor, selected, onPick }) {
       ? <div key={s.from} className="wm-door" data-testid={`mark-${s.m.key}`} style={{ gridColumn: `${s.from} / ${s.to + 1}` }}>{s.m.label}</div>
       : <div key={s.from} className="wm-solid" style={{ gridColumn: `${s.from} / ${s.to + 1}` }} />)}</div>;
   };
-  const side = (b) => blocks.filter((x) => x.key !== 'walkway' && x.key !== 'staging' && x.x[0] === b);
+  const side = (b) => blocks.filter((x) => x.key !== 'walkway' && x.key !== 'staging' && !x.location && x.x[0] === b);
   return (
     <div className="wm-floor" data-testid="pa-map">
       <div className="wm-sides" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
@@ -69,7 +91,8 @@ function Floor({ floor, selected, onPick }) {
       {wall('top')}
       <div className="wm-grid" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${total}, 18px)`, rowGap: 5 }}>
         {walk && <div className="wm-walk" style={{ gridColumn: `${walk.x[0]} / ${walk.x[1] + 1}`, gridRow: `1 / ${total + 1}` }}><span>{walk.label}</span></div>}
-        {stg && <div className="wm-stglabel" style={{ gridColumn: `${stg.x[0]} / ${stg.x[1] + 1}`, gridRow: `${2 * stg.y[0] - 1} / ${2 * stg.y[0] + 1}` }}>{stg.label}</div>}
+        {stg && <div className="wm-stglabel" style={{ gridColumn: `${stg.x[0]} / ${stg.x[1] + 1}`, gridRow: `${row(stg.x[0], stg.y[0]) - 2} / ${row(stg.x[0], stg.y[0])}` }}>{stg.label}</div>}
+        {zones.map((b) => <Zone key={b.location} b={b} o={occ.get(b.location)} sel={selected === b.location} onPick={onPick} row={row} />)}
         {cells.map((p) => {
           const o = occ.get(p.code); const t = toneOf(p, o); const c = TONES[t];
           const who = t === 'shipbay' ? (o.your_pallets || []).join(', ') || 'ShipBay' : t === 'souled' ? 'Souled' : t === 'unknown' ? (p.status !== 'open' ? p.status : o ? 'Check' : 'No data') : '';
@@ -94,7 +117,7 @@ export default function WarehouseMap({ go }) {
   const [psku, setPsku] = useState(null); const [pallet, setPallet] = useState(null);   // pallet id entered, and what ShipBay knows of it
   const [atRaw, setAt] = useState('');                    // position as typed, scanned or tapped
   const at = loc(atRaw);
-  const [reason, setReason] = useState(''); const [sure, setSure] = useState(false);
+  const [reason, setReason] = useState(''); const [sure, setSure] = useState(false); const [zs, setZs] = useState('');   // zs: inbound | outbound, for the shared zone
   const [busy, setBusy] = useState(false); const [last, setLast] = useState(null);
   const [floor, setFloor] = useState(null); const [status, setStatus] = useState(null); const [open, setOpen] = useState([]); const [exc, setExc] = useState(null);
   const [fixSure, setFixSure] = useState({}); const [brands, setBrands] = useState([]); const [at0, setAt0] = useState(null); const [creating, setCreating] = useState(false);
@@ -117,7 +140,7 @@ export default function WarehouseMap({ go }) {
   const counts = useMemo(() => { const c = {}; for (const p of pos.values()) if (p.x && p.y) { const t = toneOf(p, occ.get(p.code)); c[t] = (c[t] || 0) + 1; } return c; }, [pos, occ]);
   const brandOf = (id) => brands.find((b) => b.id === id)?.name || '';
 
-  const reset = (keepMode = true) => { setPsku(null); setPallet(null); setAt(''); setReason(''); setSure(false); if (!keepMode) setLast(null); };
+  const reset = (keepMode = true) => { setPsku(null); setPallet(null); setAt(''); setReason(''); setSure(false); setZs(''); if (!keepMode) setLast(null); };
   const pick = (m) => { setMode(m); reset(); setLast(null); };
   // a scanned label is exact; a number alone is looked up as both SB-PAL-… and PSKU-… (one number sequence, so at most one matches)
   const identify = async (raw) => {
@@ -135,6 +158,9 @@ export default function WarehouseMap({ go }) {
     else { beep('bad'); setLast({ tone: 'bad', title: r.error === 'out_of_sync' ? 'Needs an admin.' : 'Not done.', text: r.message || 'The request was refused.' }); if (!KEEP_PALLET.includes(r.error)) reset(); }
     refresh();
   };
+  // into the shared Receiving / Outbound zone, or a status change inside it: no empty-position confirmation, the status instead
+  const toZone = () => call('/zone', { psku, zone_status: zs },
+    (r) => ({ title: `${r.psku} is in Receiving / Outbound (${zs}).`, text: r.from && r.from !== r.location ? `Moved from ${r.from}. Quantity unchanged.` : r.from === r.location ? 'Status changed. It stays in the zone.' : 'Recorded in Nexus.' }));
   const place = () => call(mode === 'move' ? '/move' : '/putaway', { psku, location: at, confirmed_clear: true, ...(mode === 'register' ? { in_place: true } : {}) },
     (r) => ({ title: `${r.psku} is at ${r.location}.`, text: mode === 'move' ? `Moved from ${r.from}. Quantity unchanged.` : mode === 'register' ? `Registered where it stands. ${num(r.units_posted)} units on the shelf count.` : `${num(r.units_posted)} units on the shelf count.` }));
   const release = () => call('/release', { psku, location: at, reason, confirmed: true },
@@ -154,6 +180,9 @@ export default function WarehouseMap({ go }) {
   const canMove = status?.ok && status.pallet_moves && floor?.ok && floor.moves_enabled;
   const target = at ? occ.get(at) : null; const targetPos = at ? pos.get(at) : null; const targetTone = at ? toneOf(targetPos, target) : null;
   const where = psku ? nexusAt(psku) : null;
+  const isZone = !!at && (targetPos?.kind === 'zone' || zoneOf(floor?.ok ? floor : null).some((z) => z.location === at));
+  const zoneStatusOf = (id) => ((occ.get(where || '')?.your_pallets_status || []).find((x) => x.pallet === id) || {}).zone_status || null;
+  const curZs = where && occ.get(where)?.kind === 'zone' ? zoneStatusOf(psku) : null;
   const palletOk = pallet && !pallet.loading && !pallet.error && !pallet.missing;
   const palletProblem = !palletOk ? null : pallet.status === 'void' ? `${psku} was voided.` : pallet.held ? `${psku} is on HOLD.` : null;
   const ready = psku && palletOk && !palletProblem && at && targetPos && !busy && canMove;
@@ -183,6 +212,13 @@ export default function WarehouseMap({ go }) {
           <header className="panelhead"><h3>Hillsborough floor</h3><span>Tap a position to use it</span></header>
           {floor?.ok ? <Floor floor={floor} selected={at} onPick={tap} /> : <div className="wm-floor wm-off" data-testid="pa-map-off">{floor ? 'The map could not be read from Nexus.' : 'Loading the map…'}</div>}
           <Legend counts={counts} />
+          {floor?.ok && zoneOf(floor).map((z) => { const o = occ.get(z.location); const mine = o?.your_pallets_status || [];
+            const others = (o?.occupants || []).filter((x) => String(x.company || '').toUpperCase() !== 'SHIPBAY' && Number(x.pallets) > 0);
+            return (mine.length > 0 || others.length > 0) && (
+              <div key={z.location} className="wm-zonelist" data-testid="wm-zonelist"><b>{z.label}</b>
+                {mine.map((m) => <span key={m.pallet}><button type="button" className="linkish" onClick={() => { setAt(z.location); identify(m.pallet); }}>{m.pallet}</button> {m.zone_status}{m.since ? ` · since ${new Date(m.since).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}</span>)}
+                {others.map((x) => <span key={x.company}>{String(x.company).toUpperCase() === 'SOULED' ? 'Souled' : x.company}: {x.pallets} pallet{x.pallets === 1 ? '' : 's'}{x.inbound != null ? ` (${x.inbound} inbound, ${x.outbound} outbound)` : ''}</span>)}
+              </div>); })}
         </section>
 
         <section className="panel pad wm-act" data-testid="wm-act">
@@ -193,7 +229,7 @@ export default function WarehouseMap({ go }) {
             : (<div className="hold" data-testid="pa-pallet"><b>{psku}</b>{' '}
               {pallet?.loading ? 'Looking it up…' : pallet?.missing ? <span>is not a ShipBay pallet. Check the label, or create it in Receiving.</span> : pallet?.error ? <span>could not be looked up: {pallet.error}</span>
                 : (<><span data-testid="pa-pallet-info">{brandOf(pallet.org_id) || 'Unknown brand'} · {pallet.item_name || (pallet.mixed ? 'Mixed pallet' : '—')}{pallet.units_total ? ` · ${num(pallet.units_total)} units` : ''} · </span><StatusTag s={pallet.status} />{pallet.held && <span className="tag bad">HOLD</span>}
-                  <span> · {where ? `Nexus has it at ${where}` : 'not on the shared floor in Nexus'}</span></>)}
+                  <span> · {where ? `Nexus has it at ${where}${curZs ? ` (${curZs})` : ''}` : 'not on the shared floor in Nexus'}</span></>)}
               <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}><button className="btn sm" onClick={() => reset()}>Different pallet</button>{palletOk && <button className="btn sm" data-testid="pa-reprint" onClick={reprint}>Reprint pallet label</button>}</div>
               {palletProblem && <p className="wm-warn">{palletProblem} It cannot be placed.</p>}
             </div>)}
@@ -201,9 +237,18 @@ export default function WarehouseMap({ go }) {
           <label className="wm-step">2 · {steps.l}</label>
           <ScanBox key={`l-${mode}`} value={atRaw} onChange={setAt} placeholder="e.g. P-12 or STG-01" onScan={(c) => setAt(loc(c))} />
           {at && !targetPos && floor?.ok && <p className="wm-warn" data-testid="pa-badpos">Nexus has no position {at}.</p>}
-          {at && targetPos && <p className="sm" data-testid="pa-target">{at}: {TONES[targetTone].label}{targetTone === 'shipbay' ? ` (${(target.your_pallets || []).join(', ')})` : ''}{targetTone === 'souled' ? ' — Souled holds it. Nexus will refuse a placement here.' : ''}</p>}
+          {isZone && <p className="sm" data-testid="pa-target">{at}: Receiving / Outbound, shared by both companies, no pallet limit.</p>}
+          {mode !== 'release' && psku && isZone && (
+            <div className="hold wm-confirm" data-testid="pa-zone">
+              <b>{curZs ? `${psku} is in Receiving / Outbound as ${curZs}.` : `Send ${psku} to Receiving / Outbound.`}</b> Is it inbound or outbound?
+              <div className="seg" style={{ marginTop: 10 }}>{['inbound', 'outbound'].map((s) => <button key={s} type="button" data-testid={`zs-${s}`} className={zs === s ? 'on' : ''} disabled={s === curZs} onClick={() => setZs(s)}>{s === 'inbound' ? 'Inbound' : 'Outbound'}</button>)}</div>
+              <div style={{ marginTop: 10 }}><button className="btn go" data-testid="pa-zone-yes" disabled={!(psku && palletOk && !palletProblem && zs && !busy && canMove)} onClick={toZone}>
+                {busy ? 'Asking Nexus…' : !zs ? 'Choose inbound or outbound' : curZs ? `Change to ${zs}` : `Send to Receiving / Outbound as ${zs}`}</button></div>
+              {!canMove && <p className="sm">Placing is not switched on yet.</p>}
+            </div>)}
+          {at && targetPos && !isZone && <p className="sm" data-testid="pa-target">{at}: {TONES[targetTone].label}{targetTone === 'shipbay' ? ` (${(target.your_pallets || []).join(', ')})` : ''}{targetTone === 'souled' ? ' — Souled holds it. Nexus will refuse a placement here.' : ''}</p>}
 
-          {mode !== 'release' && psku && at && targetPos && (
+          {mode !== 'release' && psku && at && targetPos && !isZone && (
             <div className="hold wm-confirm" data-testid="pa-confirm">
               {mode === 'register'
                 ? <><b>Go to {at}.</b> Register {psku} only if it is standing in {at} right now and nothing else is.</>

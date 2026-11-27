@@ -13,8 +13,13 @@ const clean = (v) => (typeof v === 'string' && v.trim().length >= 1 && v.trim().
 // confirmed_empty: true and confirmed_by: who checked (2 to 80 characters). ShipBay sends it only for a request whose employee
 // confirmed at the position (the bridge refuses /putaway and /move on the real floor without it), naming that employee.
 const confirmer = (op) => { const n = String(op.by || '').trim().slice(0, 80); return n.length >= 2 ? n : 'ShipBay floor staff'; };
+// The shared RECEIVING / OUTBOUND zone (Nexus API 1.2.0): many pallets of both companies at once. Into it (assign or move, and a
+// status change inside it) Nexus needs zone_status "inbound" | "outbound"; confirmed_empty is never sent there (the zone is not
+// empty by design); confirmed_by is sent. Out of it to a numbered or staging position is an ordinary placement.
+export const ZONE = 'RCV-OUT';
 const nexusBody = (op, cfg = {}) => {
   const b = op.kind === 'assign' ? { pallet: op.pallet, to: op.to } : op.kind === 'move' ? { pallet: op.pallet, to: op.to, from: op.from } : { pallet: op.pallet, from: op.from };
+  if (op.kind !== 'release' && op.to === ZONE) { b.zone_status = op.zone_status; if (cfg.mode === 'production') b.confirmed_by = confirmer(op); return b; }
   if (cfg.mode === 'production' && op.kind !== 'release') { b.confirmed_empty = true; b.confirmed_by = confirmer(op); }
   return b;
 };
@@ -66,7 +71,12 @@ async function request(ctx, fn, args, scope) {
 // confirmation, at the position, that it is physically empty. Refused before ShipBay's journal or Nexus is touched.
 const unconfirmed = (ctx) => (ctx.cfg.mode === 'production' && ctx.body.confirmed_clear !== true
   ? ctx.fail(400, 'location_not_confirmed', 'Look at the position and confirm it is physically empty before placing a pallet there. Nothing was sent.') : null);
-const scans = (ctx) => { const psku = clean(ctx.body.psku), location = clean(ctx.body.location); return psku && location ? { psku, location } : null; };
+const scans = (ctx) => { const psku = clean(ctx.body.psku), location = clean(ctx.body.location); return psku && location ? { psku, location: location.toUpperCase().replace(/^LOC-/, '') } : null; };
+// into the zone: no empty-position confirmation (it holds many pallets); the employee says inbound or outbound instead
+const zoneStatus = (ctx) => { const z = String(ctx.body.zone_status || '').trim().toLowerCase(); return z === 'inbound' || z === 'outbound' ? z : null; };
+const toZone = (ctx, s) => (zoneStatus(ctx)
+  ? request(ctx, 'wms_zone_begin', { p_psku: s.psku, p_zone_status: zoneStatus(ctx) }, { pallet: s.psku, positions: [ZONE] })
+  : ctx.fail(400, 'zone_status_required', 'Say whether the pallet in Receiving / Outbound is inbound or outbound. Nothing was sent.'));
 
 // ShipBay's journal next to Nexus's occupancy. Admin or staff only. Read-only: it reports, it corrects nothing.
 async function reconcile({ nx, user, send: out, fail }) {
@@ -90,14 +100,15 @@ async function reconcile({ nx, user, send: out, fail }) {
 
 // Nexus map version 4 → the shape ShipBay's registry function reads. Pallet and staging positions only: the dock is not a position.
 export function registrySnapshot(map) {
-  const kind = { pallet: 'pallet', staging: 'floor' }; const status = { open: 'active', blocked: 'blocked', unavailable: 'blocked' };
+  const kind = { pallet: 'pallet', staging: 'floor', zone: 'floor' };   // the shared zone is kept as a 'floor' row in ShipBay const status = { open: 'active', blocked: 'blocked', unavailable: 'blocked' };
   return { version: map.map_version, checksum: map.checksum, warehouse: map.warehouse,
     locations: (map.positions || []).filter((p) => kind[p.kind]).map((p) => ({ id: p.code, code: p.code, kind: kind[p.kind], zone: p.block || null, capacity: p.capacity ?? null, status: status[p.status] || 'blocked', version: map.map_version })) };
 }
 
 export const palletRoutes = [
-  { method: 'POST', match: /^\/putaway$/, run: (ctx) => { const s = scans(ctx); if (s && unconfirmed(ctx)) return unconfirmed(ctx); return s ? request(ctx, 'wms_putaway_begin', { p_psku: s.psku, p_location: s.location }, { pallet: s.psku, positions: [s.location] }) : ctx.fail(400, 'bad_request', 'Scan the pallet label and the position.'); } },
-  { method: 'POST', match: /^\/move$/, run: (ctx) => { const s = scans(ctx); if (s && unconfirmed(ctx)) return unconfirmed(ctx); return s ? request(ctx, 'wms_move_begin', { p_psku: s.psku, p_location: s.location }, { pallet: s.psku, positions: [s.location] }) : ctx.fail(400, 'bad_request', 'Scan the pallet label and the position.'); } },
+  { method: 'POST', match: /^\/zone$/, run: (ctx) => { const psku = clean(ctx.body.psku); return psku ? toZone(ctx, { psku }) : ctx.fail(400, 'bad_request', 'Scan the pallet label.'); } },
+  { method: 'POST', match: /^\/putaway$/, run: (ctx) => { const s = scans(ctx); if (s && s.location === ZONE) return toZone(ctx, s); if (s && unconfirmed(ctx)) return unconfirmed(ctx); return s ? request(ctx, 'wms_putaway_begin', { p_psku: s.psku, p_location: s.location }, { pallet: s.psku, positions: [s.location] }) : ctx.fail(400, 'bad_request', 'Scan the pallet label and the position.'); } },
+  { method: 'POST', match: /^\/move$/, run: (ctx) => { const s = scans(ctx); if (s && s.location === ZONE) return toZone(ctx, s); if (s && unconfirmed(ctx)) return unconfirmed(ctx); return s ? request(ctx, 'wms_move_begin', { p_psku: s.psku, p_location: s.location }, { pallet: s.psku, positions: [s.location] }) : ctx.fail(400, 'bad_request', 'Scan the pallet label and the position.'); } },
   // Explicit release: a person at the position states the pallet is no longer standing there, and says why it left.
   { method: 'POST', match: /^\/release$/, run: (ctx) => { const s = scans(ctx);
     if (!s) return ctx.fail(400, 'bad_request', 'Give the pallet and the position it left.');

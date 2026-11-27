@@ -5,17 +5,24 @@
 //   OUT=/tmp/wm-e2e VITE_NEXUS_BRIDGE=on VITE_SUPABASE_URL=http://127.0.0.1:4641 VITE_SUPABASE_KEY=stub npx vite build --config test/putaway-e2e/vite.config.js && BUILD=/tmp/wm-e2e PORT=4641 node test/putaway-e2e/warehouse-map.cjs
 const { chromium } = require('playwright'); const fs = require('fs'); const path = require('path'); const http = require('http');
 const BUILD = process.env.BUILD; const PORT = Number(process.env.PORT || 4641); let pass = 0, fail = 0; const ok = (c, w) => { c ? pass++ : fail++; console.log(`${c ? 'ok  ' : 'FAIL'} ${w}`); };
-const layout = { grid: { cols: 5, rows: 18 }, blocks: [{ key: 'outbound', x: [1, 2], y: [1, 18], label: 'Outbound' }, { key: 'walkway', x: [3, 3], y: [1, 18], label: 'Walkway' }, { key: 'inbound', x: [4, 5], y: [1, 15], label: 'Inbound' }, { key: 'staging', x: [4, 5], y: [16, 16], label: 'Staging' }] };
+const layout = { grid: { cols: 5, rows: 18, top_rows: 3 }, blocks: [{ key: 'receiving_outbound', label: 'Receiving / Outbound', side: 'left', x: [1, 2], y: [-2, 0], location: 'RCV-OUT', shared: true, footprint: 'visual only, not a capacity' }, { key: 'outbound', x: [1, 2], y: [1, 18], label: 'Outbound' }, { key: 'walkway', x: [3, 3], y: [1, 18], label: 'Walkway' }, { key: 'inbound', x: [4, 5], y: [1, 15], label: 'Inbound' }, { key: 'staging', x: [4, 5], y: [16, 16], label: 'Staging' }] };
 const landmarks = [{ key: 'exit', x: [1, 2], edge: 'top', label: 'Exit' }, { key: 'dock', x: [4, 5], edge: 'top', label: 'Dock' }, { key: 'entrance', x: [3, 3], edge: 'bottom', label: 'Entrance' }, { key: 'prep', x: [4, 5], edge: 'bottom', label: 'Prep area' }];
 const positions = []; let n = 1;
 for (let x = 4; x <= 5; x++) for (let y = 1; y <= 15; y++) positions.push({ code: `P-${String(n++).padStart(2, '0')}`, kind: 'pallet', block: 'inbound', status: 'open', capacity: 1, x, y });
 for (let x = 1; x <= 2; x++) for (let y = 1; y <= 18; y++) positions.push({ code: `P-${String(n++).padStart(2, '0')}`, kind: 'pallet', block: 'outbound', status: 'open', capacity: 1, x, y });
 positions.push({ code: 'STG-01', kind: 'staging', block: 'staging', status: 'open', x: 4, y: 16 }, { code: 'STG-02', kind: 'staging', block: 'staging', status: 'open', x: 5, y: 16 }, { code: 'RCV-DOCK', kind: 'dock', status: 'open', x: null, y: null });
 positions.find((p) => p.code === 'P-66').status = 'blocked';
+positions.push({ code: 'RCV-OUT', kind: 'zone', block: 'receiving_outbound', status: 'open', capacity: null, x: null, y: null });
+// the zone, kept like Nexus: many pallets, each with inbound / outbound; Souled shown as counts only
+const zone = new Map([['SOULED-Z1', { company: 'SOULED', s: 'inbound' }], ['SOULED-Z2', { company: 'SOULED', s: 'outbound' }]]);
+const zoneEntry = () => { const by = {}; for (const [, z] of zone) { const b = by[z.company] || (by[z.company] = { company: z.company, pallets: 0, inbound: 0, outbound: 0 }); b.pallets++; b[z.s]++; }
+  const mine = [...zone].filter(([, z]) => z.company === 'SHIPBAY');
+  return { code: 'RCV-OUT', kind: 'zone', zone: 'receiving_outbound', status: 'open', capacity: null, used: zone.size, free: null, shared: true, occupants: Object.values(by),
+    your_pallets: mine.map(([id]) => id), your_pallets_status: mine.map(([id, z]) => ({ pallet: id, zone_status: z.s, since: '2026-11-27T05:00:00Z' })) }; };
 // occupancy kept like Nexus: who stands where
 const at = new Map([['P-05', { company: 'SOULED', id: 'SOULED-PAL-9' }]]);
-const occupancy = () => positions.filter((p) => p.kind !== 'dock').map((p) => { const o = at.get(p.code); return { code: p.code, kind: p.kind, status: p.status, capacity: 1, used: o ? 1 : 0, free: o ? 0 : 1, occupants: o ? [{ company: o.company, pallets: 1 }] : [], your_pallets: o && o.company === 'SHIPBAY' ? [o.id] : [] }; });
-const where = (id) => [...at].find(([, o]) => o.id === id)?.[0] || null;
+const occupancy = () => positions.filter((p) => p.kind !== 'dock').map((p) => { if (p.kind === 'zone') return zoneEntry(); const o = at.get(p.code); return { code: p.code, kind: p.kind, status: p.status, capacity: 1, used: o ? 1 : 0, free: o ? 0 : 1, occupants: o ? [{ company: o.company, pallets: 1 }] : [], your_pallets: o && o.company === 'SHIPBAY' ? [o.id] : [] }; });
+const where = (id) => (zone.has(id) ? 'RCV-OUT' : [...at].find(([, o]) => o.id === id)?.[0] || null);
 const seen = []; let floorReads = 0; const created = [];
 const PALLETS = { 'PSKU-000040': { id: 'u40', psku: 'PSKU-000040', org_id: 'vm', status: 'counted', item_name: 'VM135 records', units_total: 300, held: false }, 'PSKU-000041': { id: 'u41', psku: 'PSKU-000041', org_id: 'vm', status: 'counted', item_name: 'VM135 mailers', units_total: 500, held: false } };
 const server = http.createServer((req, res) => {
@@ -40,10 +47,13 @@ const server = http.createServer((req, res) => {
       if (r === '/floor') { floorReads++; return send(200, { ok: true, warehouse: 'HILLSBOROUGH', map_version: 4, checksum: 'be3c', occupancy_state: 'forward_only', moves_enabled: true, layout, landmarks, positions, locations: occupancy() }); }
       if (r === '/pending') return send(200, { ok: true, open: [] });
       if (r === '/reconcile') return send(403, { ok: false, error: 'not_admin' });
+      if (r === '/zone') { if (!['inbound', 'outbound'].includes(b.zone_status)) return send(400, { ok: false, error: 'zone_status_required' });
+        const from = where(b.psku); if (from === 'RCV-OUT' && zone.get(b.psku).s === b.zone_status) return send(409, { ok: false, error: 'already_there', message: 'same' });
+        if (from && from !== 'RCV-OUT') at.delete(from); zone.set(b.psku, { company: 'SHIPBAY', s: b.zone_status }); return send(200, { ok: true, psku: b.psku, location: 'RCV-OUT', from }); }
       if (b.confirmed_clear !== true && (r === '/putaway' || r === '/move')) return send(400, { ok: false, error: 'location_not_confirmed', message: 'Confirm first.' });
       if (r === '/putaway' || r === '/move') {
         if (at.has(b.location)) return send(409, { ok: false, error: 'location_full', message: `${b.location} is taken in Nexus. Pick another position.` });
-        const from = where(b.psku); if (r === '/putaway' && from) return send(409, { ok: false, error: 'already_there', message: 'already placed' });
+        const from = where(b.psku); if (from === 'RCV-OUT') zone.delete(b.psku); if (r === '/putaway' && from) return send(409, { ok: false, error: 'already_there', message: 'already placed' });
         if (r === '/move' && !from) return send(409, { ok: false, error: 'pallet_not_placed', message: 'not placed' });
         if (from) at.delete(from); at.set(b.location, { company: 'SHIPBAY', id: b.psku });
         return send(200, { ok: true, psku: b.psku, location: b.location, from, units_posted: PALLETS[b.psku]?.units_total || 0 });
@@ -64,7 +74,14 @@ const tone = (p, c) => p.locator(`[data-testid="map-${c}"]`).getAttribute('data-
   await p.addInitScript(() => { window.__printed = []; window.print = () => { window.__printed.push(document.title); }; });
   await p.goto(`http://127.0.0.1:${PORT}/?screen=map`); await p.waitForSelector('[data-testid=pa-map]');
   ok((await p.locator('h1').innerText()).startsWith('Warehouse Map'), 'title is Warehouse Map');
-  ok(await p.locator('[data-testid^=map-]').count() === 68, '66 pallet positions + 2 staging drawn');
+  ok(await p.locator('[data-testid^=map-]:not([data-zone])').count() === 68, '66 pallet positions + 2 staging drawn as tiles');
+  ok(await p.locator('[data-zone]').count() === 1, 'one Receiving / Outbound rectangle');
+  const zbox = async (c) => p.locator(`[data-testid="map-${c}"]`).boundingBox();
+  const [zb, exitb, p31b, p49b] = await Promise.all([zbox('RCV-OUT'), p.locator('[data-testid=mark-exit]').boundingBox(), zbox('P-31'), zbox('P-49')]);
+  ok(zb.y > exitb.y + exitb.height - 2 && zb.y + zb.height < p31b.y && Math.abs(zb.x - p31b.x) < 2 && Math.abs(zb.x + zb.width - (p49b.x + p49b.width)) < 2, 'zone under the Exit, above the left bank, over both left rows');
+  ok(zb.height > 2.5 * p31b.height && zb.height < 3.6 * p31b.height, `zone about three positions tall (${Math.round(zb.height)} vs tile ${Math.round(p31b.height)})`);
+  ok(/Souled 2 \(1 in · 1 out\)/.test(await p.locator('[data-testid=map-RCV-OUT]').innerText()) && !/SOULED-Z/.test(await p.content()), 'Souled in the zone as counts only');
+  ok(/68 positions/.test(await p.locator('[data-testid=pa-floor]').innerText()), 'the zone is not counted as a position');
   const box = async (c) => p.locator(`[data-testid="map-${c}"]`).boundingBox();
   const [p31, p49, p01, p16, s1, s2, p15] = await Promise.all(['P-31', 'P-49', 'P-01', 'P-16', 'STG-01', 'STG-02', 'P-15'].map(box));
   ok(p31.x < p49.x && p49.x < p01.x && p01.x < p16.x, 'left two rows (P-31.., P-49..), walkway, right two rows (P-01.., P-16..)');
@@ -97,6 +114,22 @@ const tone = (p, c) => p.locator(`[data-testid="map-${c}"]`).getAttribute('data-
   ok(/Nexus has it at P-12/.test(await p.locator('[data-testid=pa-pallet]').innerText()), 'pallet shows where Nexus has it');
   await p.locator('[data-testid="map-P-40"]').click(); await p.locator('[data-testid=pa-confirm-yes]').click(); await p.waitForSelector('[data-testid=pa-result][data-tone=ok]');
   await p.waitForFunction(() => document.querySelector('[data-testid="map-P-12"]')?.dataset.tone === 'open' && document.querySelector('[data-testid="map-P-40"]')?.dataset.tone === 'shipbay'); ok(true, 'moved: P-12 open, P-40 ShipBay');
+  // into the shared zone: no empty confirmation, inbound/outbound required; status change; then out to a numbered position
+  await p.locator('[data-testid=mode-move]').click(); await p.locator('[data-testid=wm-act] .scanbox input').first().fill('40'); await p.keyboard.press('Enter'); await p.waitForSelector('[data-testid=pa-pallet-info]');
+  await p.locator('[data-testid="map-RCV-OUT"]').click(); await p.waitForSelector('[data-testid=pa-zone]');
+  ok(await p.locator('[data-testid=pa-confirm]').count() === 0 && await p.locator('[data-testid=pa-zone-yes]').isDisabled(), 'zone: no empty-position prompt, needs inbound/outbound');
+  await p.locator('[data-testid=zs-inbound]').click(); await p.locator('[data-testid=pa-zone-yes]').click(); await p.waitForSelector('[data-testid=pa-result][data-tone=ok]');
+  const zpost = seen.filter((x) => x.r === '/zone').at(-1); ok(zpost && zpost.b.psku === 'PSKU-000040' && zpost.b.zone_status === 'inbound', 'sent to the zone as inbound');
+  await p.waitForFunction(() => document.querySelector('[data-testid="map-P-40"]')?.dataset.tone === 'open' && /ShipBay 1/.test(document.querySelector('[data-testid="map-RCV-OUT"]')?.innerText || ''));
+  ok(/#000040 · inbound/.test(await p.locator('[data-testid=map-RCV-OUT]').innerText()), 'own pallet id and status shown in the zone');
+  await p.locator('[data-testid=wm-act] .scanbox input').first().fill('40'); await p.keyboard.press('Enter'); await p.waitForSelector('[data-testid=pa-pallet-info]');
+  await p.locator('[data-testid="map-RCV-OUT"]').click(); await p.waitForSelector('[data-testid=pa-zone]');
+  ok(await p.locator('[data-testid=zs-inbound]').isDisabled(), 'current status cannot be sent again');
+  await p.locator('[data-testid=zs-outbound]').click(); await p.locator('[data-testid=pa-zone-yes]').click(); await p.waitForSelector('[data-testid=pa-result][data-tone=ok]');
+  await p.waitForFunction(() => /#000040 · outbound/.test(document.querySelector('[data-testid="map-RCV-OUT"]')?.innerText || '')); ok(true, 'status changed to outbound in the zone');
+  await p.locator('[data-testid=wm-act] .scanbox input').first().fill('40'); await p.keyboard.press('Enter'); await p.waitForSelector('[data-testid=pa-pallet-info]');
+  await p.locator('[data-testid="map-P-40"]').click(); await p.waitForSelector('[data-testid=pa-confirm]'); await p.locator('[data-testid=pa-confirm-yes]').click(); await p.waitForSelector('[data-testid=pa-result][data-tone=ok]');
+  await p.waitForFunction(() => document.querySelector('[data-testid="map-P-40"]')?.dataset.tone === 'shipbay'); ok(seen.filter((x) => x.r === '/move').at(-1).b.confirmed_clear === true, 'out of the zone to P-40 with the empty-position confirmation');
   // release by tapping its position
   await p.locator('[data-testid=mode-release]').click(); await p.locator('[data-testid="map-P-40"]').click(); await p.waitForSelector('[data-testid=pa-reason]');
   ok(await p.locator('[data-testid=pa-release-yes]').isDisabled(), 'release needs a reason and the tick');

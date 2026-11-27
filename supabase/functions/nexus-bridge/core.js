@@ -53,7 +53,8 @@ export function moveAuthorization(env, now, { pallet = null, positions = [], flo
   const no = (error, why) => ({ status: 503, error, message: `${why}. Nothing was sent to Nexus.` });
   if ((env.NEXUS_BRIDGE_MODE || 'off') === 'production') {
     // the real floor in daily use: only shared floor positions may be named; Nexus and ShipBay's rules decide the rest
-    for (const x of positions.map(pos).filter(Boolean)) if (!(floorCodesOnly && !/^(P|STG)-\d{2}$/.test(x)) && !/^(P|STG)-\d{2}$/.test(x)) return no('move_out_of_scope', `${x} is not a shared floor position`);
+    const shared = (x) => /^(P|STG)-\d{2}$/.test(x) || x === 'RCV-OUT';   // numbered positions, staging, and the shared Receiving / Outbound zone
+    for (const x of positions.map(pos).filter(Boolean)) if (!shared(x)) return no('move_out_of_scope', `${x} is not a shared floor position`);
     return null;
   }
   const w = readMoveWindow(env); const t = now();
@@ -184,6 +185,7 @@ export function inWords(error, { pallet, to, http, request } = {}) {
     forbidden: 'ShipBay\'s Nexus key is not allowed to place pallets.',
     unauthorized: 'Nexus did not accept ShipBay\'s key.',
     idempotency_key_reused: 'Nexus has seen this request with different details. Stop and tell an admin.',
+    zone_status_required: 'Nexus needs to know whether the pallet in Receiving / Outbound is inbound or outbound. Nothing was recorded. Choose one and send it again.',
     location_not_confirmed: `Nexus did not receive the confirmation that ${to} is physically empty, so nothing was placed. Confirm at the position and try again; if it repeats, tell an admin.`,
     location_not_a_destination: `${to} cannot take a pallet in Nexus. Pick a pallet or staging position.`,
     floor_not_ready: 'The shared floor is not open for placements in Nexus yet. Nothing was placed. Tell an admin.',

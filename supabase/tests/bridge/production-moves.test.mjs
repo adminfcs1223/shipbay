@@ -46,3 +46,26 @@ test('staging floor bodies are unchanged; a release never carries a placement co
   assert.deepEqual(nexusBody({ kind: 'release', pallet: 'P', from: 'P-01', by: 'X Y' }, { mode: 'production' }), { pallet: 'P', from: 'P-01' });
   assert.deepEqual(nexusBody({ kind: 'move', pallet: 'P', to: 'P-02', from: 'P-01', by: '' }, { mode: 'production' }), { pallet: 'P', to: 'P-02', from: 'P-01', confirmed_empty: true, confirmed_by: 'ShipBay floor staff' });
 });
+
+test('Receiving / Outbound zone (API 1.2.0): zone_status required, never confirmed_empty, status change inside the zone', async () => {
+  const { nexusBody, ZONE } = await import('../../functions/nexus-bridge/pallets.js');
+  assert.equal(ZONE, 'RCV-OUT');
+  assert.deepEqual(nexusBody({ kind: 'assign', pallet: 'SB-PAL-000050', to: 'RCV-OUT', zone_status: 'inbound', by: 'Derek Harrison' }, { mode: 'production' }),
+    { pallet: 'SB-PAL-000050', to: 'RCV-OUT', zone_status: 'inbound', confirmed_by: 'Derek Harrison' });
+  assert.deepEqual(nexusBody({ kind: 'move', pallet: 'P', from: 'RCV-OUT', to: 'RCV-OUT', zone_status: 'outbound', by: 'D H' }, { mode: 'production' }),
+    { pallet: 'P', from: 'RCV-OUT', to: 'RCV-OUT', zone_status: 'outbound', confirmed_by: 'D H' });
+  assert.deepEqual(nexusBody({ kind: 'move', pallet: 'P', from: 'RCV-OUT', to: 'P-12', by: 'D H' }, { mode: 'production' }),
+    { pallet: 'P', from: 'RCV-OUT', to: 'P-12', confirmed_empty: true, confirmed_by: 'D H' }, 'leaving the zone is an ordinary placement');
+  assert.equal(moveAuthorization(ENV, Date.now, { pallet: 'P', positions: ['RCV-OUT'] }), null);
+  const sent = []; const rpcs = [];
+  const db = { user: () => ({ rpc: async (fn, args) => { rpcs.push([fn, args]); return fn === 'is_wms_staff' ? true : { op: 'z1', kind: 'assign', pallet: 'SB-PAL-000050', to: 'RCV-OUT', key: 'kz', by: 'Derek Harrison', zone_status: args.p_zone_status }; } }),
+    service: { rpc: async (fn) => (fn === 'wms_nexus_op_commit' ? { psku: 'SB-PAL-000050', location: 'RCV-OUT' } : null) } };
+  const fetchImpl = async (u, o) => { sent.push({ method: o.method, body: o.body ? JSON.parse(o.body) : null });
+    return new Response(o.method === 'GET' ? '{"ok":true,"warehouse":"HILLSBOROUGH"}' : '{"ok":true,"location":"RCV-OUT","zone_status":"inbound"}', { status: 200 }); };
+  const run = (path, body) => makeBridge({ env: ENV, fetchImpl, db, routes: palletRoutes })(new Request(`https://x/functions/v1/nexus-bridge${path}`, { method: 'POST', headers: { authorization: 'Bearer t' }, body: JSON.stringify(body) })).then((r) => r.json());
+  const no = await run('/putaway', { psku: 'SB-PAL-000050', location: 'RCV-OUT' });
+  assert.equal(no.error, 'zone_status_required'); assert.equal(sent.length, 0, 'nothing sent without a status');
+  const ok = await run('/putaway', { psku: 'SB-PAL-000050', location: 'rcv-out', zone_status: 'inbound' });
+  assert.equal(ok.ok, true); assert.deepEqual(rpcs.find((x) => x[0] === 'wms_zone_begin')[1], { p_psku: 'SB-PAL-000050', p_zone_status: 'inbound' });
+  assert.deepEqual(sent.at(-1).body, { pallet: 'SB-PAL-000050', to: 'RCV-OUT', zone_status: 'inbound', confirmed_by: 'Derek Harrison' });
+});
