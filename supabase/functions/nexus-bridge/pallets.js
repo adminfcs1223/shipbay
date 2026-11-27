@@ -100,7 +100,8 @@ async function reconcile({ nx, user, send: out, fail }) {
 
 // Nexus map version 4 → the shape ShipBay's registry function reads. Pallet and staging positions only: the dock is not a position.
 export function registrySnapshot(map) {
-  const kind = { pallet: 'pallet', staging: 'floor', zone: 'floor' };   // the shared zone is kept as a 'floor' row in ShipBay const status = { open: 'active', blocked: 'blocked', unavailable: 'blocked' };
+  const kind = { pallet: 'pallet', staging: 'floor', zone: 'floor' };   // the shared zone is kept as a 'floor' row in ShipBay
+  const status = { open: 'active', blocked: 'blocked', unavailable: 'blocked' };
   return { version: map.map_version, checksum: map.checksum, warehouse: map.warehouse,
     locations: (map.positions || []).filter((p) => kind[p.kind]).map((p) => ({ id: p.code, code: p.code, kind: kind[p.kind], zone: p.block || null, capacity: p.capacity ?? null, status: status[p.status] || 'blocked', version: map.map_version })) };
 }
